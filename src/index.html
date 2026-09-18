@@ -10,8 +10,35 @@
         height: 100%;
         background: #000;
       }
-      #terminal {
+      #app {
+        display: flex;
+        flex-direction: column;
         height: 100%;
+      }
+      #terminal {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      #divider {
+        flex: 0 0 auto;
+        height: 1px;
+        margin: 1px 0;
+        border: none;
+        background: #333;
+      }
+      #input-area {
+        flex: 0 0 auto;
+        box-sizing: border-box;
+        resize: none;
+        overflow-y: hidden;
+        background: #000;
+        color: #ddd;
+        border: none;
+        outline: none;
+        font-family: Menlo, Consolas, monospace;
+        font-size: 14px;
+        line-height: 1.3;
+        padding: 2px 4px;
       }
       .xterm-viewport::-webkit-scrollbar {
         width: 14px;
@@ -31,7 +58,11 @@
     </style>
   </head>
   <body>
-    <div id="terminal"></div>
+    <div id="app">
+      <div id="terminal"></div>
+      <hr id="divider" />
+      <textarea id="input-area" rows="1" spellcheck="false" autofocus></textarea>
+    </div>
     <script src="../dist/renderer.js"></script>
   </body>
 </html>
