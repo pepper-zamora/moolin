@@ -72,6 +72,8 @@ function centeredOn(display: Electron.Display, width: number, height: number): {
   };
 }
 
+const APP_ICON = path.join(__dirname, "..", "icons", "icon-512.png");
+
 function createWindow(): void {
   log("debug", "main", "creating main window");
   const width = 1000;
@@ -81,6 +83,7 @@ function createWindow(): void {
     width,
     height,
     ...centeredOn(targetDisplay, width, height),
+    icon: APP_ICON,
     backgroundColor: "#000000",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -117,6 +120,7 @@ function openWorldsWindow(onReady?: () => void): void {
     width,
     height,
     ...centeredOn(targetDisplay, width, height),
+    icon: APP_ICON,
     parent: mainWindow ?? undefined,
     modal: true,
     frame: false, // Linux WMs don't reliably honor minimizable/maximizable hints; drop the frame instead
