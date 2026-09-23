@@ -103,7 +103,7 @@ inputArea.addEventListener("keydown", (event) => {
   } else if (event.key === "PageDown") {
     event.preventDefault();
     term.scrollPages(1);
-  } else if (event.altKey && event.key === "ArrowUp") {
+  } else if (event.ctrlKey && event.key === "ArrowUp") {
     event.preventDefault();
     if (historyIndex > 0) {
       if (historyIndex === commandHistory.length) {
@@ -112,7 +112,7 @@ inputArea.addEventListener("keydown", (event) => {
       historyIndex -= 1;
       showHistoryEntry();
     }
-  } else if (event.altKey && event.key === "ArrowDown") {
+  } else if (event.ctrlKey && event.key === "ArrowDown") {
     event.preventDefault();
     if (historyIndex < commandHistory.length) {
       historyIndex += 1;

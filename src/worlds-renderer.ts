@@ -21,10 +21,8 @@ const nameInput = document.getElementById("name-input") as HTMLInputElement;
 const hostInput = document.getElementById("host-input") as HTMLInputElement;
 const portInput = document.getElementById("port-input") as HTMLInputElement;
 
-const isMac = navigator.platform.toLowerCase().includes("mac");
-const altKey = isMac ? "⌥" : "Alt+";
-addBtn.title = `Add world (${altKey}N)`;
-deleteBtn.title = `Delete selected world (${altKey}D)`;
+addBtn.title = "Add world (Ctrl+N)";
+deleteBtn.title = "Delete selected world (Ctrl+D)";
 connectBtn.title = "Connect (Enter)";
 
 function selectedWorld(): World | undefined {
@@ -45,6 +43,10 @@ function renderTree(): void {
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", String(isSelected));
     li.addEventListener("click", () => selectWorld(world.id));
+    li.addEventListener("dblclick", () => {
+      selectWorld(world.id);
+      connectSelected();
+    });
     treeList.appendChild(li);
   }
 }
@@ -181,7 +183,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.altKey && event.key.toLowerCase() === "d") {
+  if (event.ctrlKey && event.key.toLowerCase() === "d") {
     event.preventDefault();
     void deleteSelected();
     return;
@@ -207,7 +209,7 @@ async function init(): Promise<void> {
   treeList.focus();
 }
 
-// "New World" (Alt+N) is a global accelerator, so main can send this before
+// "New World" (Ctrl+N) is a global accelerator, so main can send this before
 // this dialog's own async load has resolved — queue behind it so addWorld()
 // never runs against a still-empty `worlds` array (which would clobber the
 // saved file with just the one new entry).

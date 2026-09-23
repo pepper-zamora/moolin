@@ -1,13 +1,24 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, dialog, screen } from "electron";
 import * as path from "path";
+import { spawn } from "child_process";
 import { resolveWorldsPath, loadWorlds, saveWorlds, loadWorldsState, loadMru, saveMru } from "./worlds";
 import { TelnetSession } from "./telnet";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
 import type { World } from "./worlds-types";
 
+function cliArgs(): string[] {
+  return app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
+}
+
 function getCliWorldsArg(): string | undefined {
-  const args = app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
-  return args.find((arg) => !arg.startsWith("-"));
+  return cliArgs().find((arg) => !arg.startsWith("-"));
+}
+
+const CONNECT_FLAG_PREFIX = "--connect=";
+
+function getCliConnectWorldId(): string | undefined {
+  const flag = cliArgs().find((arg) => arg.startsWith(CONNECT_FLAG_PREFIX));
+  return flag?.slice(CONNECT_FLAG_PREFIX.length);
 }
 
 const logLevel = getCliLogLevel(process.argv);
@@ -17,8 +28,31 @@ configureLogger(logLevel);
 // down explicitly so preload.ts can compute the same value.
 const rendererArgs = [`--log-level=${logLevel}`];
 
-const worldsPath = resolveWorldsPath(getCliWorldsArg());
+const cliWorldsArg = getCliWorldsArg();
+const worldsPath = resolveWorldsPath(cliWorldsArg);
+const connectWorldId = getCliConnectWorldId();
 log("info", "main", "starting, worldsPath =", worldsPath);
+
+// Opening a second world while one is already connected spawns a whole new
+// app instance (rather than a second window/session inside this process) —
+// simplest way to give each world its own independent connection without a
+// multi-window rearchitecture. The child re-resolves the same worlds file
+// and connects directly to `world` on startup via --connect=<id>.
+function spawnInstanceForWorld(world: World): void {
+  const args = app.isPackaged ? [] : [app.getAppPath()];
+  if (cliWorldsArg) args.push(cliWorldsArg);
+  args.push(`${CONNECT_FLAG_PREFIX}${world.id}`);
+  log("debug", "main", "spawning new instance for world", world.id, "argv:", args);
+  spawn(process.execPath, args, { detached: true, stdio: "ignore" }).unref();
+}
+
+function connectOrSpawn(world: World): void {
+  if (connectedWorld) {
+    spawnInstanceForWorld(world);
+  } else {
+    startConnection(world);
+  }
+}
 
 const MAX_MRU = 5;
 
@@ -27,11 +61,26 @@ let worldsWindow: BrowserWindow | null = null;
 let connectedWorld: World | null = null;
 let session: TelnetSession | null = null;
 
+// BrowserWindow's default placement (and modal centering on its parent) is
+// unreliable across monitors on Linux WMs, so we compute explicit x/y
+// ourselves rather than relying on Electron/the WM to pick a sane display.
+function centeredOn(display: Electron.Display, width: number, height: number): { x: number; y: number } {
+  const { x: areaX, y: areaY, width: areaWidth, height: areaHeight } = display.workArea;
+  return {
+    x: areaX + Math.round((areaWidth - width) / 2),
+    y: areaY + Math.round((areaHeight - height) / 2),
+  };
+}
+
 function createWindow(): void {
   log("debug", "main", "creating main window");
+  const width = 1000;
+  const height = 700;
+  const targetDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
+    width,
+    height,
+    ...centeredOn(targetDisplay, width, height),
     backgroundColor: "#000000",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -59,9 +108,15 @@ function openWorldsWindow(onReady?: () => void): void {
   }
 
   log("debug", "main", "opening worlds window");
+  const width = 640;
+  const height = 420;
+  const targetDisplay = mainWindow
+    ? screen.getDisplayMatching(mainWindow.getBounds())
+    : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   worldsWindow = new BrowserWindow({
-    width: 640,
-    height: 420,
+    width,
+    height,
+    ...centeredOn(targetDisplay, width, height),
     parent: mainWindow ?? undefined,
     modal: true,
     frame: false, // Linux WMs don't reliably honor minimizable/maximizable hints; drop the frame instead
@@ -208,21 +263,26 @@ function buildMenu(): void {
     .slice(0, MAX_MRU)
     .map((world, index) => ({
       label: world.name,
-      accelerator: `Alt+${index + 1}`,
-      click: () => startConnection(world),
+      accelerator: `Ctrl+${index + 1}`,
+      click: () => connectOrSpawn(world),
     }));
 
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: "&Worlds",
       submenu: [
-        { label: "&New World…", accelerator: "Alt+N", click: () => newWorld() },
-        { label: "&Open World…", accelerator: "Alt+O", click: () => openWorldsWindow() },
+        { label: "&New World…", accelerator: "Ctrl+N", click: () => newWorld() },
+        { label: "&Open World…", accelerator: "Ctrl+O", click: () => openWorldsWindow() },
         {
-          label: "&Close World",
-          accelerator: "Alt+C",
+          label: "&Disconnect",
+          accelerator: "Ctrl+K",
           enabled: connectedWorld !== null,
           click: () => void confirmDisconnect(),
+        },
+        {
+          label: "Close &Window",
+          accelerator: "Ctrl+W",
+          click: (_item, window) => window?.close(),
         },
         ...(mruItems.length > 0 ? ([{ type: "separator" }, ...mruItems] as Electron.MenuItemConstructorOptions[]) : []),
         { type: "separator" },
@@ -286,7 +346,7 @@ ipcMain.handle("dialog:confirm", (event, message: string): Promise<boolean> => {
 ipcMain.handle("connect:request", (event, world: World): void => {
   BrowserWindow.fromWebContents(event.sender)?.close();
   mainWindow?.focus();
-  startConnection(world);
+  connectOrSpawn(world);
 });
 
 ipcMain.on("telnet:input", (_event, text: string) => {
@@ -312,12 +372,22 @@ ipcMain.on("log:emit", (_event, level: Exclude<LogLevel, "none">, scope: string,
   log(level, scope, ...args);
 });
 
-sendToTerminal("\x1b[36mmoolin — press Alt+O to open Worlds and connect.\x1b[0m\r\n");
-
 app.whenReady().then(() => {
   log("debug", "main", "app ready");
   buildMenu();
   createWindow();
+
+  // Spawned instances (see spawnInstanceForWorld) connect straight to their
+  // assigned world instead of showing the idle prompt.
+  const targetWorld = connectWorldId ? loadWorlds(worldsPath).find((w) => w.id === connectWorldId) : undefined;
+  if (connectWorldId && !targetWorld) {
+    log("error", "main", "spawned with unknown world id", connectWorldId);
+  }
+  if (targetWorld) {
+    startConnection(targetWorld);
+  } else {
+    sendToTerminal("\x1b[36mmoolin — press Ctrl+O to open Worlds and connect.\x1b[0m\r\n");
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
