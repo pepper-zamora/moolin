@@ -134,6 +134,75 @@ terminalContainer.addEventListener("mouseup", () => {
   }
 });
 
+// Copy/paste go through Electron's clipboard module (via preload) rather
+// than the browser's native copy/paste commands, which don't reliably see
+// xterm.js's canvas/WebGL-rendered selection. Prefers an active input-area
+// selection over a terminal selection, so copying works no matter which one
+// the user last selected in.
+function copySelection(): void {
+  if (document.activeElement === inputArea && inputArea.selectionStart !== inputArea.selectionEnd) {
+    window.moolin.clipboard.writeText(
+      inputArea.value.slice(inputArea.selectionStart ?? 0, inputArea.selectionEnd ?? 0),
+    );
+    return;
+  }
+  const text = term.getSelection();
+  if (text.length > 0) {
+    window.moolin.clipboard.writeText(text);
+  }
+}
+
+// The terminal is output-only, so pasted text always lands in the input
+// area — at the current cursor/selection if it's focused, otherwise appended
+// at the end.
+async function pasteIntoInput(): Promise<void> {
+  const text = await window.moolin.clipboard.readText();
+  if (!text) return;
+  const active = document.activeElement === inputArea;
+  const start = active ? (inputArea.selectionStart ?? inputArea.value.length) : inputArea.value.length;
+  const end = active ? (inputArea.selectionEnd ?? inputArea.value.length) : inputArea.value.length;
+  inputArea.value = inputArea.value.slice(0, start) + text + inputArea.value.slice(end);
+  inputArea.focus();
+  inputArea.selectionStart = inputArea.selectionEnd = start + text.length;
+  resizeInput();
+}
+
+// xterm's own keydown handling runs in the capture phase on its internal
+// helper textarea (which holds focus while the user drags to select terminal
+// text) and stops the event from ever bubbling to the window listener below.
+// Returning false here short-circuits xterm's handling for Ctrl/Cmd+C/+V
+// before that happens, letting the event continue to the window listener.
+term.attachCustomKeyEventHandler((event) => {
+  const mod = event.ctrlKey || event.metaKey;
+  if (event.type !== "keydown" || !mod) return true;
+  const key = event.key.toLowerCase();
+  return key !== "c" && key !== "v";
+});
+
+window.moolin.onCopyRequested(() => copySelection());
+window.moolin.onPasteRequested(() => void pasteIntoInput());
+window.moolin.onSelectAllRequested(() => term.selectAll());
+
+// No accelerator claims Ctrl/Cmd+C or +V at the menu level (see main.ts), so
+// they reach here as normal keydown events; preventDefault suppresses the
+// browser's native (unreliable) copy/paste before it can run.
+window.addEventListener("keydown", (event) => {
+  const mod = event.ctrlKey || event.metaKey;
+  if (!mod) return;
+  if (event.key.toLowerCase() === "c") {
+    event.preventDefault();
+    copySelection();
+  } else if (event.key.toLowerCase() === "v") {
+    event.preventDefault();
+    void pasteIntoInput();
+  }
+});
+
+document.addEventListener("contextmenu", (event) => {
+  event.preventDefault();
+  window.moolin.showContextMenu({ hasSelection: term.hasSelection() });
+});
+
 resizeInput();
 inputArea.focus();
 

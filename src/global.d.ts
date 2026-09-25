@@ -16,6 +16,14 @@ declare global {
       onTelnetData(callback: (data: string | Uint8Array) => void): void;
       onZoom(callback: (direction: number) => void): void;
       onCreateNewWorld(callback: () => void): void;
+      clipboard: {
+        writeText(text: string): void;
+        readText(): Promise<string>;
+      };
+      showContextMenu(options: { hasSelection: boolean }): void;
+      onCopyRequested(callback: () => void): void;
+      onPasteRequested(callback: () => void): void;
+      onSelectAllRequested(callback: () => void): void;
       log(level: Exclude<LogLevel, "none">, scope: string, ...args: unknown[]): void;
     };
   }

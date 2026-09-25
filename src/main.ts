@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, screen } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, dialog, screen, clipboard } from "electron";
 import * as path from "path";
 import { spawn } from "child_process";
 import { resolveWorldsPath, loadWorlds, saveWorlds, loadWorldsState, loadMru, saveMru } from "./worlds";
@@ -295,7 +295,21 @@ function buildMenu(): void {
         { role: "quit", label: "&Quit" },
       ],
     },
-    { role: "editMenu", label: "&Edit" },
+    {
+      // Not the built-in "editMenu" role: its Copy/Paste/Select All rely on
+      // Chromium's native edit commands against the focused DOM selection,
+      // which don't reliably reach into xterm.js's canvas/WebGL-rendered
+      // selection. These items carry no accelerator so Ctrl+C/V stay owned
+      // by the renderer's own keydown handling (see renderer.ts), and just
+      // forward here for menu-bar/discoverability use.
+      label: "&Edit",
+      submenu: [
+        { label: "&Copy", click: () => mainWindow?.webContents.send("terminal:copyRequested") },
+        { label: "&Paste", click: () => mainWindow?.webContents.send("terminal:pasteRequested") },
+        { type: "separator" },
+        { label: "Select &All", click: () => mainWindow?.webContents.send("terminal:selectAllRequested") },
+      ],
+    },
     {
       label: "&View",
       // Not the built-in "viewMenu" role: it bundles Zoom In/Out/Reset as a
@@ -371,6 +385,22 @@ ipcMain.on("telnet:resize", (_event, { cols, rows }: { cols: number; rows: numbe
 });
 
 ipcMain.handle("terminal:getScrollback", (): Array<string | Uint8Array> => scrollbackBuffer.slice());
+
+// The clipboard module is unavailable to the sandboxed preload/renderer
+// contexts, so writes/reads are proxied through the main process instead.
+ipcMain.on("clipboard:writeText", (_event, text: string) => clipboard.writeText(text));
+ipcMain.handle("clipboard:readText", (): string => clipboard.readText());
+
+ipcMain.on("terminal:contextMenu", (event, options: { hasSelection: boolean }) => {
+  const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const template: Electron.MenuItemConstructorOptions[] = [
+    { label: "Copy", enabled: options.hasSelection, click: () => event.sender.send("terminal:copyRequested") },
+    { label: "Paste", click: () => event.sender.send("terminal:pasteRequested") },
+    { type: "separator" },
+    { label: "Select All", click: () => event.sender.send("terminal:selectAllRequested") },
+  ];
+  Menu.buildFromTemplate(template).popup({ window });
+});
 
 ipcMain.on("log:emit", (_event, level: Exclude<LogLevel, "none">, scope: string, args: unknown[]) => {
   log(level, scope, ...args);

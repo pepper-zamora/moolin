@@ -26,6 +26,24 @@ contextBridge.exposeInMainWorld("moolin", {
   onCreateNewWorld: (callback: () => void): void => {
     ipcRenderer.on("worlds:createNew", () => callback());
   },
+  clipboard: {
+    // The `clipboard` module isn't available to sandboxed preload/renderer
+    // contexts, so this proxies to main.ts instead of calling it directly.
+    writeText: (text: string): void => ipcRenderer.send("clipboard:writeText", text),
+    readText: (): Promise<string> => ipcRenderer.invoke("clipboard:readText"),
+  },
+  showContextMenu: (options: { hasSelection: boolean }): void => {
+    ipcRenderer.send("terminal:contextMenu", options);
+  },
+  onCopyRequested: (callback: () => void): void => {
+    ipcRenderer.on("terminal:copyRequested", () => callback());
+  },
+  onPasteRequested: (callback: () => void): void => {
+    ipcRenderer.on("terminal:pasteRequested", () => callback());
+  },
+  onSelectAllRequested: (callback: () => void): void => {
+    ipcRenderer.on("terminal:selectAllRequested", () => callback());
+  },
   log: (level: Exclude<LogLevel, "none">, scope: string, ...args: unknown[]): void => {
     if (!isEnabled(currentLogLevel, level)) return;
     ipcRenderer.send("log:emit", level, scope, args);
