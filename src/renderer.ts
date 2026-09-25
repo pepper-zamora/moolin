@@ -22,6 +22,7 @@ const term = new Terminal({
   scrollback: 100000,
   convertEol: true,
   disableStdin: true, // scrollback is output-only; all typing goes to #input-area
+  cursorInactiveStyle: "none", // term never actually has focus, so the hollow "inactive" cursor is just noise
   fontFamily: "Menlo, Consolas, monospace",
   fontSize: DEFAULT_FONT_SIZE,
   theme: {
@@ -102,6 +103,26 @@ function sendInput(): void {
   window.moolin.sendInput(text);
 }
 
+// Scrolls the last real line fully off the top of the viewport by writing a
+// screenful of blank lines, rather than touching xterm's scrollback buffer.
+// The blanks are ordinary written lines: scrolling up reveals real history
+// beneath them same as ever, and since new output just overwrites them from
+// the top down (the terminal stays pinned to the bottom), there's nothing to
+// clean up later — once they're filled or scrolled past, they're gone like
+// any other line that scrolled out of the buffer.
+//
+// xterm's scrollback has no API for trimming lines back out, so a repeat
+// press while already cleared is a no-op rather than stacking another blank
+// screenful on top — otherwise mashing the key would litter history with
+// redundant blank gaps. isCleared is reset the moment any real output
+// arrives (see onTelnetData below).
+let isCleared = false;
+function clearToOffscreen(): void {
+  if (isCleared) return;
+  term.write("\n".repeat(term.rows));
+  isCleared = true;
+}
+
 inputArea.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
@@ -112,6 +133,9 @@ inputArea.addEventListener("keydown", (event) => {
   } else if (event.key === "PageDown") {
     event.preventDefault();
     term.scrollPages(1);
+  } else if (event.ctrlKey && event.key.toLowerCase() === "y") {
+    event.preventDefault();
+    clearToOffscreen();
   } else if (event.ctrlKey && event.key === "ArrowUp") {
     event.preventDefault();
     if (historyIndex > 0) {
@@ -224,7 +248,10 @@ async function loadScrollback(): Promise<void> {
   for (const chunk of chunks) {
     term.write(chunk);
   }
-  window.moolin.onTelnetData((data) => term.write(data));
+  window.moolin.onTelnetData((data) => {
+    isCleared = false;
+    term.write(data);
+  });
 }
 void loadScrollback();
 
