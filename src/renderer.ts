@@ -1,6 +1,7 @@
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 
 window.addEventListener("error", (event) => {
   window.moolin.log("error", "renderer", "uncaught error:", event.error ?? event.message);
@@ -30,6 +31,14 @@ const term = new Terminal({
 
 const fitAddon = new FitAddon();
 term.loadAddon(fitAddon);
+
+// Renderer has no direct access to Electron's `shell` module (sandboxed),
+// so opening the link is proxied through main.ts.
+term.loadAddon(
+  new WebLinksAddon((_event, uri) => {
+    window.moolin.openExternal(uri);
+  }),
+);
 
 const terminalContainer = document.getElementById("terminal");
 if (!terminalContainer) throw new Error("missing #terminal container");

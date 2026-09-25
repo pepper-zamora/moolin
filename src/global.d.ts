@@ -20,6 +20,7 @@ declare global {
         writeText(text: string): void;
         readText(): Promise<string>;
       };
+      openExternal(url: string): void;
       showContextMenu(options: { hasSelection: boolean }): void;
       onCopyRequested(callback: () => void): void;
       onPasteRequested(callback: () => void): void;

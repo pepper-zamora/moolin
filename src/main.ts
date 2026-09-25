@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, screen, clipboard } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, dialog, screen, clipboard, shell } from "electron";
 import * as path from "path";
 import { spawn } from "child_process";
 import { resolveWorldsPath, loadWorlds, saveWorlds, loadWorldsState, loadMru, saveMru } from "./worlds";
@@ -390,6 +390,12 @@ ipcMain.handle("terminal:getScrollback", (): Array<string | Uint8Array> => scrol
 // contexts, so writes/reads are proxied through the main process instead.
 ipcMain.on("clipboard:writeText", (_event, text: string) => clipboard.writeText(text));
 ipcMain.handle("clipboard:readText", (): string => clipboard.readText());
+
+// Restricted to http(s) so a malicious server can't trick a click into
+// opening e.g. a file:// or custom-protocol URI on the user's machine.
+ipcMain.on("shell:openExternal", (_event, url: string) => {
+  if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+});
 
 ipcMain.on("terminal:contextMenu", (event, options: { hasSelection: boolean }) => {
   const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;

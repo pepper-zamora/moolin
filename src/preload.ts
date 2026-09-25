@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld("moolin", {
     writeText: (text: string): void => ipcRenderer.send("clipboard:writeText", text),
     readText: (): Promise<string> => ipcRenderer.invoke("clipboard:readText"),
   },
+  openExternal: (url: string): void => ipcRenderer.send("shell:openExternal", url),
   showContextMenu: (options: { hasSelection: boolean }): void => {
     ipcRenderer.send("terminal:contextMenu", options);
   },
