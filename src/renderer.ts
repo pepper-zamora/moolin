@@ -38,6 +38,10 @@ const term = new Terminal({
     // draw its selection the same as a focused one rather than dimmed.
     selectionBackground: "#264f78",
     selectionInactiveBackground: "#264f78",
+    // xterm draws its own scrollbar, so it is styled here rather than in CSS.
+    scrollbarSliderBackground: "#5a5a5a",
+    scrollbarSliderHoverBackground: "#7a7a7a",
+    scrollbarSliderActiveBackground: "#9a9a9a",
   },
 });
 
@@ -73,7 +77,7 @@ term.onResize(({ cols, rows }) => {
 try {
   term.loadAddon(new WebglAddon());
 } catch {
-  // Falls back to the default canvas renderer if WebGL is unavailable.
+  // Falls back to the default DOM renderer if WebGL is unavailable.
 }
 
 function lineHeightPx(): number {
