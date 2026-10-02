@@ -41,9 +41,12 @@ log("info", "main", "starting, worldsPath =", worldsPath);
 function spawnInstanceForWorld(world: World): void {
   const args = app.isPackaged ? [] : [app.getAppPath()];
   if (cliWorldsArg) args.push(cliWorldsArg);
-  args.push(`${CONNECT_FLAG_PREFIX}${world.id}`);
+  args.push(`${CONNECT_FLAG_PREFIX}${world.id}`, `--log-level=${logLevel}`);
   log("debug", "main", "spawning new instance for world", world.id, "argv:", args);
-  spawn(process.execPath, args, { detached: true, stdio: "ignore" }).unref();
+  // `inherit` (rather than `ignore`) so --log-level actually reaches a
+  // terminal when debugging a spawned instance; `detached` already keeps it
+  // out of this process's group, so it won't die with us either way.
+  spawn(process.execPath, args, { detached: true, stdio: "inherit" }).unref();
 }
 
 function connectOrSpawn(world: World): void {
