@@ -11,4 +11,4 @@ Terminal=false
 Categories=Game;RolePlaying;
 Keywords=MOO;MUD;MUSH;MUCK;telnet;
 StartupNotify=true
-StartupWMClass=Moolin
+StartupWMClass=moolin
