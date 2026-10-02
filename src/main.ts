@@ -2,7 +2,7 @@ import { app, BrowserWindow, Menu, ipcMain, dialog, screen, clipboard, shell } f
 import * as path from "path";
 import { spawn } from "child_process";
 import { resolveWorldsPath, loadWorlds, saveWorlds, loadWorldsState, loadMru, saveMru } from "./worlds";
-import { TelnetSession } from "./telnet";
+import { TelnetSession, type TlsInfo } from "./telnet";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
 import type { World } from "./worlds-types";
 
@@ -254,12 +254,18 @@ function startConnection(world: World): void {
           reason ? `\x1b[31m[connection error: ${reason}]\x1b[0m\r\n` : "\x1b[33m[disconnected]\x1b[0m\r\n",
         );
       },
-      onTlsProbeResult: (secure) => {
+      onTlsProbeResult: (secure, info?: TlsInfo) => {
+        if (!secure || !info) {
+          sendToTerminal("\x1b[33m[TLS not available, falling back to plaintext]\x1b[0m\r\n");
+          return;
+        }
+        sendToTerminal(`\x1b[32m[TLS available, connecting securely: ${info.protocol}, ${info.cipherName}]\x1b[0m\r\n`);
         sendToTerminal(
-          secure
-            ? "\x1b[32m[TLS available, connecting securely]\x1b[0m\r\n"
-            : "\x1b[33m[TLS not available, falling back to plaintext]\x1b[0m\r\n",
+          `\x1b[32m[cert: ${info.certSubject} issued by ${info.certIssuer}, valid ${info.certValidFrom} to ${info.certValidTo}]\x1b[0m\r\n`,
         );
+        if (!info.certValid) {
+          sendToTerminal(`\x1b[31m[warning: certificate is not valid: ${info.certValidationError}]\x1b[0m\r\n`);
+        }
       },
     },
     (level, ...args) => log(level, "telnet", ...args),

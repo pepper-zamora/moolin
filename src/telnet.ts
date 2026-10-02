@@ -13,6 +13,20 @@ const TELOPT_NAWS = 31;
 // doesn't speak TLS and falling back to plaintext.
 const TLS_PROBE_TIMEOUT_MS = 5000;
 
+export interface TlsInfo {
+  protocol: string;
+  cipherName: string;
+  certSubject: string;
+  certIssuer: string;
+  certValidFrom: string;
+  certValidTo: string;
+  // Whether the cert passed Node's normal chain/hostname verification. We
+  // don't reject on failure (rejectUnauthorized is off, since plenty of
+  // MUDs run self-signed certs), but we still want to surface the warning.
+  certValid: boolean;
+  certValidationError?: string;
+}
+
 export interface TelnetSessionHandlers {
   onConnect: (secure: boolean) => void;
   onData: (data: string | Uint8Array) => void;
@@ -21,8 +35,32 @@ export interface TelnetSessionHandlers {
   // Fired once per connection attempt, after the TCP connection itself
   // succeeded, reporting whether the TLS handshake on top of it succeeded.
   // Not fired at all if the TCP connection never came up (that's a plain
-  // connection error, not a TLS outcome).
-  onTlsProbeResult: (secure: boolean) => void;
+  // connection error, not a TLS outcome). `info` is present iff `secure`.
+  onTlsProbeResult: (secure: boolean, info?: TlsInfo) => void;
+}
+
+function formatCertName(name: Record<string, string | string[] | undefined> | undefined): string {
+  if (!name) return "unknown";
+  if (name.CN) return Array.isArray(name.CN) ? name.CN.join(", ") : name.CN;
+  return Object.entries(name)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : value}`)
+    .join(", ");
+}
+
+function collectTlsInfo(tlsSocket: tls.TLSSocket): TlsInfo {
+  const cipher = tlsSocket.getCipher();
+  const cert = tlsSocket.getPeerCertificate();
+  return {
+    protocol: tlsSocket.getProtocol() ?? "unknown",
+    cipherName: cipher?.standardName || cipher?.name || "unknown",
+    certSubject: formatCertName(cert?.subject),
+    certIssuer: formatCertName(cert?.issuer),
+    certValidFrom: cert?.valid_from ?? "unknown",
+    certValidTo: cert?.valid_to ?? "unknown",
+    certValid: tlsSocket.authorized,
+    certValidationError: tlsSocket.authorized ? undefined : tlsSocket.authorizationError?.toString(),
+  };
 }
 
 type LogFn = (level: Exclude<LogLevel, "none">, ...args: unknown[]) => void;
@@ -55,7 +93,15 @@ export class TelnetSession {
   // to plaintext if the handshake fails on an otherwise-live TCP connection.
   private probeTls(world: World): void {
     this.log("debug", "tcp connecting to", `${world.host}:${world.port}`, "(probing TLS)");
-    const tlsSocket = tls.connect({ host: world.host, port: world.port, rejectUnauthorized: false });
+    // Only TLS 1.2+: older versions (1.0/1.1) are treated the same as "no
+    // TLS" and fall back to plaintext rather than connecting insecurely.
+    // No maxVersion ceiling, so newer protocol versions stay allowed.
+    const tlsSocket = tls.connect({
+      host: world.host,
+      port: world.port,
+      rejectUnauthorized: false,
+      minVersion: "TLSv1.2",
+    });
     let tcpConnected = false;
     let settled = false;
 
@@ -67,8 +113,9 @@ export class TelnetSession {
       if (settled) return;
       settled = true;
       tlsSocket.setTimeout(0);
-      this.log("debug", "tls handshake succeeded");
-      this.handlers.onTlsProbeResult(true);
+      const info = collectTlsInfo(tlsSocket);
+      this.log("debug", "tls handshake succeeded:", info.protocol, info.cipherName);
+      this.handlers.onTlsProbeResult(true, info);
       this.establish(tlsSocket, true);
     });
 
