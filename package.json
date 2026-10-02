@@ -23,9 +23,9 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "electron": "^44.5.1",
-    "esbuild": "^0.24.0",
+    "esbuild": "^0.28.2",
     "npm-run-all": "^4.1.5",
-    "typescript": "^5.6.0"
+    "typescript": "^7.0.2"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
