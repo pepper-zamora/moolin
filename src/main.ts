@@ -1,8 +1,9 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, screen, clipboard, shell } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, shell } from "electron";
 import * as path from "path";
 import { spawn } from "child_process";
 import { resolveWorldsPath, loadWorlds, saveWorlds, loadWorldsState, updateMru as updateMruState } from "./worlds";
-import { TelnetSession, type TlsInfo } from "./telnet";
+import { ConnectionManager } from "./connection-manager";
+import { WindowManager } from "./window-manager";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
 import type { World } from "./worlds-types";
 
@@ -50,133 +51,64 @@ function spawnInstanceForWorld(world: World): void {
 }
 
 function connectOrSpawn(world: World): void {
-  if (connectedWorld) {
+  if (connectionManager.getConnectedWorld()) {
     spawnInstanceForWorld(world);
   } else {
-    startConnection(world);
+    connectionManager.connect(world);
   }
 }
 
 const MAX_MRU = 5;
 
-let mainWindow: BrowserWindow | null = null;
-let worldsWindow: BrowserWindow | null = null;
-let connectedWorld: World | null = null;
-let connectedSecure = false;
+const APP_ICON = path.join(__dirname, "..", "icons", "icon-512.png");
+const INDEX_HTML = path.join(__dirname, "..", "src", "index.html");
+const WORLDS_HTML = path.join(__dirname, "..", "src", "worlds.html");
+const PRELOAD_PATH = path.join(__dirname, "preload.js");
+
+const windowManager = new WindowManager(APP_ICON, PRELOAD_PATH, rendererArgs);
+
+function updateMru(id: string): void {
+  const updated = updateMruState(worldsPath, (mru) =>
+    [id, ...mru.filter((existingId) => existingId !== id)].slice(0, MAX_MRU),
+  );
+  log("debug", "worlds", "mru updated:", updated);
+}
+
+// In-memory replay buffer so the scrollback survives a renderer reload/crash.
+// Disk logging is a separate, opt-in feature — this is not persisted.
+const MAX_SCROLLBACK_BYTES = 2 * 1024 * 1024;
+const scrollbackBuffer: Array<string | Uint8Array> = [];
+let scrollbackBytes = 0;
+
+function byteLength(data: string | Uint8Array): number {
+  return typeof data === "string" ? Buffer.byteLength(data, "utf8") : data.length;
+}
+
+function sendToTerminal(data: string | Uint8Array): void {
+  scrollbackBuffer.push(data);
+  scrollbackBytes += byteLength(data);
+  while (scrollbackBytes > MAX_SCROLLBACK_BYTES && scrollbackBuffer.length > 0) {
+    scrollbackBytes -= byteLength(scrollbackBuffer.shift() as string | Uint8Array);
+  }
+  windowManager.send("telnet:data", data);
+}
 
 function broadcastConnectionState(): void {
-  mainWindow?.webContents.send("connection:state", { secure: connectedSecure });
-}
-let session: TelnetSession | null = null;
-
-// BrowserWindow's default placement (and modal centering on its parent) is
-// unreliable across monitors on Linux WMs, so we compute explicit x/y
-// ourselves rather than relying on Electron/the WM to pick a sane display.
-function centeredOn(display: Electron.Display, width: number, height: number): { x: number; y: number } {
-  const { x: areaX, y: areaY, width: areaWidth, height: areaHeight } = display.workArea;
-  return {
-    x: areaX + Math.round((areaWidth - width) / 2),
-    y: areaY + Math.round((areaHeight - height) / 2),
-  };
+  windowManager.send("connection:state", { secure: connectionManager.isSecure() });
 }
 
-const APP_ICON = path.join(__dirname, "..", "icons", "icon-512.png");
-
-function createWindow(): void {
-  log("debug", "main", "creating main window");
-  const width = 1000;
-  const height = 700;
-  const targetDisplay = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  mainWindow = new BrowserWindow({
-    width,
-    height,
-    ...centeredOn(targetDisplay, width, height),
-    icon: APP_ICON,
-    backgroundColor: "#000000",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      additionalArguments: rendererArgs,
+const connectionManager = new ConnectionManager(
+  {
+    onStateChange: () => {
+      buildMenu();
+      broadcastConnectionState();
     },
-  });
-
-  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    log("debug", "main-console", `level=${level} ${sourceId}:${line} ${message}`);
-  });
-  mainWindow.webContents.on("did-fail-load", (_event, code, desc, url) => {
-    log("error", "main", "did-fail-load", code, desc, url);
-  });
-  mainWindow.loadFile(path.join(__dirname, "..", "src", "index.html"));
-}
-
-function openWorldsWindow(onReady?: () => void): void {
-  if (worldsWindow) {
-    log("debug", "main", "worlds window already open, focusing");
-    worldsWindow.focus();
-    onReady?.();
-    return;
-  }
-
-  log("debug", "main", "opening worlds window");
-  const width = 640;
-  const height = 420;
-  const targetDisplay = mainWindow
-    ? screen.getDisplayMatching(mainWindow.getBounds())
-    : screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-  worldsWindow = new BrowserWindow({
-    width,
-    height,
-    ...centeredOn(targetDisplay, width, height),
-    icon: APP_ICON,
-    parent: mainWindow ?? undefined,
-    modal: true,
-    frame: false, // Linux WMs don't reliably honor minimizable/maximizable hints; drop the frame instead
-    backgroundColor: "#1e1e1e",
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      additionalArguments: rendererArgs,
-    },
-  });
-  worldsWindow.setMenuBarVisibility(false);
-  worldsWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-    log("debug", "worlds-console", `level=${level} ${sourceId}:${line} ${message}`);
-  });
-  worldsWindow.webContents.on("did-fail-load", (_event, code, desc, url) => {
-    log("error", "main", "worlds did-fail-load", code, desc, url);
-  });
-  if (onReady) {
-    worldsWindow.webContents.once("did-finish-load", onReady);
-  }
-  worldsWindow.loadFile(path.join(__dirname, "..", "src", "worlds.html"));
-  worldsWindow.on("closed", () => {
-    log("debug", "main", "worlds window closed");
-    worldsWindow = null;
-  });
-}
-
-function newWorld(): void {
-  log("debug", "main", "new world requested");
-  // Reuses the dialog's own "Add" logic (create/select/persist/focus) via
-  // IPC rather than main owning a duplicate worlds list — the renderer
-  // queues this behind its own load if it hasn't finished yet (see
-  // worlds-renderer.ts), so this is safe whether the dialog is fresh or
-  // already open.
-  openWorldsWindow(() => {
-    worldsWindow?.webContents.send("worlds:createNew");
-  });
-}
-
-function openPreferences(): void {
-  const options: Electron.MessageBoxOptions = {
-    type: "info",
-    message: "Preferences",
-    detail: "Not yet implemented.",
-  };
-  void (mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options));
-}
+    onMessage: (text) => sendToTerminal(text),
+    onData: (data) => sendToTerminal(data),
+    onConnected: (worldId) => updateMru(worldId),
+  },
+  (level, ...args) => log(level, "telnet", ...args),
+);
 
 async function confirmAction(
   parentWindow: BrowserWindow | undefined,
@@ -198,93 +130,37 @@ async function confirmAction(
   return confirmed;
 }
 
-// In-memory replay buffer so the scrollback survives a renderer reload/crash.
-// Disk logging is a separate, opt-in feature — this is not persisted.
-const MAX_SCROLLBACK_BYTES = 2 * 1024 * 1024;
-const scrollbackBuffer: Array<string | Uint8Array> = [];
-let scrollbackBytes = 0;
-
-function byteLength(data: string | Uint8Array): number {
-  return typeof data === "string" ? Buffer.byteLength(data, "utf8") : data.length;
-}
-
-function sendToTerminal(data: string | Uint8Array): void {
-  scrollbackBuffer.push(data);
-  scrollbackBytes += byteLength(data);
-  while (scrollbackBytes > MAX_SCROLLBACK_BYTES && scrollbackBuffer.length > 0) {
-    scrollbackBytes -= byteLength(scrollbackBuffer.shift() as string | Uint8Array);
-  }
-  mainWindow?.webContents.send("telnet:data", data);
-}
-
-function updateMru(id: string): void {
-  const updated = updateMruState(worldsPath, (mru) =>
-    [id, ...mru.filter((existingId) => existingId !== id)].slice(0, MAX_MRU),
-  );
-  log("debug", "worlds", "mru updated:", updated);
-}
-
-function startConnection(world: World): void {
-  session?.disconnect();
-  log("info", "telnet", "connecting to", `${world.host}:${world.port}`, `(${world.name})`);
-  sendToTerminal(`\x1b[33m[connecting to ${world.name} (${world.host}:${world.port})...]\x1b[0m\r\n`);
-
-  session = new TelnetSession(
-    {
-      onConnect: (secure) => {
-        log("info", "telnet", "connected to", world.name, secure ? "(TLS)" : "(plaintext)");
-        connectedWorld = world;
-        connectedSecure = secure;
-        updateMru(world.id);
-        buildMenu();
-        broadcastConnectionState();
-        sendToTerminal(`\x1b[32m[connected to ${world.name}${secure ? ", securely (TLS)" : ""}]\x1b[0m\r\n`);
-      },
-      onData: (data) => {
-        sendToTerminal(data);
-      },
-      onDisconnect: (reason) => {
-        log(reason ? "error" : "info", "telnet", reason ? `connection error: ${reason}` : "disconnected");
-        session = null;
-        connectedWorld = null;
-        connectedSecure = false;
-        buildMenu();
-        broadcastConnectionState();
-        sendToTerminal(
-          reason ? `\x1b[31m[connection error: ${reason}]\x1b[0m\r\n` : "\x1b[33m[disconnected]\x1b[0m\r\n",
-        );
-      },
-      onTlsProbeResult: (secure, info?: TlsInfo) => {
-        if (!secure || !info) {
-          sendToTerminal("\x1b[33m[TLS not available, falling back to plaintext]\x1b[0m\r\n");
-          return;
-        }
-        sendToTerminal(`\x1b[32m[TLS available, connecting securely: ${info.protocol}, ${info.cipherName}]\x1b[0m\r\n`);
-        sendToTerminal(
-          `\x1b[32m[cert: ${info.certSubject} issued by ${info.certIssuer}, valid ${info.certValidFrom} to ${info.certValidTo}]\x1b[0m\r\n`,
-        );
-        if (!info.certValid) {
-          sendToTerminal(`\x1b[31m[warning: certificate is not valid: ${info.certValidationError}]\x1b[0m\r\n`);
-        }
-      },
-    },
-    (level, ...args) => log(level, "telnet", ...args),
-  );
-  session.connect(world);
-}
-
 async function confirmDisconnect(): Promise<void> {
-  if (!connectedWorld) return;
-  const confirmed = await confirmAction(
-    mainWindow ?? undefined,
-    `Disconnect from "${connectedWorld.name}"?`,
-    "Disconnect",
-  );
-  if (confirmed) session?.disconnect();
+  const world = connectionManager.getConnectedWorld();
+  if (!world) return;
+  const confirmed = await confirmAction(windowManager.main ?? undefined, `Disconnect from "${world.name}"?`, "Disconnect");
+  if (confirmed) connectionManager.disconnect();
+}
+
+function newWorld(): void {
+  log("debug", "main", "new world requested");
+  // Reuses the dialog's own "Add" logic (create/select/persist/focus) via
+  // IPC rather than main owning a duplicate worlds list — the renderer
+  // queues this behind its own load if it hasn't finished yet (see
+  // worlds-renderer.ts), so this is safe whether the dialog is fresh or
+  // already open.
+  windowManager.openWorldsWindow(WORLDS_HTML, () => {
+    windowManager.sendToWorlds("worlds:createNew");
+  });
+}
+
+function openPreferences(): void {
+  const options: Electron.MessageBoxOptions = {
+    type: "info",
+    message: "Preferences",
+    detail: "Not yet implemented.",
+  };
+  void (windowManager.main ? dialog.showMessageBox(windowManager.main, options) : dialog.showMessageBox(options));
 }
 
 function buildMenu(): void {
-  log("debug", "main", "rebuilding menu, connected =", connectedWorld !== null);
+  const connected = connectionManager.getConnectedWorld() !== null;
+  log("debug", "main", "rebuilding menu, connected =", connected);
   const state = loadWorldsState(worldsPath);
   const mruItems: Electron.MenuItemConstructorOptions[] = state.mru
     .map((id) => state.worlds.find((w) => w.id === id))
@@ -301,11 +177,11 @@ function buildMenu(): void {
       label: "&Worlds",
       submenu: [
         { label: "&New World…", accelerator: "Ctrl+N", click: () => newWorld() },
-        { label: "&Open World…", accelerator: "Ctrl+O", click: () => openWorldsWindow() },
+        { label: "&Open World…", accelerator: "Ctrl+O", click: () => windowManager.openWorldsWindow(WORLDS_HTML) },
         {
           label: "&Disconnect",
           accelerator: "Ctrl+K",
-          enabled: connectedWorld !== null,
+          enabled: connected,
           click: () => void confirmDisconnect(),
         },
         {
@@ -329,10 +205,10 @@ function buildMenu(): void {
       // forward here for menu-bar/discoverability use.
       label: "&Edit",
       submenu: [
-        { label: "&Copy", click: () => mainWindow?.webContents.send("terminal:copyRequested") },
-        { label: "&Paste", click: () => mainWindow?.webContents.send("terminal:pasteRequested") },
+        { label: "&Copy", click: () => windowManager.send("terminal:copyRequested") },
+        { label: "&Paste", click: () => windowManager.send("terminal:pasteRequested") },
         { type: "separator" },
-        { label: "Select &All", click: () => mainWindow?.webContents.send("terminal:selectAllRequested") },
+        { label: "Select &All", click: () => windowManager.send("terminal:selectAllRequested") },
       ],
     },
     {
@@ -349,17 +225,17 @@ function buildMenu(): void {
         {
           label: "Zoom &In",
           accelerator: "CmdOrCtrl+=",
-          click: () => mainWindow?.webContents.send("terminal:zoom", 1),
+          click: () => windowManager.send("terminal:zoom", 1),
         },
         {
           label: "Zoom &Out",
           accelerator: "CmdOrCtrl+-",
-          click: () => mainWindow?.webContents.send("terminal:zoom", -1),
+          click: () => windowManager.send("terminal:zoom", -1),
         },
         {
           label: "&Actual Size",
           accelerator: "CmdOrCtrl+0",
-          click: () => mainWindow?.webContents.send("terminal:zoom", 0),
+          click: () => windowManager.send("terminal:zoom", 0),
         },
         { type: "separator" },
         { role: "togglefullscreen", label: "Toggle &Full Screen" },
@@ -388,17 +264,17 @@ ipcMain.handle("dialog:confirm", (event, message: string): Promise<boolean> => {
 
 ipcMain.handle("connect:request", (event, world: World): void => {
   BrowserWindow.fromWebContents(event.sender)?.close();
-  mainWindow?.focus();
+  windowManager.main?.focus();
   connectOrSpawn(world);
 });
 
 ipcMain.on("telnet:input", (_event, text: string) => {
-  if (!session?.isConnected()) {
+  if (!connectionManager.isConnected()) {
     log("debug", "main", "input while not connected, ignoring:", JSON.stringify(text));
     sendToTerminal("\x1b[90m[not connected]\x1b[0m\r\n");
     return;
   }
-  const { echoed } = session.sendLine(text);
+  const { echoed } = connectionManager.sendLine(text);
   if (echoed) {
     sendToTerminal(text.replace(/\n/g, "\r\n") + "\r\n");
   }
@@ -406,12 +282,12 @@ ipcMain.on("telnet:input", (_event, text: string) => {
 
 ipcMain.on("telnet:resize", (_event, { cols, rows }: { cols: number; rows: number }) => {
   log("debug", "main", "terminal resized to", `${cols}x${rows}`);
-  session?.resize(cols, rows);
+  connectionManager.resize(cols, rows);
 });
 
 ipcMain.handle("terminal:getScrollback", (): Array<string | Uint8Array> => scrollbackBuffer.slice());
 
-ipcMain.handle("connection:getState", (): { secure: boolean } => ({ secure: connectedSecure }));
+ipcMain.handle("connection:getState", (): { secure: boolean } => ({ secure: connectionManager.isSecure() }));
 
 // The clipboard module is unavailable to the sandboxed preload/renderer
 // contexts, so writes/reads are proxied through the main process instead.
@@ -442,7 +318,7 @@ ipcMain.on("log:emit", (_event, level: Exclude<LogLevel, "none">, scope: string,
 app.whenReady().then(() => {
   log("debug", "main", "app ready");
   buildMenu();
-  createWindow();
+  windowManager.createMainWindow(INDEX_HTML);
 
   // Spawned instances (see spawnInstanceForWorld) connect straight to their
   // assigned world instead of showing the idle prompt.
@@ -451,13 +327,13 @@ app.whenReady().then(() => {
     log("error", "main", "spawned with unknown world id", connectWorldId);
   }
   if (targetWorld) {
-    startConnection(targetWorld);
+    connectionManager.connect(targetWorld);
   } else {
     sendToTerminal("\x1b[36mmoolin — press Ctrl+O to open Worlds and connect.\x1b[0m\r\n");
   }
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) windowManager.createMainWindow(INDEX_HTML);
   });
 });
 
