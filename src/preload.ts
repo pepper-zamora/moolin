@@ -17,8 +17,12 @@ contextBridge.exposeInMainWorld("moolin", {
   sendInput: (text: string): void => ipcRenderer.send("telnet:input", text),
   sendResize: (cols: number, rows: number): void => ipcRenderer.send("telnet:resize", { cols, rows }),
   getScrollback: (): Promise<Array<string | Uint8Array>> => ipcRenderer.invoke("terminal:getScrollback"),
+  getConnectionState: (): Promise<{ secure: boolean }> => ipcRenderer.invoke("connection:getState"),
   onTelnetData: (callback: (data: string | Uint8Array) => void): void => {
     ipcRenderer.on("telnet:data", (_event, data: string | Uint8Array) => callback(data));
+  },
+  onConnectionState: (callback: (state: { secure: boolean }) => void): void => {
+    ipcRenderer.on("connection:state", (_event, state: { secure: boolean }) => callback(state));
   },
   onZoom: (callback: (direction: number) => void): void => {
     ipcRenderer.on("terminal:zoom", (_event, direction: number) => callback(direction));

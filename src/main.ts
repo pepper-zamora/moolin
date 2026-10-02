@@ -59,6 +59,11 @@ const MAX_MRU = 5;
 let mainWindow: BrowserWindow | null = null;
 let worldsWindow: BrowserWindow | null = null;
 let connectedWorld: World | null = null;
+let connectedSecure = false;
+
+function broadcastConnectionState(): void {
+  mainWindow?.webContents.send("connection:state", { secure: connectedSecure });
+}
 let session: TelnetSession | null = null;
 
 // BrowserWindow's default placement (and modal centering on its parent) is
@@ -223,12 +228,14 @@ function startConnection(world: World): void {
 
   session = new TelnetSession(
     {
-      onConnect: () => {
-        log("info", "telnet", "connected to", world.name);
+      onConnect: (secure) => {
+        log("info", "telnet", "connected to", world.name, secure ? "(TLS)" : "(plaintext)");
         connectedWorld = world;
+        connectedSecure = secure;
         updateMru(world.id);
         buildMenu();
-        sendToTerminal(`\x1b[32m[connected to ${world.name}]\x1b[0m\r\n`);
+        broadcastConnectionState();
+        sendToTerminal(`\x1b[32m[connected to ${world.name}${secure ? ", securely (TLS)" : ""}]\x1b[0m\r\n`);
       },
       onData: (data) => {
         sendToTerminal(data);
@@ -237,9 +244,18 @@ function startConnection(world: World): void {
         log(reason ? "error" : "info", "telnet", reason ? `connection error: ${reason}` : "disconnected");
         session = null;
         connectedWorld = null;
+        connectedSecure = false;
         buildMenu();
+        broadcastConnectionState();
         sendToTerminal(
           reason ? `\x1b[31m[connection error: ${reason}]\x1b[0m\r\n` : "\x1b[33m[disconnected]\x1b[0m\r\n",
+        );
+      },
+      onTlsProbeResult: (secure) => {
+        sendToTerminal(
+          secure
+            ? "\x1b[32m[TLS available, connecting securely]\x1b[0m\r\n"
+            : "\x1b[33m[TLS not available, falling back to plaintext]\x1b[0m\r\n",
         );
       },
     },
@@ -385,6 +401,8 @@ ipcMain.on("telnet:resize", (_event, { cols, rows }: { cols: number; rows: numbe
 });
 
 ipcMain.handle("terminal:getScrollback", (): Array<string | Uint8Array> => scrollbackBuffer.slice());
+
+ipcMain.handle("connection:getState", (): { secure: boolean } => ({ secure: connectedSecure }));
 
 // The clipboard module is unavailable to the sandboxed preload/renderer
 // contexts, so writes/reads are proxied through the main process instead.

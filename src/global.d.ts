@@ -13,7 +13,9 @@ declare global {
       sendInput(text: string): void;
       sendResize(cols: number, rows: number): void;
       getScrollback(): Promise<Array<string | Uint8Array>>;
+      getConnectionState(): Promise<{ secure: boolean }>;
       onTelnetData(callback: (data: string | Uint8Array) => void): void;
+      onConnectionState(callback: (state: { secure: boolean }) => void): void;
       onZoom(callback: (direction: number) => void): void;
       onCreateNewWorld(callback: () => void): void;
       clipboard: {

@@ -255,6 +255,12 @@ async function loadScrollback(): Promise<void> {
 }
 void loadScrollback();
 
+function applyConnectionState(state: { secure: boolean }): void {
+  inputArea.classList.toggle("secure", state.secure);
+}
+window.moolin.getConnectionState().then(applyConnectionState);
+window.moolin.onConnectionState(applyConnectionState);
+
 // Terminal-native "zoom": resizes the actual font (and re-fits cols/rows),
 // rather than Chromium's CSS page zoom, which breaks the WebGL canvas/scrollbar.
 window.moolin.onZoom((direction) => {
