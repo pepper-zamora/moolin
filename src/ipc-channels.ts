@@ -5,8 +5,12 @@
 export const IpcChannels = {
   worldsLoad: "worlds:load",
   worldsSave: "worlds:save",
-  worldsCreateNew: "worlds:createNew",
+  // main -> renderer: open the Worlds dialog, optionally creating a new world.
+  worldsOpen: "worlds:open",
+  // main -> renderer: another window saved the worlds file.
+  worldsChanged: "worlds:changed",
   dialogConfirm: "dialog:confirm",
+  menuPopup: "menu:popup",
   connectRequest: "connect:request",
   telnetInput: "telnet:input",
   telnetResize: "telnet:resize",

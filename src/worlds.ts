@@ -1,14 +1,23 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import type { World } from "./worlds-types";
+import type { Character, MruEntry, World } from "./worlds-types";
+import { DEFAULT_LOGIN_TEMPLATE, isValidPort } from "./world-utils";
 import { log } from "./logger";
 
 const DEFAULT_WORLDS_PATH = path.join("~", "Documents", "Moolin", "worlds");
 
 export interface WorldsState {
   worlds: World[];
-  mru: string[];
+  mru: MruEntry[];
+}
+
+// `error` is set when the file exists but couldn't be read or parsed. The
+// state is then empty, and writes are refused so the user's file (which may
+// just have a typo from hand-editing) isn't overwritten.
+export interface WorldsReadResult {
+  state: WorldsState;
+  error?: string;
 }
 
 export function resolveWorldsPath(cliArg: string | undefined): string {
@@ -19,42 +28,109 @@ export function resolveWorldsPath(cliArg: string | undefined): string {
   return path.resolve(raw);
 }
 
-// Guards against a hand-edited or corrupted worlds file feeding a malformed
-// entry (missing host, non-numeric port, etc.) straight into net.connect().
-function isValidWorld(value: unknown): value is World {
-  if (typeof value !== "object" || value === null) return false;
-  const w = value as Record<string, unknown>;
-  return (
-    typeof w.id === "string" &&
-    w.id.length > 0 &&
-    typeof w.name === "string" &&
-    typeof w.host === "string" &&
-    w.host.length > 0 &&
-    typeof w.port === "number" &&
-    Number.isInteger(w.port) &&
-    w.port > 0 &&
-    w.port <= 65535
-  );
+function optional<T>(value: unknown, isType: (v: unknown) => v is T, fallback: T): T | undefined {
+  if (value === undefined) return fallback;
+  return isType(value) ? value : undefined;
 }
 
-function readState(filePath: string): WorldsState {
-  if (!fs.existsSync(filePath)) return { worlds: [], mru: [] };
-  const raw = fs.readFileSync(filePath, "utf-8").trim();
-  if (raw.length === 0) return { worlds: [], mru: [] };
-  try {
-    const parsed = JSON.parse(raw) as Partial<WorldsState>;
-    const rawWorlds = Array.isArray(parsed.worlds) ? parsed.worlds : [];
-    const worlds = rawWorlds.filter((w): w is World => {
-      if (isValidWorld(w)) return true;
-      log("warn", "worlds", "dropping malformed world entry from", filePath, ":", JSON.stringify(w));
-      return false;
-    });
-    const mru = Array.isArray(parsed.mru) ? parsed.mru.filter((id): id is string => typeof id === "string") : [];
-    return { worlds, mru };
-  } catch (err) {
-    log("warn", "worlds", "failed to parse", filePath, "- treating as empty:", err);
-    return { worlds: [], mru: [] };
+const isString = (v: unknown): v is string => typeof v === "string";
+const isBoolean = (v: unknown): v is boolean => typeof v === "boolean";
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+
+function parseCharacter(value: unknown): Character | null {
+  if (!isObject(value) || !isString(value.id) || value.id.length === 0) return null;
+  const name = optional(value.name, isString, "");
+  const password = optional(value.password, isString, "");
+  if (name === undefined || password === undefined) return null;
+  return { id: value.id, name, password };
+}
+
+// Validates one world record from disk (or from a renderer) and fills in
+// defaults for fields added since it was written, so older files — including
+// moolin v1's {id, name, host, port} records — load as-is. Returns null for
+// anything malformed, so a hand-edited or corrupted entry can't flow straight
+// into net.connect(). An out-of-range port is cleared rather than rejected,
+// since that's just an unfinished edit.
+export function parseWorld(value: unknown): World | null {
+  if (!isObject(value) || !isString(value.id) || value.id.length === 0) return null;
+  const name = optional(value.name, isString, "");
+  const host = optional(value.host, isString, "");
+  const tls = optional(value.tls, isBoolean, false);
+  const tlsAllowUntrusted = optional(value.tlsAllowUntrusted, isBoolean, false);
+  const autoLogin = optional(value.autoLogin, isBoolean, false);
+  const loginTemplate = optional(value.loginTemplate, isString, DEFAULT_LOGIN_TEMPLATE);
+  const rawCharacters = value.characters === undefined ? [] : value.characters;
+  if (
+    name === undefined ||
+    host === undefined ||
+    tls === undefined ||
+    tlsAllowUntrusted === undefined ||
+    autoLogin === undefined ||
+    loginTemplate === undefined ||
+    !Array.isArray(rawCharacters)
+  ) {
+    return null;
   }
+
+  const characters: Character[] = [];
+  for (const raw of rawCharacters) {
+    const character = parseCharacter(raw);
+    if (character) characters.push(character);
+    else log("warn", "worlds", "dropping malformed character entry from world", value.id);
+  }
+  return {
+    id: value.id,
+    name,
+    host,
+    port: isValidPort(value.port) ? value.port : null,
+    tls,
+    tlsAllowUntrusted,
+    autoLogin,
+    loginTemplate,
+    characters,
+  };
+}
+
+// moolin v1 stored MRU entries as bare world ids.
+function parseMruEntry(value: unknown): MruEntry | null {
+  if (isString(value)) return { worldId: value };
+  if (!isObject(value) || !isString(value.worldId)) return null;
+  if (value.characterId !== undefined && !isString(value.characterId)) return null;
+  return value.characterId === undefined
+    ? { worldId: value.worldId }
+    : { worldId: value.worldId, characterId: value.characterId };
+}
+
+export function readWorldsFile(filePath: string): WorldsReadResult {
+  const empty = (): WorldsState => ({ worlds: [], mru: [] });
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8").trim();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { state: empty() };
+    return { state: empty(), error: `Could not read ${filePath}: ${(err as Error).message}` };
+  }
+  if (raw.length === 0) return { state: empty() };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { state: empty(), error: `Could not parse ${filePath}: ${(err as Error).message}` };
+  }
+  if (!isObject(parsed) || !Array.isArray(parsed.worlds)) {
+    return { state: empty(), error: `Could not parse ${filePath}: missing "worlds" list` };
+  }
+
+  const worlds: World[] = [];
+  for (const rawWorld of parsed.worlds) {
+    const world = parseWorld(rawWorld);
+    if (world) worlds.push(world);
+    else log("warn", "worlds", "dropping malformed world entry from", filePath, ":", JSON.stringify(rawWorld));
+  }
+  const rawMru: unknown[] = Array.isArray(parsed.mru) ? parsed.mru : [];
+  const mru = rawMru.map(parseMruEntry).filter((entry): entry is MruEntry => entry !== null);
+  return { state: { worlds, mru } };
 }
 
 // Write-temp-then-rename so a process killed mid-write can never leave a
@@ -67,25 +143,25 @@ function writeState(filePath: string, state: WorldsState): void {
   fs.renameSync(tmpPath, filePath);
 }
 
-export function loadWorldsState(filePath: string): WorldsState {
-  return readState(filePath);
-}
-
-export function loadWorlds(filePath: string): World[] {
-  return readState(filePath).worlds;
-}
-
 // The read-modify-write helpers below need no locking: one moolin process
 // owns every window (see main.ts's single-instance lock), and these run
 // synchronously in it, so no two can interleave.
 
+// Throws if the existing file couldn't be read, rather than replace it.
 export function saveWorlds(filePath: string, worlds: World[]): void {
-  const state = readState(filePath);
+  const { state, error } = readWorldsFile(filePath);
+  if (error) throw new Error(error);
   writeState(filePath, { ...state, worlds });
 }
 
-export function updateMru(filePath: string, updater: (mru: string[]) => string[]): string[] {
-  const state = readState(filePath);
+// Returns the new MRU list, or null if the file couldn't be read (in which
+// case it is left alone).
+export function updateMru(filePath: string, updater: (mru: MruEntry[]) => MruEntry[]): MruEntry[] | null {
+  const { state, error } = readWorldsFile(filePath);
+  if (error) {
+    log("warn", "worlds", "not updating MRU:", error);
+    return null;
+  }
   const mru = updater(state.mru);
   writeState(filePath, { ...state, mru });
   return mru;

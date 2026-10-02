@@ -1,23 +1,26 @@
-import type { World } from "./worlds-types";
+import type { World, WorldsLoadResult } from "./worlds-types";
+import type { ConnectionState } from "./connection-manager";
 import type { LogLevel } from "./logger";
 
 declare global {
   interface Window {
     moolin: {
       worlds: {
-        load(): Promise<World[]>;
-        save(worlds: World[]): Promise<void>;
+        load(): Promise<WorldsLoadResult>;
+        save(worlds: World[]): Promise<{ error?: string }>;
+        onOpen(callback: (options: { createNew: boolean }) => void): void;
+        onChanged(callback: () => void): void;
       };
       confirm(message: string): Promise<boolean>;
-      connect(world: World): Promise<void>;
+      connect(world: World, characterId: string | null): void;
+      popupMenu(items: Array<{ id: string; label: string }>): Promise<string | null>;
       sendInput(text: string): void;
       sendResize(cols: number, rows: number): void;
       getScrollback(): Promise<Array<string | Uint8Array>>;
-      getConnectionState(): Promise<{ secure: boolean }>;
+      getConnectionState(): Promise<ConnectionState>;
       onTelnetData(callback: (data: string | Uint8Array) => void): void;
-      onConnectionState(callback: (state: { secure: boolean }) => void): void;
+      onConnectionState(callback: (state: ConnectionState) => void): void;
       onZoom(callback: (direction: number) => void): void;
-      onCreateNewWorld(callback: () => void): void;
       clipboard: {
         writeText(text: string): void;
         readText(): Promise<string>;

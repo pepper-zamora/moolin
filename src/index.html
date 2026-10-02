@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta
@@ -8,61 +8,7 @@
     />
     <title>moolin</title>
     <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
-    <style>
-      html, body {
-        margin: 0;
-        height: 100%;
-        background: #000;
-      }
-      #app {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-      }
-      #terminal {
-        flex: 1 1 auto;
-        min-height: 0;
-      }
-      #divider {
-        flex: 0 0 auto;
-        height: 1px;
-        margin: 1px 0;
-        border: none;
-        background: #333;
-      }
-      #input-area {
-        flex: 0 0 auto;
-        box-sizing: border-box;
-        resize: none;
-        overflow-y: hidden;
-        background: #100000; /* subtle red: not a TLS connection */
-        color: #ddd;
-        border: none;
-        outline: none;
-        font-family: Menlo, Consolas, monospace;
-        font-size: 14px;
-        line-height: 1.3;
-        padding: 2px 4px;
-      }
-      #input-area.secure {
-        background: #001000; /* subtle green: connected over TLS */
-      }
-      .xterm-viewport::-webkit-scrollbar {
-        width: 14px;
-      }
-      .xterm-viewport::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      .xterm-viewport::-webkit-scrollbar-thumb {
-        background-color: #5a5a5a;
-        border-radius: 7px;
-        border: 3px solid transparent;
-        background-clip: content-box;
-      }
-      .xterm-viewport::-webkit-scrollbar-thumb:hover {
-        background-color: #7a7a7a;
-      }
-    </style>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div id="app">
@@ -70,6 +16,58 @@
       <hr id="divider" />
       <textarea id="input-area" rows="1" spellcheck="false" autofocus></textarea>
     </div>
+
+    <dialog id="worlds-dialog">
+      <div class="worlds-layout">
+        <div class="worlds-sidebar">
+          <ul id="worlds-tree" role="tree" aria-label="Worlds" tabindex="0"></ul>
+          <button id="new-world-btn" type="button">New World</button>
+        </div>
+
+        <div class="worlds-content">
+          <div id="worlds-error" class="worlds-error" hidden></div>
+
+          <div id="empty-pane" class="pane">
+            <p class="placeholder">
+              Select a world or character, or create a new world. Right-click a world to add characters.
+            </p>
+          </div>
+
+          <form id="world-pane" class="pane" hidden>
+            <label>Name <input name="name" type="text" spellcheck="false" /></label>
+            <label>Host <input name="host" type="text" spellcheck="false" /></label>
+            <label>Port <input name="port" type="number" min="1" max="65535" /></label>
+            <label class="check"><input name="tls" type="checkbox" /> Use TLS</label>
+            <label class="check indented">
+              <input name="tlsAllowUntrusted" type="checkbox" /> Accept untrusted certificates (self-signed, expired)
+            </label>
+            <label class="check"><input name="autoLogin" type="checkbox" /> Log in characters automatically</label>
+            <label>Login command <input name="loginTemplate" type="text" spellcheck="false" /></label>
+            <p class="hint">
+              {{character}} and {{password}} are replaced with the character's name and password. \r sends a
+              carriage return, \n a line feed, \\ a backslash.
+            </p>
+          </form>
+
+          <form id="character-pane" class="pane" hidden>
+            <label>Name <input name="name" type="text" spellcheck="false" /></label>
+            <label>
+              Password
+              <span class="password-row">
+                <input name="password" type="password" spellcheck="false" />
+                <button id="show-password-btn" type="button">Show</button>
+              </span>
+            </label>
+          </form>
+
+          <div class="worlds-buttons">
+            <button id="close-btn" type="button">Close</button>
+            <button id="connect-btn" type="button" class="primary">Connect</button>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
     <script src="../dist/renderer.js"></script>
   </body>
 </html>

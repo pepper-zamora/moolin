@@ -1,11 +1,13 @@
 import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, shell } from "electron";
 import * as path from "path";
-import { resolveWorldsPath, loadWorlds, saveWorlds, loadWorldsState, updateMru as updateMruState } from "./worlds";
+import { parseWorld, readWorldsFile, resolveWorldsPath, saveWorlds, updateMru as updateMruState } from "./worlds";
 import { WindowManager } from "./window-manager";
 import type { TerminalWindow } from "./terminal-window";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
 import { IpcChannels } from "./ipc-channels";
-import type { World } from "./worlds-types";
+import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-types";
+import { targetLabel } from "./world-utils";
+import type { ConnectionState } from "./connection-manager";
 
 function cliArgs(): string[] {
   return app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
@@ -38,14 +40,13 @@ const MAX_MRU = 5;
 
 const APP_ICON = path.join(__dirname, "..", "icons", "icon-512.png");
 const INDEX_HTML = path.join(__dirname, "..", "src", "index.html");
-const WORLDS_HTML = path.join(__dirname, "..", "src", "worlds.html");
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 
 const windowManager = new WindowManager(
   { appIcon: APP_ICON, preloadPath: PRELOAD_PATH, rendererArgs, indexHtmlPath: INDEX_HTML },
   {
     onStateChange: (terminal) => buildMenu(terminal),
-    onConnected: (worldId) => updateMru(worldId),
+    onConnected: (target) => updateMru(target),
   },
 );
 
@@ -59,21 +60,41 @@ function rebuildAllMenus(): void {
   for (const terminal of windowManager.all()) buildMenu(terminal);
 }
 
-function updateMru(id: string): void {
+function updateMru(target: ConnectTarget): void {
+  const entry: MruEntry = target.character
+    ? { worldId: target.world.id, characterId: target.character.id }
+    : { worldId: target.world.id };
   const updated = updateMruState(worldsPath, (mru) =>
-    [id, ...mru.filter((existingId) => existingId !== id)].slice(0, MAX_MRU),
+    [entry, ...mru.filter((e) => e.worldId !== entry.worldId || e.characterId !== entry.characterId)].slice(0, MAX_MRU),
   );
   log("debug", "worlds", "mru updated:", updated);
   rebuildAllMenus();
 }
 
+// MRU entries whose world (and character, if any) still exist.
+function mruTargets(): ConnectTarget[] {
+  const { state } = readWorldsFile(worldsPath);
+  const targets: ConnectTarget[] = [];
+  for (const entry of state.mru) {
+    const world = state.worlds.find((w) => w.id === entry.worldId);
+    if (!world) continue;
+    if (entry.characterId === undefined) {
+      targets.push({ world, character: null });
+      continue;
+    }
+    const character = world.characters.find((c) => c.id === entry.characterId);
+    if (character) targets.push({ world, character });
+  }
+  return targets.slice(0, MAX_MRU);
+}
+
 // A window holds at most one connection. Connecting from a window that
 // already has one opens the new connection in a window of its own.
-function connectOrNewWindow(terminal: TerminalWindow, world: World): void {
+function connectOrNewWindow(terminal: TerminalWindow, target: ConnectTarget): void {
   if (terminal.connection.isActive()) {
-    newTerminalWindow(terminal).connection.connect(world);
+    newTerminalWindow(terminal).connection.connect(target);
   } else {
-    terminal.connection.connect(world);
+    terminal.connection.connect(target);
   }
 }
 
@@ -98,22 +119,20 @@ async function confirmAction(
 }
 
 async function confirmDisconnect(terminal: TerminalWindow): Promise<void> {
-  const world = terminal.connection.getConnectedWorld();
-  if (!world) return;
-  const confirmed = await confirmAction(terminal.window, `Disconnect from "${world.name}"?`, "Disconnect");
+  const target = terminal.connection.getConnected();
+  if (!target) return;
+  const label = targetLabel(target.world, target.character);
+  const confirmed = await confirmAction(terminal.window, `Disconnect from "${label}"?`, "Disconnect");
   if (confirmed) terminal.connection.disconnect();
 }
 
-function newWorld(terminal: TerminalWindow): void {
-  log("debug", "main", "new world requested");
-  // Reuses the dialog's own "Add" logic (create/select/persist/focus) via
-  // IPC rather than main owning a duplicate worlds list — the renderer
-  // queues this behind its own load if it hasn't finished yet (see
-  // worlds-renderer.ts), so this is safe whether the dialog is fresh or
-  // already open.
-  windowManager.openWorldsWindow(terminal, WORLDS_HTML, () => {
-    windowManager.sendToWorlds(terminal, IpcChannels.worldsCreateNew);
-  });
+// The Worlds dialog lives in the terminal window's renderer. "New World"
+// reuses the dialog's own create logic rather than main owning a duplicate
+// worlds list; the dialog finishes loading the list before creating.
+function openWorldsDialog(terminal: TerminalWindow, createNew: boolean): void {
+  log("debug", "main", "opening worlds dialog, createNew =", createNew);
+  terminal.window.focus();
+  terminal.send(IpcChannels.worldsOpen, { createNew });
 }
 
 function openPreferences(terminal: TerminalWindow): void {
@@ -127,29 +146,20 @@ function openPreferences(terminal: TerminalWindow): void {
 // Each window has its own menu, since Disconnect and the MRU entries act on
 // that window's connection.
 function buildMenu(terminal: TerminalWindow): void {
-  const connected = terminal.connection.getConnectedWorld() !== null;
+  const connected = terminal.connection.getConnected() !== null;
   log("debug", "main", "rebuilding menu for window", terminal.window.id, "connected =", connected);
-  const state = loadWorldsState(worldsPath);
-  const mruItems: Electron.MenuItemConstructorOptions[] = state.mru
-    .map((id) => state.worlds.find((w) => w.id === id))
-    .filter((w): w is World => w !== undefined)
-    .slice(0, MAX_MRU)
-    .map((world, index) => ({
-      label: world.name,
-      accelerator: `Ctrl+${index + 1}`,
-      click: () => connectOrNewWindow(terminal, world),
-    }));
+  const mruItems: Electron.MenuItemConstructorOptions[] = mruTargets().map((target, index) => ({
+    label: targetLabel(target.world, target.character),
+    accelerator: `Ctrl+${index + 1}`,
+    click: () => connectOrNewWindow(terminal, target),
+  }));
 
   const template: Electron.MenuItemConstructorOptions[] = [
     {
       label: "&Worlds",
       submenu: [
-        { label: "&New World…", accelerator: "Ctrl+N", click: () => newWorld(terminal) },
-        {
-          label: "&Open World…",
-          accelerator: "Ctrl+O",
-          click: () => windowManager.openWorldsWindow(terminal, WORLDS_HTML),
-        },
+        { label: "&New World…", accelerator: "Ctrl+N", click: () => openWorldsDialog(terminal, true) },
+        { label: "&Open World…", accelerator: "Ctrl+O", click: () => openWorldsDialog(terminal, false) },
         {
           label: "&Disconnect",
           accelerator: "Ctrl+K",
@@ -217,24 +227,35 @@ function buildMenu(terminal: TerminalWindow): void {
   terminal.setMenu(Menu.buildFromTemplate(template));
 }
 
-// Every IPC handler below acts on the terminal window the message came from
-// (or whose Worlds dialog it came from).
+// Every IPC handler below acts on the terminal window the message came from.
 function terminalFor(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): TerminalWindow | undefined {
   const terminal = windowManager.terminalFor(event.sender);
   if (!terminal) log("warn", "main", "IPC from an unknown window, ignoring");
   return terminal;
 }
 
-ipcMain.handle(IpcChannels.worldsLoad, (): World[] => {
-  const worlds = loadWorlds(worldsPath);
-  log("debug", "worlds", "loaded", worlds.length, "world(s) from", worldsPath);
-  return worlds;
+ipcMain.handle(IpcChannels.worldsLoad, (): WorldsLoadResult => {
+  const { state, error } = readWorldsFile(worldsPath);
+  if (error) log("error", "worlds", error);
+  else log("debug", "worlds", "loaded", state.worlds.length, "world(s) from", worldsPath);
+  return { worlds: state.worlds, error };
 });
 
-ipcMain.handle(IpcChannels.worldsSave, (_event, worlds: World[]): void => {
-  saveWorlds(worldsPath, worlds);
+ipcMain.handle(IpcChannels.worldsSave, (event, rawWorlds: unknown[]): { error?: string } => {
+  const worlds = rawWorlds.map(parseWorld).filter((w): w is World => w !== null);
+  try {
+    saveWorlds(worldsPath, worlds);
+  } catch (err) {
+    const error = `Could not save ${worldsPath}: ${(err as Error).message}`;
+    log("error", "worlds", error);
+    return { error };
+  }
   log("debug", "worlds", "saved", worlds.length, "world(s) to", worldsPath);
-  rebuildAllMenus(); // world names may have changed, which affects MRU labels
+  for (const terminal of windowManager.all()) {
+    if (terminal.window.webContents.id !== event.sender.id) terminal.send(IpcChannels.worldsChanged);
+  }
+  rebuildAllMenus(); // names may have changed, which affects MRU labels
+  return {};
 });
 
 ipcMain.handle(IpcChannels.dialogConfirm, (event, message: string): Promise<boolean> => {
@@ -242,12 +263,33 @@ ipcMain.handle(IpcChannels.dialogConfirm, (event, message: string): Promise<bool
   return confirmAction(sourceWindow, message, "Delete");
 });
 
-ipcMain.handle(IpcChannels.connectRequest, (event, world: World): void => {
+// Native popup menu for the Worlds dialog. Resolves with the chosen item's
+// id, or null.
+ipcMain.handle(IpcChannels.menuPopup, (event, items: Array<{ id: string; label: string }>) => {
+  const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  return new Promise<string | null>((resolve) => {
+    let chosen: string | null = null;
+    const menu = Menu.buildFromTemplate(
+      items.map(({ id, label }) => ({
+        label,
+        click: () => {
+          chosen = id;
+        },
+      })),
+    );
+    // The click handler runs before the close callback.
+    menu.popup({ window, callback: () => setImmediate(() => resolve(chosen)) });
+  });
+});
+
+// The dialog sends its in-memory copy of the world, so edits not yet saved
+// still apply; it's validated like a record read from disk.
+ipcMain.on(IpcChannels.connectRequest, (event, request: { world: unknown; characterId: string | null }) => {
   const terminal = terminalFor(event);
-  if (!terminal) return;
-  BrowserWindow.fromWebContents(event.sender)?.close();
-  terminal.window.focus();
-  connectOrNewWindow(terminal, world);
+  const world = parseWorld(request.world);
+  if (!terminal || !world) return;
+  const character = world.characters.find((c) => c.id === request.characterId) ?? null;
+  connectOrNewWindow(terminal, { world, character });
 });
 
 ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
@@ -271,9 +313,11 @@ ipcMain.on(IpcChannels.telnetResize, (event, { cols, rows }: { cols: number; row
 
 ipcMain.handle(IpcChannels.terminalGetScrollback, (event) => terminalFor(event)?.getScrollback() ?? []);
 
-ipcMain.handle(IpcChannels.connectionGetState, (event): { secure: boolean } => ({
-  secure: terminalFor(event)?.connection.isSecure() ?? false,
-}));
+ipcMain.handle(
+  IpcChannels.connectionGetState,
+  (event): ConnectionState =>
+    terminalFor(event)?.connection.getState() ?? { status: "disconnected", secure: false, label: null },
+);
 
 // The clipboard module is unavailable to the sandboxed preload/renderer
 // contexts, so writes/reads are proxied through the main process instead.

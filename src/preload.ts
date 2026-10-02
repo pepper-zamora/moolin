@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { World } from "./worlds-types";
+import type { World, WorldsLoadResult } from "./worlds-types";
+import type { ConnectionState } from "./connection-manager";
 import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
 import { IpcChannels } from "./ipc-channels";
 
@@ -10,26 +11,33 @@ const currentLogLevel = getCliLogLevel(process.argv);
 
 contextBridge.exposeInMainWorld("moolin", {
   worlds: {
-    load: (): Promise<World[]> => ipcRenderer.invoke(IpcChannels.worldsLoad),
-    save: (worlds: World[]): Promise<void> => ipcRenderer.invoke(IpcChannels.worldsSave, worlds),
+    load: (): Promise<WorldsLoadResult> => ipcRenderer.invoke(IpcChannels.worldsLoad),
+    save: (worlds: World[]): Promise<{ error?: string }> => ipcRenderer.invoke(IpcChannels.worldsSave, worlds),
+    onOpen: (callback: (options: { createNew: boolean }) => void): void => {
+      ipcRenderer.on(IpcChannels.worldsOpen, (_event, options: { createNew: boolean }) => callback(options));
+    },
+    onChanged: (callback: () => void): void => {
+      ipcRenderer.on(IpcChannels.worldsChanged, () => callback());
+    },
   },
   confirm: (message: string): Promise<boolean> => ipcRenderer.invoke(IpcChannels.dialogConfirm, message),
-  connect: (world: World): Promise<void> => ipcRenderer.invoke(IpcChannels.connectRequest, world),
+  connect: (world: World, characterId: string | null): void =>
+    ipcRenderer.send(IpcChannels.connectRequest, { world, characterId }),
+  // Shows a native popup menu; resolves with the chosen item's id, or null.
+  popupMenu: (items: Array<{ id: string; label: string }>): Promise<string | null> =>
+    ipcRenderer.invoke(IpcChannels.menuPopup, items),
   sendInput: (text: string): void => ipcRenderer.send(IpcChannels.telnetInput, text),
   sendResize: (cols: number, rows: number): void => ipcRenderer.send(IpcChannels.telnetResize, { cols, rows }),
   getScrollback: (): Promise<Array<string | Uint8Array>> => ipcRenderer.invoke(IpcChannels.terminalGetScrollback),
-  getConnectionState: (): Promise<{ secure: boolean }> => ipcRenderer.invoke(IpcChannels.connectionGetState),
+  getConnectionState: (): Promise<ConnectionState> => ipcRenderer.invoke(IpcChannels.connectionGetState),
   onTelnetData: (callback: (data: string | Uint8Array) => void): void => {
     ipcRenderer.on(IpcChannels.telnetData, (_event, data: string | Uint8Array) => callback(data));
   },
-  onConnectionState: (callback: (state: { secure: boolean }) => void): void => {
-    ipcRenderer.on(IpcChannels.connectionState, (_event, state: { secure: boolean }) => callback(state));
+  onConnectionState: (callback: (state: ConnectionState) => void): void => {
+    ipcRenderer.on(IpcChannels.connectionState, (_event, state: ConnectionState) => callback(state));
   },
   onZoom: (callback: (direction: number) => void): void => {
     ipcRenderer.on(IpcChannels.terminalZoom, (_event, direction: number) => callback(direction));
-  },
-  onCreateNewWorld: (callback: () => void): void => {
-    ipcRenderer.on(IpcChannels.worldsCreateNew, () => callback());
   },
   clipboard: {
     // The `clipboard` module isn't available to sandboxed preload/renderer

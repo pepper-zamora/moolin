@@ -3,6 +3,7 @@ import { ConnectionManager } from "./connection-manager";
 import { ScrollbackBuffer, type TerminalChunk } from "./scrollback-buffer";
 import { IpcChannels } from "./ipc-channels";
 import { log } from "./logger";
+import type { ConnectTarget } from "./worlds-types";
 
 const MAX_SCROLLBACK_BYTES = 2 * 1024 * 1024;
 
@@ -10,7 +11,7 @@ export interface TerminalWindowHandlers {
   // Connected/secure state changed — refresh this window's menu.
   onStateChange: (terminal: TerminalWindow) => void;
   // A successful connection, for MRU persistence.
-  onConnected: (worldId: string) => void;
+  onConnected: (target: ConnectTarget) => void;
   onClosed: (terminal: TerminalWindow) => void;
 }
 
@@ -49,11 +50,11 @@ export class TerminalWindow {
       {
         onStateChange: () => {
           handlers.onStateChange(this);
-          this.send(IpcChannels.connectionState, { secure: this.connection.isSecure() });
+          this.send(IpcChannels.connectionState, this.connection.getState());
         },
         onMessage: (text) => this.write(text),
         onData: (data) => this.write(data),
-        onConnected: (worldId) => handlers.onConnected(worldId),
+        onConnected: (target) => handlers.onConnected(target),
       },
       (level, ...args) => log(level, `telnet:${id}`, ...args),
     );

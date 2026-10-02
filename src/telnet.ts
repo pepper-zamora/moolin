@@ -1,7 +1,6 @@
 import * as net from "net";
 import * as tls from "tls";
 import { TelnetParser, encodeNegotiation, encodeSub, escapeIac, type NegotiationVerb } from "./telnet-protocol";
-import type { World } from "./worlds-types";
 import type { LogLevel } from "./logger";
 
 const TELOPT_ECHO = 1;
@@ -9,9 +8,10 @@ const TELOPT_SGA = 3;
 const TELOPT_TTYPE = 24;
 const TELOPT_NAWS = 31;
 
-// How long to wait for a TLS handshake to resolve before assuming the peer
-// doesn't speak TLS and falling back to plaintext.
-const TLS_PROBE_TIMEOUT_MS = 5000;
+// How long to wait, once TCP is up, for the TLS handshake to finish. A
+// plaintext server usually answers a ClientHello with an immediate protocol
+// error, but some just sit waiting for a login line.
+const TLS_HANDSHAKE_TIMEOUT_MS = 15000;
 
 // Per-telnet-option behavior, keyed by option number in buildOptionHandlers.
 // Any callback left unset falls back to the default do/will/wont/sub
@@ -25,6 +25,14 @@ interface TelnetOptionHandler {
 
 type Socket = net.Socket | tls.TLSSocket;
 
+export interface ConnectOptions {
+  host: string;
+  port: number;
+  tls: boolean;
+  // Connect even if the server's certificate fails verification.
+  tlsAllowUntrusted: boolean;
+}
+
 export interface TlsInfo {
   protocol: string;
   cipherName: string;
@@ -32,9 +40,9 @@ export interface TlsInfo {
   certIssuer: string;
   certValidFrom: string;
   certValidTo: string;
-  // Whether the cert passed Node's normal chain/hostname verification. We
-  // don't reject on failure (rejectUnauthorized is off, since plenty of
-  // MUDs run self-signed certs), but we still want to surface the warning.
+  // Whether the cert passed Node's normal chain/hostname verification. Only
+  // false on a connection the world allows untrusted certificates for
+  // (plenty of MUDs run self-signed certs); otherwise a failure disconnects.
   certValid: boolean;
   certValidationError?: string;
 }
@@ -43,12 +51,11 @@ export interface TelnetSessionHandlers {
   onConnect: (secure: boolean) => void;
   onData: (data: Uint8Array) => void;
   // A `reason` means the socket errored; its absence means a normal close.
-  onDisconnect: (reason?: string) => void;
-  // Fired once per connection attempt, after the TCP connection itself
-  // succeeded, reporting whether the TLS handshake on top of it succeeded.
-  // Not fired at all if the TCP connection never came up (that's a plain
-  // connection error, not a TLS outcome). `info` is present iff `secure`.
-  onTlsProbeResult: (secure: boolean, info?: TlsInfo) => void;
+  // `certificateRejected` marks a TLS certificate that failed verification
+  // on a world that doesn't allow untrusted certificates.
+  onDisconnect: (reason?: string, certificateRejected?: boolean) => void;
+  // Fired after a successful TLS handshake, just before onConnect.
+  onTlsInfo: (info: TlsInfo) => void;
 }
 
 function formatCertName(name: Record<string, string | string[] | undefined> | undefined): string {
@@ -84,7 +91,7 @@ export class TelnetSession {
   private socket: Socket | null = null;
   // The TCP/TLS socket during the connect-in-progress window, before
   // `establish()` promotes it to `socket`. Needed so `isConnected`/`disconnect`/
-  // `teardown` still work while a TLS probe or plaintext fallback is in flight.
+  // `teardown` still work while the TCP connect or TLS handshake is in flight.
   private pendingSocket: Socket | null = null;
   private localEchoSuppressed = false;
   private nawsEnabled = false;
@@ -96,97 +103,64 @@ export class TelnetSession {
     private readonly log: LogFn = noopLog,
   ) {}
 
-  connect(world: World): void {
-    this.probeTls(world);
-  }
+  // TLS is the world's explicit setting, never guessed: probing for it would
+  // send a ClientHello to plaintext servers, and silently falling back to
+  // plaintext would let anyone on the network path downgrade the connection.
+  connect(options: ConnectOptions): void {
+    const { host, port } = options;
+    this.log("debug", "tcp connecting to", `${host}:${port}`, options.tls ? "(TLS)" : "(plaintext)");
+    if (!options.tls) {
+      const socket = net.createConnection({ host, port });
+      this.pendingSocket = socket;
+      this.handlePendingSocket(socket, "connect", () => {
+        this.log("debug", "tcp connected (plaintext)");
+        this.establish(socket, false);
+      });
+      return;
+    }
 
-  // Servers that speak TLS expect the client to send a ClientHello as the
-  // very first bytes on the socket, so there's no way to "peek" for TLS
-  // without attempting the handshake. We always try TLS first and fall back
-  // to plaintext if the handshake fails on an otherwise-live TCP connection.
-  private probeTls(world: World): void {
-    this.log("debug", "tcp connecting to", `${world.host}:${world.port}`, "(probing TLS)");
-    // Only TLS 1.2+: older versions (1.0/1.1) are treated the same as "no
-    // TLS" and fall back to plaintext rather than connecting insecurely.
-    // No maxVersion ceiling, so newer protocol versions stay allowed.
-    const tlsSocket = tls.connect({
-      host: world.host,
-      port: world.port,
-      rejectUnauthorized: false,
-      minVersion: "TLSv1.2",
+    // Verification is checked by hand below rather than via
+    // rejectUnauthorized, so an untrusted certificate can be reported with
+    // its details either way. Nothing is written to the socket before then.
+    // Only TLS 1.2+; no maxVersion ceiling, so newer versions stay allowed.
+    const socket = tls.connect({ host, port, rejectUnauthorized: false, minVersion: "TLSv1.2" });
+    this.pendingSocket = socket;
+    socket.once("connect", () => {
+      socket.setTimeout(TLS_HANDSHAKE_TIMEOUT_MS, () => {
+        socket.destroy(new Error("TLS handshake timed out (is this port really TLS?)"));
+      });
     });
-    let tcpConnected = false;
-    let settled = false;
-
-    tlsSocket.once("connect", () => {
-      tcpConnected = true;
-    });
-
-    tlsSocket.once("secureConnect", () => {
-      if (settled) return;
-      settled = true;
-      tlsSocket.setTimeout(0);
-      const info = collectTlsInfo(tlsSocket);
-      this.log("debug", "tls handshake succeeded:", info.protocol, info.cipherName);
-      this.handlers.onTlsProbeResult(true, info);
-      this.establish(tlsSocket, true);
-    });
-
-    tlsSocket.setTimeout(TLS_PROBE_TIMEOUT_MS, () => {
-      if (settled) return;
-      this.log("debug", "tls handshake timed out, falling back to plaintext");
-      this.fallBackToPlaintext(world, tlsSocket);
-      settled = true;
-    });
-
-    tlsSocket.once("error", (err) => {
-      if (settled) return;
-      settled = true;
-      if (!tcpConnected) {
-        // The TCP connection itself never came up (DNS failure, connection
-        // refused, etc.) — a real connection error, not a TLS outcome, so
-        // report it immediately rather than waiting on 'close' (not
-        // guaranteed to fire promptly here) or the TLS probe timeout.
-        this.log("debug", "tcp connect failed:", err.message);
-        this.teardown(err.message);
+    this.handlePendingSocket(socket, "secureConnect", () => {
+      socket.setTimeout(0);
+      const info = collectTlsInfo(socket);
+      if (!info.certValid && !options.tlsAllowUntrusted) {
+        this.log("debug", "rejecting untrusted certificate:", info.certValidationError);
+        socket.destroy();
+        this.teardown(`certificate not trusted: ${info.certValidationError}`, true);
         return;
       }
-      this.log("debug", "tls handshake failed, falling back to plaintext:", err.message);
-      this.fallBackToPlaintext(world, tlsSocket);
+      this.log("debug", "tls handshake succeeded:", info.protocol, info.cipherName);
+      this.handlers.onTlsInfo(info);
+      this.establish(socket, true);
     });
-
-    // Covers `disconnect()` being called while the probe is still in flight.
-    tlsSocket.once("close", () => {
-      if (settled) return;
-      settled = true;
-      this.teardown();
-    });
-
-    this.pendingSocket = tlsSocket;
   }
 
-  private fallBackToPlaintext(world: World, tlsSocket: tls.TLSSocket): void {
-    tlsSocket.removeAllListeners();
-    tlsSocket.destroy();
-    this.handlers.onTlsProbeResult(false);
-
-    const rawSocket = net.createConnection({ host: world.host, port: world.port });
-    this.pendingSocket = rawSocket;
-    rawSocket.once("connect", () => {
-      this.log("debug", "tcp connected (plaintext)");
-      // Hand off to `establish()`, which attaches its own error/close
-      // handling for the rest of the session.
-      rawSocket.removeAllListeners("error");
-      rawSocket.removeAllListeners("close");
-      this.establish(rawSocket, false);
-    });
-    rawSocket.on("error", (err) => {
-      this.log("error", "socket error:", err.message);
+  // Wires error/close for the connect-in-progress window, then hands off to
+  // `onReady` once `readyEvent` fires; `establish()` attaches its own
+  // handling for the rest of the session.
+  private handlePendingSocket(socket: Socket, readyEvent: "connect" | "secureConnect", onReady: () => void): void {
+    const onError = (err: Error): void => {
+      this.log("debug", "connect failed:", err.message);
       this.teardown(err.message);
-    });
-    rawSocket.on("close", () => {
-      this.log("debug", "socket closed");
-      this.teardown();
+    };
+    // Covers `disconnect()` being called while the connect is in flight.
+    const onClose = (): void => this.teardown();
+    socket.once("error", onError);
+    socket.once("close", onClose);
+    socket.once(readyEvent, () => {
+      socket.removeListener("error", onError);
+      socket.removeListener("close", onClose);
+      onReady();
     });
   }
 
@@ -300,18 +274,25 @@ export class TelnetSession {
     };
   }
 
-  private teardown(reason?: string): void {
+  private teardown(reason?: string, certificateRejected = false): void {
     if (!this.socket && !this.pendingSocket) return;
     this.socket = null;
     this.pendingSocket = null;
-    this.handlers.onDisconnect(reason);
+    this.handlers.onDisconnect(reason, certificateRejected);
   }
 
-  // True only once the telnet session is actually established — while a TLS
-  // probe or plaintext fallback is still in flight, callers should treat the
+  // True only once the telnet session is actually established — while the
+  // connect or TLS handshake is still in flight, callers should treat the
   // session as not yet connected (see `pendingSocket`).
   isConnected(): boolean {
     return this.socket !== null;
+  }
+
+  // Writes text as-is (IAC-escaped, no line ending added) — used for the
+  // auto-login string, whose template supplies its own line endings. Never
+  // logged, since it carries a password.
+  sendRaw(text: string): void {
+    this.socket?.write(escapeIac(Buffer.from(text, "utf8")));
   }
 
   sendLine(text: string): { echoed: boolean } {

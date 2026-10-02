@@ -1,4 +1,4 @@
-import { BrowserWindow, screen, type WebContents } from "electron";
+import { screen, type BrowserWindow, type WebContents } from "electron";
 import { TerminalWindow, type TerminalWindowHandlers } from "./terminal-window";
 import { log } from "./logger";
 
@@ -39,11 +39,10 @@ export interface WindowManagerOptions {
   indexHtmlPath: string;
 }
 
-// Owns every terminal window (one per connection) and each one's modal
-// Worlds dialog, and maps an IPC sender back to the terminal it belongs to.
+// Owns every terminal window (one per connection) and maps an IPC sender
+// back to the terminal it belongs to.
 export class WindowManager {
   private readonly terminals = new Map<number, TerminalWindow>();
-  private readonly worldsWindows = new Map<TerminalWindow, BrowserWindow>();
 
   constructor(
     private readonly options: WindowManagerOptions,
@@ -72,10 +71,7 @@ export class WindowManager {
       { ...this.options, bounds },
       {
         ...this.handlers,
-        onClosed: (closed) => {
-          this.terminals.delete(webContentsId);
-          this.worldsWindows.get(closed)?.close();
-        },
+        onClosed: () => this.terminals.delete(webContentsId),
       },
     );
     // Captured now: webContents is no longer accessible once the window closes.
@@ -85,64 +81,7 @@ export class WindowManager {
     return terminal;
   }
 
-  // The terminal an IPC message came from: either its own window or its
-  // Worlds dialog.
   terminalFor(sender: WebContents): TerminalWindow | undefined {
-    const direct = this.terminals.get(sender.id);
-    if (direct) return direct;
-    for (const [terminal, worldsWindow] of this.worldsWindows) {
-      if (!worldsWindow.isDestroyed() && worldsWindow.webContents.id === sender.id) return terminal;
-    }
-    return undefined;
-  }
-
-  sendToWorlds(terminal: TerminalWindow, channel: string, ...args: unknown[]): void {
-    this.worldsWindows.get(terminal)?.webContents.send(channel, ...args);
-  }
-
-  openWorldsWindow(terminal: TerminalWindow, worldsHtmlPath: string, onReady?: () => void): void {
-    const existing = this.worldsWindows.get(terminal);
-    if (existing) {
-      log("debug", "main", "worlds window already open, focusing");
-      existing.focus();
-      onReady?.();
-      return;
-    }
-
-    log("debug", "main", "opening worlds window for terminal", terminal.window.id);
-    const width = 640;
-    const height = 420;
-    const worldsWindow = new BrowserWindow({
-      width,
-      height,
-      ...centeredOn(screen.getDisplayMatching(terminal.window.getBounds()), width, height),
-      icon: this.options.appIcon,
-      parent: terminal.window,
-      modal: true,
-      frame: false, // Linux WMs don't reliably honor minimizable/maximizable hints; drop the frame instead
-      backgroundColor: "#1e1e1e",
-      webPreferences: {
-        preload: this.options.preloadPath,
-        contextIsolation: true,
-        nodeIntegration: false,
-        additionalArguments: this.options.rendererArgs,
-      },
-    });
-    this.worldsWindows.set(terminal, worldsWindow);
-    worldsWindow.setMenuBarVisibility(false);
-    worldsWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-      log("debug", "worlds-console", `level=${level} ${sourceId}:${line} ${message}`);
-    });
-    worldsWindow.webContents.on("did-fail-load", (_event, code, desc, url) => {
-      log("error", "main", "worlds did-fail-load", code, desc, url);
-    });
-    if (onReady) {
-      worldsWindow.webContents.once("did-finish-load", onReady);
-    }
-    worldsWindow.loadFile(worldsHtmlPath);
-    worldsWindow.on("closed", () => {
-      log("debug", "main", "worlds window closed");
-      this.worldsWindows.delete(terminal);
-    });
+    return this.terminals.get(sender.id);
   }
 }

@@ -2,6 +2,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { worldsDialog } from "./worlds-dialog";
 
 window.addEventListener("error", (event) => {
   window.moolin.log("error", "renderer", "uncaught error:", event.error ?? event.message);
@@ -221,7 +222,8 @@ window.moolin.onSelectAllRequested(() => term.selectAll());
 // browser's native (unreliable) copy/paste before it can run.
 window.addEventListener("keydown", (event) => {
   const mod = event.ctrlKey || event.metaKey;
-  if (!mod) return;
+  // The Worlds dialog's own fields use the browser's native copy/paste.
+  if (!mod || worldsDialog.isOpen()) return;
   if (event.key.toLowerCase() === "c") {
     event.preventDefault();
     copySelection();
@@ -232,6 +234,8 @@ window.addEventListener("keydown", (event) => {
 });
 
 document.addEventListener("contextmenu", (event) => {
+  // Leave the Worlds dialog's fields their native context menu.
+  if (worldsDialog.isOpen()) return;
   event.preventDefault();
   window.moolin.showContextMenu({ hasSelection: term.hasSelection() });
 });
@@ -254,6 +258,9 @@ async function loadScrollback(): Promise<void> {
   });
 }
 void loadScrollback();
+
+window.moolin.worlds.onOpen((options) => void worldsDialog.open(options));
+worldsDialog.dialog.addEventListener("close", () => inputArea.focus());
 
 function applyConnectionState(state: { secure: boolean }): void {
   inputArea.classList.toggle("secure", state.secure);
