@@ -130,9 +130,12 @@ export class TelnetSession {
       if (settled) return;
       settled = true;
       if (!tcpConnected) {
-        // The TCP connection itself never came up — a real connection error,
-        // not a TLS outcome, so let it surface as the usual error/close path.
+        // The TCP connection itself never came up (DNS failure, connection
+        // refused, etc.) — a real connection error, not a TLS outcome, so
+        // report it immediately rather than waiting on 'close' (not
+        // guaranteed to fire promptly here) or the TLS probe timeout.
         this.log("debug", "tcp connect failed:", err.message);
+        this.teardown(err.message);
         return;
       }
       this.log("debug", "tls handshake failed, falling back to plaintext:", err.message);
