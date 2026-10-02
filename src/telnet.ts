@@ -13,6 +13,16 @@ const TELOPT_NAWS = 31;
 // doesn't speak TLS and falling back to plaintext.
 const TLS_PROBE_TIMEOUT_MS = 5000;
 
+// Per-telnet-option behavior, keyed by option number in buildOptionHandlers.
+// Any callback left unset falls back to the default do/will/wont/sub
+// behavior (refuse/ignore) rather than needing an explicit no-op.
+interface TelnetOptionHandler {
+  onDo?: () => void;
+  onWill?: () => void;
+  onWont?: () => void;
+  onSub?: (buffer: Buffer) => void;
+}
+
 export interface TlsInfo {
   protocol: string;
   cipherName: string;
@@ -187,54 +197,36 @@ export class TelnetSession {
       this.handlers.onData(typeof data === "string" ? data : new Uint8Array(data));
     });
 
-    // Reasonable defaults: accept NAWS/TTYPE/SGA/ECHO, refuse everything else
-    // (GMCP/MSDP/MCCP are MUD-specific extensions layered on top of telnet
-    // that would need dedicated handling — out of scope for this pass).
+    // One entry per supported option instead of a switch per event type, so
+    // adding an option (GMCP/MSDP/MCCP are MUD-specific extensions layered on
+    // top of telnet that would need this — out of scope for this pass) means
+    // adding one registry entry rather than touching do/will/wont/sub below.
+    // Anything with no entry (or no matching callback on its entry) falls
+    // back to refusing/ignoring, same as the old switch statements' defaults.
+    const optionHandlers = this.buildOptionHandlers(telnetSocket);
+
     telnetSocket.on("do", (option) => {
       this.log("debug", "recv IAC DO", option);
-      switch (option) {
-        case TELOPT_NAWS:
-          this.nawsEnabled = true;
-          telnetSocket.writeWill(TELOPT_NAWS);
-          this.sendNaws();
-          break;
-        case TELOPT_TTYPE:
-          telnetSocket.writeWill(TELOPT_TTYPE);
-          break;
-        case TELOPT_SGA:
-          telnetSocket.writeWill(TELOPT_SGA);
-          break;
-        default:
-          telnetSocket.writeWont(option);
-      }
+      const onDo = optionHandlers[option]?.onDo;
+      if (onDo) onDo();
+      else telnetSocket.writeWont(option);
     });
 
     telnetSocket.on("will", (option) => {
       this.log("debug", "recv IAC WILL", option);
-      switch (option) {
-        case TELOPT_ECHO:
-          // Server takes over echoing — typically for password prompts.
-          this.localEchoSuppressed = true;
-          telnetSocket.writeDo(option);
-          break;
-        case TELOPT_SGA:
-          telnetSocket.writeDo(option);
-          break;
-        default:
-          telnetSocket.writeDont(option);
-      }
+      const onWill = optionHandlers[option]?.onWill;
+      if (onWill) onWill();
+      else telnetSocket.writeDont(option);
     });
 
     telnetSocket.on("wont", (option) => {
       this.log("debug", "recv IAC WONT", option);
-      if (option === TELOPT_ECHO) this.localEchoSuppressed = false;
+      optionHandlers[option]?.onWont?.();
     });
 
     telnetSocket.on("sub", (option, buffer) => {
       this.log("debug", "recv IAC SB", option, "len =", buffer.length);
-      if (option === TELOPT_TTYPE && buffer[0] === 1 /* SEND */) {
-        telnetSocket.writeSub(TELOPT_TTYPE, Buffer.concat([Buffer.from([0 /* IS */]), Buffer.from("XTERM", "ascii")]));
-      }
+      optionHandlers[option]?.onSub?.(buffer);
     });
 
     telnetSocket.on("error", (err) => {
@@ -245,6 +237,44 @@ export class TelnetSession {
       this.log("debug", "socket closed");
       this.teardown();
     });
+  }
+
+  private buildOptionHandlers(telnetSocket: TelnetSocket): Partial<Record<number, TelnetOptionHandler>> {
+    return {
+      [TELOPT_NAWS]: {
+        // Remote is asking us (DO) to send window-size updates.
+        onDo: () => {
+          this.nawsEnabled = true;
+          telnetSocket.writeWill(TELOPT_NAWS);
+          this.sendNaws();
+        },
+      },
+      [TELOPT_TTYPE]: {
+        onDo: () => telnetSocket.writeWill(TELOPT_TTYPE),
+        onSub: (buffer) => {
+          if (buffer[0] === 1 /* SEND */) {
+            telnetSocket.writeSub(
+              TELOPT_TTYPE,
+              Buffer.concat([Buffer.from([0 /* IS */]), Buffer.from("XTERM", "ascii")]),
+            );
+          }
+        },
+      },
+      [TELOPT_SGA]: {
+        onDo: () => telnetSocket.writeWill(TELOPT_SGA),
+        onWill: () => telnetSocket.writeDo(TELOPT_SGA),
+      },
+      [TELOPT_ECHO]: {
+        // Server takes over echoing — typically for password prompts.
+        onWill: () => {
+          this.localEchoSuppressed = true;
+          telnetSocket.writeDo(TELOPT_ECHO);
+        },
+        onWont: () => {
+          this.localEchoSuppressed = false;
+        },
+      },
+    };
   }
 
   private teardown(reason?: string): void {
