@@ -49,6 +49,9 @@ export class TerminalWindow {
     this.connection = new ConnectionManager(
       {
         onStateChange: () => {
+          // Closing the window disconnects it, which lands here after the
+          // BrowserWindow is destroyed; there is no menu left to refresh.
+          if (this.window.isDestroyed()) return;
           handlers.onStateChange(this);
           this.send(IpcChannels.connectionState, this.connection.getState());
         },
