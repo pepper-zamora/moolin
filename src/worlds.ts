@@ -32,9 +32,54 @@ function readState(filePath: string): WorldsState {
   }
 }
 
+// Write-temp-then-rename so a process killed mid-write can never leave a
+// truncated/corrupt file behind for the next reader.
 function writeState(filePath: string, state: WorldsState): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(state, null, 2) + "\n", "utf-8");
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmpPath = path.join(dir, `.${path.basename(filePath)}.tmp-${process.pid}`);
+  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2) + "\n", "utf-8");
+  fs.renameSync(tmpPath, filePath);
+}
+
+const LOCK_WAIT_TIMEOUT_MS = 2000;
+// A lock left behind by a process that crashed/was killed while holding it
+// is indistinguishable from one still legitimately held; treat it as stale
+// (and safe to steal) once it's older than this.
+const LOCK_STALE_MS = 5000;
+
+// Multiple moolin processes (one per connected world — see main.ts's
+// spawnInstanceForWorld) can read-modify-write this same file concurrently,
+// e.g. two MRU updates landing close together. Without a lock around the
+// whole read-modify-write, the second writer can silently clobber the
+// first's change.
+function withLock<T>(filePath: string, fn: () => T): T {
+  const lockPath = `${filePath}.lock`;
+  const deadline = Date.now() + LOCK_WAIT_TIMEOUT_MS;
+  while (true) {
+    try {
+      fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+      break;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      try {
+        if (Date.now() - fs.statSync(lockPath).mtimeMs > LOCK_STALE_MS) {
+          fs.unlinkSync(lockPath);
+          continue;
+        }
+      } catch {
+        continue; // Lock vanished between the EEXIST and the stat; just retry.
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for lock on ${filePath}`);
+      }
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    fs.unlinkSync(lockPath);
+  }
 }
 
 export function loadWorldsState(filePath: string): WorldsState {
@@ -46,15 +91,20 @@ export function loadWorlds(filePath: string): World[] {
 }
 
 export function saveWorlds(filePath: string, worlds: World[]): void {
-  const state = readState(filePath);
-  writeState(filePath, { ...state, worlds });
+  withLock(filePath, () => {
+    const state = readState(filePath);
+    writeState(filePath, { ...state, worlds });
+  });
 }
 
-export function loadMru(filePath: string): string[] {
-  return readState(filePath).mru;
-}
-
-export function saveMru(filePath: string, mru: string[]): void {
-  const state = readState(filePath);
-  writeState(filePath, { ...state, mru });
+// Atomically reads the current MRU, applies `updater`, and writes the result
+// back under the same lock, so two processes updating MRU around the same
+// time can't lose one's update to the other.
+export function updateMru(filePath: string, updater: (mru: string[]) => string[]): string[] {
+  return withLock(filePath, () => {
+    const state = readState(filePath);
+    const mru = updater(state.mru);
+    writeState(filePath, { ...state, mru });
+    return mru;
+  });
 }

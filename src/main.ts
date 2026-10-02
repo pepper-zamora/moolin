@@ -1,7 +1,7 @@
 import { app, BrowserWindow, Menu, ipcMain, dialog, screen, clipboard, shell } from "electron";
 import * as path from "path";
 import { spawn } from "child_process";
-import { resolveWorldsPath, loadWorlds, saveWorlds, loadWorldsState, loadMru, saveMru } from "./worlds";
+import { resolveWorldsPath, loadWorlds, saveWorlds, loadWorldsState, updateMru as updateMruState } from "./worlds";
 import { TelnetSession, type TlsInfo } from "./telnet";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
 import type { World } from "./worlds-types";
@@ -218,9 +218,9 @@ function sendToTerminal(data: string | Uint8Array): void {
 }
 
 function updateMru(id: string): void {
-  const mru = loadMru(worldsPath);
-  const updated = [id, ...mru.filter((existingId) => existingId !== id)].slice(0, MAX_MRU);
-  saveMru(worldsPath, updated);
+  const updated = updateMruState(worldsPath, (mru) =>
+    [id, ...mru.filter((existingId) => existingId !== id)].slice(0, MAX_MRU),
+  );
   log("debug", "worlds", "mru updated:", updated);
 }
 
