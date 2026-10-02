@@ -5,6 +5,7 @@ import { resolveWorldsPath, loadWorlds, saveWorlds, loadWorldsState, updateMru a
 import { ConnectionManager } from "./connection-manager";
 import { WindowManager } from "./window-manager";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
+import { IpcChannels } from "./ipc-channels";
 import type { World } from "./worlds-types";
 
 function cliArgs(): string[] {
@@ -90,11 +91,11 @@ function sendToTerminal(data: string | Uint8Array): void {
   while (scrollbackBytes > MAX_SCROLLBACK_BYTES && scrollbackBuffer.length > 0) {
     scrollbackBytes -= byteLength(scrollbackBuffer.shift() as string | Uint8Array);
   }
-  windowManager.send("telnet:data", data);
+  windowManager.send(IpcChannels.telnetData, data);
 }
 
 function broadcastConnectionState(): void {
-  windowManager.send("connection:state", { secure: connectionManager.isSecure() });
+  windowManager.send(IpcChannels.connectionState, { secure: connectionManager.isSecure() });
 }
 
 const connectionManager = new ConnectionManager(
@@ -145,7 +146,7 @@ function newWorld(): void {
   // worlds-renderer.ts), so this is safe whether the dialog is fresh or
   // already open.
   windowManager.openWorldsWindow(WORLDS_HTML, () => {
-    windowManager.sendToWorlds("worlds:createNew");
+    windowManager.sendToWorlds(IpcChannels.worldsCreateNew);
   });
 }
 
@@ -205,10 +206,10 @@ function buildMenu(): void {
       // forward here for menu-bar/discoverability use.
       label: "&Edit",
       submenu: [
-        { label: "&Copy", click: () => windowManager.send("terminal:copyRequested") },
-        { label: "&Paste", click: () => windowManager.send("terminal:pasteRequested") },
+        { label: "&Copy", click: () => windowManager.send(IpcChannels.terminalCopyRequested) },
+        { label: "&Paste", click: () => windowManager.send(IpcChannels.terminalPasteRequested) },
         { type: "separator" },
-        { label: "Select &All", click: () => windowManager.send("terminal:selectAllRequested") },
+        { label: "Select &All", click: () => windowManager.send(IpcChannels.terminalSelectAllRequested) },
       ],
     },
     {
@@ -225,17 +226,17 @@ function buildMenu(): void {
         {
           label: "Zoom &In",
           accelerator: "CmdOrCtrl+=",
-          click: () => windowManager.send("terminal:zoom", 1),
+          click: () => windowManager.send(IpcChannels.terminalZoom, 1),
         },
         {
           label: "Zoom &Out",
           accelerator: "CmdOrCtrl+-",
-          click: () => windowManager.send("terminal:zoom", -1),
+          click: () => windowManager.send(IpcChannels.terminalZoom, -1),
         },
         {
           label: "&Actual Size",
           accelerator: "CmdOrCtrl+0",
-          click: () => windowManager.send("terminal:zoom", 0),
+          click: () => windowManager.send(IpcChannels.terminalZoom, 0),
         },
         { type: "separator" },
         { role: "togglefullscreen", label: "Toggle &Full Screen" },
@@ -245,30 +246,30 @@ function buildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-ipcMain.handle("worlds:load", (): World[] => {
+ipcMain.handle(IpcChannels.worldsLoad, (): World[] => {
   const worlds = loadWorlds(worldsPath);
   log("debug", "worlds", "loaded", worlds.length, "world(s) from", worldsPath);
   return worlds;
 });
 
-ipcMain.handle("worlds:save", (_event, worlds: World[]): void => {
+ipcMain.handle(IpcChannels.worldsSave, (_event, worlds: World[]): void => {
   saveWorlds(worldsPath, worlds);
   log("debug", "worlds", "saved", worlds.length, "world(s) to", worldsPath);
   buildMenu(); // world names may have changed, which affects MRU labels
 });
 
-ipcMain.handle("dialog:confirm", (event, message: string): Promise<boolean> => {
+ipcMain.handle(IpcChannels.dialogConfirm, (event, message: string): Promise<boolean> => {
   const sourceWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   return confirmAction(sourceWindow, message, "Delete");
 });
 
-ipcMain.handle("connect:request", (event, world: World): void => {
+ipcMain.handle(IpcChannels.connectRequest, (event, world: World): void => {
   BrowserWindow.fromWebContents(event.sender)?.close();
   windowManager.main?.focus();
   connectOrSpawn(world);
 });
 
-ipcMain.on("telnet:input", (_event, text: string) => {
+ipcMain.on(IpcChannels.telnetInput, (_event, text: string) => {
   if (!connectionManager.isConnected()) {
     log("debug", "main", "input while not connected, ignoring:", JSON.stringify(text));
     sendToTerminal("\x1b[90m[not connected]\x1b[0m\r\n");
@@ -280,38 +281,38 @@ ipcMain.on("telnet:input", (_event, text: string) => {
   }
 });
 
-ipcMain.on("telnet:resize", (_event, { cols, rows }: { cols: number; rows: number }) => {
+ipcMain.on(IpcChannels.telnetResize, (_event, { cols, rows }: { cols: number; rows: number }) => {
   log("debug", "main", "terminal resized to", `${cols}x${rows}`);
   connectionManager.resize(cols, rows);
 });
 
-ipcMain.handle("terminal:getScrollback", (): Array<string | Uint8Array> => scrollbackBuffer.slice());
+ipcMain.handle(IpcChannels.terminalGetScrollback, (): Array<string | Uint8Array> => scrollbackBuffer.slice());
 
-ipcMain.handle("connection:getState", (): { secure: boolean } => ({ secure: connectionManager.isSecure() }));
+ipcMain.handle(IpcChannels.connectionGetState, (): { secure: boolean } => ({ secure: connectionManager.isSecure() }));
 
 // The clipboard module is unavailable to the sandboxed preload/renderer
 // contexts, so writes/reads are proxied through the main process instead.
-ipcMain.on("clipboard:writeText", (_event, text: string) => clipboard.writeText(text));
-ipcMain.handle("clipboard:readText", (): string => clipboard.readText());
+ipcMain.on(IpcChannels.clipboardWriteText, (_event, text: string) => clipboard.writeText(text));
+ipcMain.handle(IpcChannels.clipboardReadText, (): string => clipboard.readText());
 
 // Restricted to http(s) so a malicious server can't trick a click into
 // opening e.g. a file:// or custom-protocol URI on the user's machine.
-ipcMain.on("shell:openExternal", (_event, url: string) => {
+ipcMain.on(IpcChannels.shellOpenExternal, (_event, url: string) => {
   if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
 });
 
-ipcMain.on("terminal:contextMenu", (event, options: { hasSelection: boolean }) => {
+ipcMain.on(IpcChannels.terminalContextMenu, (event, options: { hasSelection: boolean }) => {
   const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const template: Electron.MenuItemConstructorOptions[] = [
-    { label: "Copy", enabled: options.hasSelection, click: () => event.sender.send("terminal:copyRequested") },
-    { label: "Paste", click: () => event.sender.send("terminal:pasteRequested") },
+    { label: "Copy", enabled: options.hasSelection, click: () => event.sender.send(IpcChannels.terminalCopyRequested) },
+    { label: "Paste", click: () => event.sender.send(IpcChannels.terminalPasteRequested) },
     { type: "separator" },
-    { label: "Select All", click: () => event.sender.send("terminal:selectAllRequested") },
+    { label: "Select All", click: () => event.sender.send(IpcChannels.terminalSelectAllRequested) },
   ];
   Menu.buildFromTemplate(template).popup({ window });
 });
 
-ipcMain.on("log:emit", (_event, level: Exclude<LogLevel, "none">, scope: string, args: unknown[]) => {
+ipcMain.on(IpcChannels.logEmit, (_event, level: Exclude<LogLevel, "none">, scope: string, args: unknown[]) => {
   log(level, scope, ...args);
 });
 
