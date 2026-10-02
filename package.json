@@ -1,7 +1,9 @@
 {
   "name": "moolin",
+  "productName": "Moolin",
   "version": "0.1.0",
-  "description": "Buttery-smooth MUSH/MUCK/MOO scrollback client",
+  "description": "A MOO/MUSH/MUCK/MUD client with buttery-smooth scrollback",
+  "license": "MIT",
   "main": "dist/main.js",
   "private": true,
   "scripts": {
@@ -12,7 +14,7 @@
     "build": "npm run typecheck && npm run build:main && npm run build:preload && npm run build:renderer",
     "build:test": "esbuild src/*.test.ts --bundle --platform=node --outdir=dist/test",
     "test": "npm run build:test && node --test \"dist/test/*.test.js\"",
-    "start": "npm run build && electron .",
+    "start": "npm run build && node scripts/start.js",
     "dev": "npm-run-all --parallel dev:main dev:preload dev:renderer",
     "dev:main": "esbuild src/main.ts --bundle --platform=node --external:electron --outfile=dist/main.js --watch",
     "dev:preload": "esbuild src/preload.ts --bundle --platform=node --external:electron --outfile=dist/preload.js --watch",
@@ -20,7 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "electron": "^33.0.0",
+    "electron": "^38.8.6",
     "esbuild": "^0.24.0",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.6.0"
@@ -30,6 +32,5 @@
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0"
-  },
-  "license": "MIT"
+  }
 }

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Moolin
+GenericName=MUD Client
+Comment=Connect to MOOs, MUSHes, MUCKs and MUDs
+Exec=env -u ELECTRON_RUN_AS_NODE /home/YOUR_USERNAME/Projects/moolin/node_modules/electron/dist/electron /home/YOUR_USERNAME/Projects/moolin
+Path=/home/YOUR_USERNAME/Projects/moolin
+Icon=/home/YOUR_USERNAME/Projects/moolin/icons/icon-512.png
+Terminal=false
+Categories=Game;RolePlaying;
+Keywords=MOO;MUD;MUSH;MUCK;telnet;
+StartupNotify=true
+StartupWMClass=Moolin

@@ -59,8 +59,8 @@ export class TerminalWindow {
       (level, ...args) => log(level, `telnet:${id}`, ...args),
     );
 
-    this.window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-      log("debug", `console:${id}`, `level=${level} ${sourceId}:${line} ${message}`);
+    this.window.webContents.on("console-message", ({ level, message, lineNumber, sourceId }) => {
+      log("debug", `console:${id}`, `level=${level} ${sourceId}:${lineNumber} ${message}`);
     });
     this.window.webContents.on("did-fail-load", (_event, code, desc, url) => {
       log("error", "main", `window ${id} did-fail-load`, code, desc, url);
