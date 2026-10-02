@@ -19,13 +19,38 @@ export function resolveWorldsPath(cliArg: string | undefined): string {
   return path.resolve(raw);
 }
 
+// Guards against a hand-edited or corrupted worlds file feeding a malformed
+// entry (missing host, non-numeric port, etc.) straight into net.connect().
+function isValidWorld(value: unknown): value is World {
+  if (typeof value !== "object" || value === null) return false;
+  const w = value as Record<string, unknown>;
+  return (
+    typeof w.id === "string" &&
+    w.id.length > 0 &&
+    typeof w.name === "string" &&
+    typeof w.host === "string" &&
+    w.host.length > 0 &&
+    typeof w.port === "number" &&
+    Number.isInteger(w.port) &&
+    w.port > 0 &&
+    w.port <= 65535
+  );
+}
+
 function readState(filePath: string): WorldsState {
   if (!fs.existsSync(filePath)) return { worlds: [], mru: [] };
   const raw = fs.readFileSync(filePath, "utf-8").trim();
   if (raw.length === 0) return { worlds: [], mru: [] };
   try {
     const parsed = JSON.parse(raw) as Partial<WorldsState>;
-    return { worlds: parsed.worlds ?? [], mru: parsed.mru ?? [] };
+    const rawWorlds = Array.isArray(parsed.worlds) ? parsed.worlds : [];
+    const worlds = rawWorlds.filter((w): w is World => {
+      if (isValidWorld(w)) return true;
+      log("warn", "worlds", "dropping malformed world entry from", filePath, ":", JSON.stringify(w));
+      return false;
+    });
+    const mru = Array.isArray(parsed.mru) ? parsed.mru.filter((id): id is string => typeof id === "string") : [];
+    return { worlds, mru };
   } catch (err) {
     log("warn", "worlds", "failed to parse", filePath, "- treating as empty:", err);
     return { worlds: [], mru: [] };
