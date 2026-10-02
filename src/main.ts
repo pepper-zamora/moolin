@@ -300,9 +300,11 @@ ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
     terminal.write("\x1b[90m[not connected]\x1b[0m\r\n");
     return;
   }
+  // Echoed in cyan to tell typed commands apart from the world's output;
+  // not at all while the server has taken over echoing (password prompts).
   const { echoed } = terminal.connection.sendLine(text);
   if (echoed) {
-    terminal.write(text.replace(/\n/g, "\r\n") + "\r\n");
+    terminal.write(`\x1b[36m${text.replace(/\n/g, "\r\n")}\x1b[0m\r\n`);
   }
 });
 
@@ -345,25 +347,21 @@ ipcMain.on(IpcChannels.logEmit, (_event, level: Exclude<LogLevel, "none">, scope
   log(level, scope, ...args);
 });
 
-function greet(terminal: TerminalWindow): void {
-  terminal.write("\x1b[36mmoolin — press Ctrl+O to open Worlds and connect.\x1b[0m\r\n");
-}
-
 if (isPrimaryInstance) {
   app.on("second-instance", (_event, _argv, _cwd, additionalData) => {
     const otherWorldsPath = (additionalData as { worldsPath?: string } | null)?.worldsPath;
     if (otherWorldsPath && otherWorldsPath !== worldsPath) {
       log("warn", "main", "second launch asked for worlds file", otherWorldsPath, "but this instance uses", worldsPath);
     }
-    greet(newTerminalWindow());
+    newTerminalWindow();
   });
 
   app.whenReady().then(() => {
     log("debug", "main", "app ready");
-    greet(newTerminalWindow());
+    newTerminalWindow();
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) greet(newTerminalWindow());
+      if (BrowserWindow.getAllWindows().length === 0) newTerminalWindow();
     });
   });
 

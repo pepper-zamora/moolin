@@ -6,7 +6,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
     />
-    <title>moolin</title>
+    <title>Moolin</title>
     <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -14,7 +14,11 @@
     <div id="app">
       <div id="terminal"></div>
       <hr id="divider" />
-      <textarea id="input-area" rows="1" spellcheck="false" autofocus></textarea>
+      <textarea id="input-area" rows="1" spellcheck="false" hidden></textarea>
+      <div id="status-bar" data-status="disconnected">
+        <span id="status-text">Not connected</span>
+        <span class="hint">Press Ctrl+O to choose a world</span>
+      </div>
     </div>
 
     <dialog id="worlds-dialog">

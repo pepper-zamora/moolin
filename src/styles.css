@@ -50,6 +50,29 @@ html, body {
   background: #001000; /* subtle green: connected over TLS */
 }
 
+/* Takes the input area's place while there is no connection. */
+#status-bar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 2px 4px;
+  background: #111;
+  color: #aaa;
+  font-family: Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+#status-bar .hint {
+  margin-left: auto;
+  opacity: 0.6;
+}
+
+#status-bar[data-status="connecting"] #status-text {
+  color: #cca700;
+}
+
 .xterm-viewport::-webkit-scrollbar {
   width: 14px;
 }
