@@ -324,7 +324,7 @@ ipcMain.handle(
 // The clipboard module is unavailable to the sandboxed preload/renderer
 // contexts, so writes/reads are proxied through the main process instead.
 ipcMain.on(IpcChannels.clipboardWriteText, (_event, text: string) => clipboard.writeText(text));
-ipcMain.handle(IpcChannels.clipboardReadText, (): string => clipboard.readText());
+ipcMain.handle(IpcChannels.clipboardReadText, (): Promise<string> => clipboard.readText());
 
 // Restricted to http(s) so a malicious server can't trick a click into
 // opening e.g. a file:// or custom-protocol URI on the user's machine.

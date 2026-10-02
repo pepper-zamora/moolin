@@ -35,7 +35,18 @@ Requires Node.js 22 or later.
 
 ```sh
 npm install
+node node_modules/electron/install.js   # downloads the Electron binary
 npm start          # builds into dist/, then launches
+```
+
+Electron no longer downloads its binary during `npm install`, hence the
+second step. On Linux, if Electron aborts at launch complaining about the SUID
+sandbox helper, make it root-owned (this must be redone whenever Electron is
+reinstalled):
+
+```sh
+sudo chown root:root node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 ```
 
 `npm start` runs `scripts/start.js`, which clears `ELECTRON_RUN_AS_NODE`
