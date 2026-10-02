@@ -10,8 +10,8 @@
     "build:preload": "esbuild src/preload.ts --bundle --platform=node --external:electron --outfile=dist/preload.js",
     "build:renderer": "esbuild src/renderer.ts src/worlds-renderer.ts --bundle --platform=browser --outdir=dist",
     "build": "npm run typecheck && npm run build:main && npm run build:preload && npm run build:renderer",
-    "build:test": "esbuild src/telnet.test.ts --bundle --platform=node --outfile=dist/telnet.test.js",
-    "test": "npm run build:test && node --test dist/telnet.test.js",
+    "build:test": "esbuild src/*.test.ts --bundle --platform=node --outdir=dist/test",
+    "test": "npm run build:test && node --test \"dist/test/*.test.js\"",
     "start": "npm run build && electron .",
     "dev": "npm-run-all --parallel dev:main dev:preload dev:renderer",
     "dev:main": "esbuild src/main.ts --bundle --platform=node --external:electron --outfile=dist/main.js --watch",
@@ -29,7 +29,7 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.18.0",
-    "@xterm/xterm": "^5.5.0",
-    "telnet-stream": "^1.1.0"
-  }
+    "@xterm/xterm": "^5.5.0"
+  },
+  "license": "MIT"
 }

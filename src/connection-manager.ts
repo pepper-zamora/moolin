@@ -11,7 +11,7 @@ export interface ConnectionManagerHandlers {
   // An ANSI-colored status line to append to the scrollback.
   onMessage: (text: string) => void;
   // Raw telnet traffic to append to the scrollback.
-  onData: (data: string | Uint8Array) => void;
+  onData: (data: Uint8Array) => void;
   // A successful connection, for MRU persistence.
   onConnected: (worldId: string) => void;
 }

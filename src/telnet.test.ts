@@ -159,3 +159,79 @@ test("disconnect() during the TLS probe tears down cleanly without hanging", { t
     server.close();
   }
 });
+
+test("negotiates ECHO, NAWS and TTYPE, and stops local echo while the server echoes", { timeout: TEST_TIMEOUT_MS }, async () => {
+  const IAC = 255, SB = 250, SE = 240, WILL = 251, WONT = 252, DO = 253;
+  const ECHO = 1, TTYPE = 24, NAWS = 31;
+  let serverSocket: net.Socket | undefined;
+  const received: number[] = [];
+  const server = net.createServer((socket) => {
+    serverSocket = socket;
+    socket.on("data", (chunk) => received.push(...chunk));
+    socket.on("error", () => {}); // the TLS probe's connection is reset by the client
+    socket.write(Buffer.from([IAC, WILL, ECHO, IAC, DO, NAWS, IAC, DO, TTYPE, IAC, SB, TTYPE, 1, IAC, SE]));
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+
+  const { handlers } = recordingHandlers();
+  const session = new TelnetSession(handlers, noopLog);
+  const includes = (sequence: number[]): boolean =>
+    received.some((_, i) => sequence.every((byte, j) => received[i + j] === byte));
+  const waitFor = async (sequence: number[]): Promise<void> => {
+    while (!includes(sequence)) await new Promise((resolve) => setTimeout(resolve, 10));
+  };
+
+  try {
+    await new Promise<void>((resolve) => {
+      handlers.onConnect = () => resolve();
+      session.connect(makeWorld(freePort(server)));
+    });
+    session.resize(100, 40);
+
+    await waitFor([IAC, DO, ECHO]);
+    await waitFor([IAC, WILL, NAWS]);
+    await waitFor([IAC, SB, NAWS, 0, 100, 0, 40, IAC, SE]);
+    await waitFor([IAC, WILL, TTYPE]);
+    await waitFor([IAC, SB, TTYPE, 0, ...Buffer.from("XTERM"), IAC, SE]);
+    assert.deepEqual(session.sendLine("secret"), { echoed: false });
+
+    serverSocket?.write(Buffer.from([IAC, WONT, ECHO]));
+    await waitFor([...Buffer.from("secret\r\n")]);
+    // WONT ECHO has no reply, so poll until the session has seen it.
+    let echo = session.sendLine("look");
+    while (!echo.echoed) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      echo = session.sendLine("look");
+    }
+  } finally {
+    session.disconnect();
+    server.close();
+  }
+});
+
+test("refuses options it doesn't support", { timeout: TEST_TIMEOUT_MS }, async () => {
+  const IAC = 255, WILL = 251, WONT = 252, DO = 253, DONT = 254;
+  const received: number[] = [];
+  const server = net.createServer((socket) => {
+    socket.on("data", (chunk) => received.push(...chunk));
+    socket.on("error", () => {});
+    socket.write(Buffer.from([IAC, DO, 200, IAC, WILL, 201]));
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+
+  const { handlers } = recordingHandlers();
+  const session = new TelnetSession(handlers, noopLog);
+  try {
+    await new Promise<void>((resolve) => {
+      handlers.onConnect = () => resolve();
+      session.connect(makeWorld(freePort(server)));
+    });
+    const expected = [IAC, WONT, 200, IAC, DONT, 201];
+    while (!received.some((_, i) => expected.every((byte, j) => received[i + j] === byte))) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  } finally {
+    session.disconnect();
+    server.close();
+  }
+});

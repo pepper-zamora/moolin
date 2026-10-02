@@ -1,6 +1,6 @@
 import * as net from "net";
 import * as tls from "tls";
-import { TelnetSocket } from "telnet-stream";
+import { TelnetParser, encodeNegotiation, encodeSub, escapeIac, type NegotiationVerb } from "./telnet-protocol";
 import type { World } from "./worlds-types";
 import type { LogLevel } from "./logger";
 
@@ -23,6 +23,8 @@ interface TelnetOptionHandler {
   onSub?: (buffer: Buffer) => void;
 }
 
+type Socket = net.Socket | tls.TLSSocket;
+
 export interface TlsInfo {
   protocol: string;
   cipherName: string;
@@ -39,7 +41,7 @@ export interface TlsInfo {
 
 export interface TelnetSessionHandlers {
   onConnect: (secure: boolean) => void;
-  onData: (data: string | Uint8Array) => void;
+  onData: (data: Uint8Array) => void;
   // A `reason` means the socket errored; its absence means a normal close.
   onDisconnect: (reason?: string) => void;
   // Fired once per connection attempt, after the TCP connection itself
@@ -78,11 +80,12 @@ type LogFn = (level: Exclude<LogLevel, "none">, ...args: unknown[]) => void;
 const noopLog: LogFn = () => {};
 
 export class TelnetSession {
-  private socket: TelnetSocket | null = null;
-  // The raw TCP/TLS socket during the connect-in-progress window, before it's
-  // wrapped into `socket` by `establish()`. Needed so `isConnected`/`disconnect`/
+  // Set by `establish()` once the telnet session is up.
+  private socket: Socket | null = null;
+  // The TCP/TLS socket during the connect-in-progress window, before
+  // `establish()` promotes it to `socket`. Needed so `isConnected`/`disconnect`/
   // `teardown` still work while a TLS probe or plaintext fallback is in flight.
-  private pendingSocket: net.Socket | tls.TLSSocket | null = null;
+  private pendingSocket: Socket | null = null;
   private localEchoSuppressed = false;
   private nawsEnabled = false;
   private cols = 80;
@@ -172,7 +175,7 @@ export class TelnetSession {
     rawSocket.once("connect", () => {
       this.log("debug", "tcp connected (plaintext)");
       // Hand off to `establish()`, which attaches its own error/close
-      // handling on the wrapping TelnetSocket for the rest of the session.
+      // handling for the rest of the session.
       rawSocket.removeAllListeners("error");
       rawSocket.removeAllListeners("close");
       this.establish(rawSocket, false);
@@ -187,88 +190,108 @@ export class TelnetSession {
     });
   }
 
-  private establish(rawSocket: net.Socket | tls.TLSSocket, secure: boolean): void {
+  private establish(socket: Socket, secure: boolean): void {
     this.pendingSocket = null;
-    const telnetSocket = new TelnetSocket(rawSocket);
-    this.socket = telnetSocket;
+    this.socket = socket;
     this.handlers.onConnect(secure);
 
-    telnetSocket.on("data", (data) => {
-      this.handlers.onData(typeof data === "string" ? data : new Uint8Array(data));
+    const parser = new TelnetParser();
+    // One entry per supported option instead of a switch per verb, so adding
+    // an option (GMCP/MSDP/MCCP are MUD-specific extensions layered on top of
+    // telnet that would need this — out of scope for this pass) means adding
+    // one registry entry rather than touching the dispatch below. Anything
+    // with no entry (or no matching callback on its entry) falls back to
+    // refusing/ignoring.
+    const optionHandlers = this.buildOptionHandlers();
+
+    socket.on("data", (chunk: Buffer) => {
+      for (const event of parser.parse(chunk)) {
+        switch (event.type) {
+          case "data":
+            this.handlers.onData(event.data);
+            break;
+          case "negotiation":
+            this.log("debug", `recv IAC ${event.verb.toUpperCase()}`, event.option);
+            this.dispatchNegotiation(optionHandlers, event.verb, event.option);
+            break;
+          case "sub":
+            this.log("debug", "recv IAC SB", event.option, "len =", event.data.length);
+            optionHandlers[event.option]?.onSub?.(event.data);
+            break;
+          case "command":
+            break; // GA, NOP, etc. — nothing to do.
+        }
+      }
     });
 
-    // One entry per supported option instead of a switch per event type, so
-    // adding an option (GMCP/MSDP/MCCP are MUD-specific extensions layered on
-    // top of telnet that would need this — out of scope for this pass) means
-    // adding one registry entry rather than touching do/will/wont/sub below.
-    // Anything with no entry (or no matching callback on its entry) falls
-    // back to refusing/ignoring, same as the old switch statements' defaults.
-    const optionHandlers = this.buildOptionHandlers(telnetSocket);
-
-    telnetSocket.on("do", (option) => {
-      this.log("debug", "recv IAC DO", option);
-      const onDo = optionHandlers[option]?.onDo;
-      if (onDo) onDo();
-      else telnetSocket.writeWont(option);
-    });
-
-    telnetSocket.on("will", (option) => {
-      this.log("debug", "recv IAC WILL", option);
-      const onWill = optionHandlers[option]?.onWill;
-      if (onWill) onWill();
-      else telnetSocket.writeDont(option);
-    });
-
-    telnetSocket.on("wont", (option) => {
-      this.log("debug", "recv IAC WONT", option);
-      optionHandlers[option]?.onWont?.();
-    });
-
-    telnetSocket.on("sub", (option, buffer) => {
-      this.log("debug", "recv IAC SB", option, "len =", buffer.length);
-      optionHandlers[option]?.onSub?.(buffer);
-    });
-
-    telnetSocket.on("error", (err) => {
+    socket.on("error", (err) => {
       this.log("error", "socket error:", err.message);
       this.teardown(err.message);
     });
-    telnetSocket.on("close", () => {
+    socket.on("close", () => {
       this.log("debug", "socket closed");
       this.teardown();
     });
   }
 
-  private buildOptionHandlers(telnetSocket: TelnetSocket): Partial<Record<number, TelnetOptionHandler>> {
+  private dispatchNegotiation(
+    optionHandlers: Partial<Record<number, TelnetOptionHandler>>,
+    verb: NegotiationVerb,
+    option: number,
+  ): void {
+    const handler = optionHandlers[option];
+    switch (verb) {
+      case "do":
+        if (handler?.onDo) handler.onDo();
+        else this.writeNegotiation("wont", option);
+        break;
+      case "will":
+        if (handler?.onWill) handler.onWill();
+        else this.writeNegotiation("dont", option);
+        break;
+      case "wont":
+        handler?.onWont?.();
+        break;
+      case "dont":
+        // We never enable an option the server hasn't asked for, so there's
+        // nothing to turn off; not replying also avoids negotiation loops.
+        break;
+    }
+  }
+
+  private writeNegotiation(verb: NegotiationVerb, option: number): void {
+    this.socket?.write(encodeNegotiation(verb, option));
+  }
+
+  private buildOptionHandlers(): Partial<Record<number, TelnetOptionHandler>> {
     return {
       [TELOPT_NAWS]: {
         // Remote is asking us (DO) to send window-size updates.
         onDo: () => {
           this.nawsEnabled = true;
-          telnetSocket.writeWill(TELOPT_NAWS);
+          this.writeNegotiation("will", TELOPT_NAWS);
           this.sendNaws();
         },
       },
       [TELOPT_TTYPE]: {
-        onDo: () => telnetSocket.writeWill(TELOPT_TTYPE),
+        onDo: () => this.writeNegotiation("will", TELOPT_TTYPE),
         onSub: (buffer) => {
           if (buffer[0] === 1 /* SEND */) {
-            telnetSocket.writeSub(
-              TELOPT_TTYPE,
-              Buffer.concat([Buffer.from([0 /* IS */]), Buffer.from("XTERM", "ascii")]),
+            this.socket?.write(
+              encodeSub(TELOPT_TTYPE, Buffer.concat([Buffer.from([0 /* IS */]), Buffer.from("XTERM", "ascii")])),
             );
           }
         },
       },
       [TELOPT_SGA]: {
-        onDo: () => telnetSocket.writeWill(TELOPT_SGA),
-        onWill: () => telnetSocket.writeDo(TELOPT_SGA),
+        onDo: () => this.writeNegotiation("will", TELOPT_SGA),
+        onWill: () => this.writeNegotiation("do", TELOPT_SGA),
       },
       [TELOPT_ECHO]: {
         // Server takes over echoing — typically for password prompts.
         onWill: () => {
           this.localEchoSuppressed = true;
-          telnetSocket.writeDo(TELOPT_ECHO);
+          this.writeNegotiation("do", TELOPT_ECHO);
         },
         onWont: () => {
           this.localEchoSuppressed = false;
@@ -293,7 +316,7 @@ export class TelnetSession {
 
   sendLine(text: string): { echoed: boolean } {
     if (!this.socket) return { echoed: false };
-    this.socket.write(text.replace(/\n/g, "\r\n") + "\r\n");
+    this.socket.write(escapeIac(Buffer.from(text.replace(/\n/g, "\r\n") + "\r\n", "utf8")));
     return { echoed: !this.localEchoSuppressed };
   }
 
@@ -309,7 +332,7 @@ export class TelnetSession {
     const buffer = Buffer.alloc(4);
     buffer.writeUInt16BE(this.cols, 0);
     buffer.writeUInt16BE(this.rows, 2);
-    this.socket.writeSub(TELOPT_NAWS, buffer);
+    this.socket.write(encodeSub(TELOPT_NAWS, buffer));
   }
 
   disconnect(): void {
