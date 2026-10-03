@@ -29,7 +29,13 @@ its worlds-and-characters model and dialog, and its input/focus behavior.
   connecting without a character). Connecting pre-populates the scrollback with
   the last 2 MiB of that log. If several windows are connected to the same
   world and character, only the first reads and writes the log. The log grows
-  without bound for now.
+  without bound for now, as does the `moolin.log.times` file beside it (see
+  timestamps, below); delete or prune the two together.
+- **Line timestamps.** View > Show Timestamps adds a gutter showing when each
+  line from the server arrived, with the date wherever the day changes. The
+  times are display-only: they never appear in copied text or in the log,
+  and are kept in `moolin.log.times` so logged history keeps its times on
+  reconnect.
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
@@ -185,9 +191,11 @@ on the `PATH`.
 | `src/telnet-protocol.ts`  | Telnet byte-stream parser and command encoding (no I/O)                   |
 | `src/worlds.ts`           | Reading, validating and writing the worlds file                           |
 | `src/world-utils.ts`      | World helpers shared by main and renderer (defaults, labels, login templates) |
-| `src/scrollback-buffer.ts`| The per-window replay buffer                                              |
+| `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
+| `src/session-log.ts`      | Persistent per-world/character logs and their `.times` timestamp sidecar  |
+| `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
-| `src/renderer.ts`         | The terminal window's page: scrollback, input area, keys                  |
+| `src/renderer.ts`         | The terminal window's page: scrollback, timestamp gutter, input area, keys |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
 | `src/command-history.ts`  | Input history                                                             |
 | `src/input-undo.ts`       | Input area undo/redo                                                     |

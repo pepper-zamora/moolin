@@ -196,13 +196,9 @@ currently discards or never negotiates:
   show-only or hide-by-tag turns tags into a lightweight "channel" view
   (e.g. isolate just combat lines, or just tells) without needing full
   spawn/capture windows.
-- **Line timestamps**: recording when each line arrived and optionally
-  showing it. Moolin captures no per-line time at all — both the replay
-  buffer (`src/scrollback-buffer.ts`) and the session log
-  (`src/session-log.ts`) are raw byte streams storing "exactly what the
-  terminal was shown, escape sequences included," with no line model and no
-  embedded clock. How other clients do it varies, and the split matters for
-  Moolin:
+- **Line timestamps** — *now implemented*; kept here for the comparison and
+  the design notes. Other clients differ mainly in whether the time becomes
+  part of the line's text:
   - [MUSHclient](https://www.gammon.com.au/forum/bbshowpost.php?bbsubject_id=10625)
     (since v4.62) is the richest: an optional per-line timestamp drawn in a
     margin *and* a hover tooltip giving the exact time (with the day) for
@@ -224,26 +220,44 @@ currently discards or never negotiates:
     session *log*, and a separate community plugin
     ([blightmud-timestamp](https://github.com/Blightmud/blightmud-timestamp))
     prepends `[hh:mm:ss]` to displayed lines by rewriting them.
-  MUSHclient's display-only model is the one worth copying here, precisely
-  because of the trigger/search work above: you don't want the clock baked
-  into the line text where a trigger, the scrollback search (this section)
-  or the session log would then have to see and skip it. xterm.js has no
-  dedicated timestamp gutter, but it does have a decorations/marker API
-  (`registerMarker` + `registerDecoration`) that anchors overlay elements to
-  buffer lines — the same mechanism VS Code's terminal uses for its
-  command-navigation gutter marks — so a timestamp margin (and the
-  Blightmud-style per-line tag marks in §1, which would share it) is an
-  overlay layer, not buffer text, keeping the display-only property for
-  free. A natural shape: a checkbox item in the existing **View** menu
-  (`src/main.ts`, alongside Clear Screen / Zoom) toggling the overlay, with
-  the arrival time stamped via a marker as each newline is written in
-  `write()` (`src/terminal-window.ts`), where the wall-clock time is known.
-  The honest limitation is history: lines replayed after a renderer reload,
-  and the log tail loaded on connect, carry no time (the log never recorded
-  one), so a first cut only timestamps lines received live this session
-  unless the log format grows a per-line clock. "Per line" also presumes
-  knowing where lines break, which the byte-chunk buffer doesn't track today
-  — the same missing line/prompt model that EOR/GA detection touches in §6.
+
+  Moolin follows MUSHclient's display-only model, so the clock never enters
+  the line text that copy, the session log, and future triggers (§1) and
+  scrollback search would otherwise have to skip. How it fits together:
+  - **Display.** **View > Show Timestamps** toggles a gutter to the left of
+    the scrollback (`#gutter` in `src/index.html`, drawn by `renderGutter`
+    in `src/renderer.ts`). It is a separate element kept aligned to the
+    viewport rather than an xterm decoration, since decorations are drawn
+    inside the terminal's columns. Each stamped line is anchored by an
+    xterm marker, which follows the line as the buffer scrolls and goes
+    away when the line leaves the scrollback. Labels are 12-hour,
+    minute-resolution (`9:05p`), shown once per run of same-minute lines,
+    with the date floated above the first line of each day.
+  - **What gets a time.** Only server output (`writeServerData` in
+    `src/terminal-window.ts`, stamped with its arrival time). Moolin's own
+    lines — connection status, warnings, echoed commands, Clear Screen's
+    blank filler — go through `writeStatus` and carry `null`, so the gutter
+    leaves them blank.
+  - **Line model.** Rather than tracking line breaks in the byte stream,
+    every layer keeps one time per *line feed*, counted by
+    `countLineFeeds` (`src/line-feeds.ts`; LF, VT and FF, the bytes xterm
+    feeds a line for). The renderer queues the times as it writes and pops
+    one each time xterm fires `onLineFeed`, so the stamps match the lines
+    exactly however the bytes were chunked. Wrapped rows don't fire it, and
+    a stamp lands on its logical line's first row.
+  - **History.** The replay buffer (`src/scrollback-buffer.ts`) keeps the
+    times alongside its chunks, so a renderer reload restores them. The
+    session log stays a plain byte stream; its times go in a sidecar,
+    `moolin.log.times`, holding one little-endian float64 (epoch ms; NaN
+    for no time) per line feed. On connect, the log tail's times are read
+    back from the sidecar's end (`readTimesTail` in `src/session-log.ts`).
+    Lines logged before the sidecar existed come back unstamped. Both files
+    are written synchronously so they're always on disk together, and a
+    record torn by a crash is read as one unknown time and repaired before
+    the next append, so it can't shift the rest.
+  - **Not done.** There's no hover tooltip with the exact time, and no
+    seconds or configurable format. Neither the sidecar nor the log is
+    pruned.
 - **Tab completion**: completing a partial word against recent scrollback
   output or command history (Blightmud; also common in Mudlet/MUSHclient).
   Moolin's input box has history recall (Up/Down) but no completion.
@@ -282,11 +296,8 @@ currently discards or never negotiates:
    API" work (xterm.js has a search addon; Electron/Chromium's spellchecker
    is available for free in any text input) rather than new design surface.
    Low-hanging fruit, worth doing first regardless of where the rest of
-   this list goes. **Line timestamps** (§8) belong in the same tier: also
-   self-contained and scripting-independent, though slightly more than
-   "wire up a library" since they need an xterm.js decorations overlay and
-   a per-line arrival time captured live — and, done the display-only way,
-   they also lay down the gutter overlay that later tag marks (§1) reuse.
+   this list goes. (**Line timestamps**, once in this tier, are done; see
+   §8. Their gutter is where later tag marks (§1) could go.)
 2. **Triggers** (match + highlight/gag/send/script actions) and **aliases**
    — the two most-depended-on features; almost nothing else in this list is
    useful without them.
