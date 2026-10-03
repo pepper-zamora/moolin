@@ -392,7 +392,10 @@ ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRe
   buildMenu(terminal);
 });
 
-ipcMain.handle(IpcChannels.terminalGetScrollback, (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [] });
+ipcMain.handle(
+  IpcChannels.terminalGetScrollback,
+  (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [] },
+);
 
 ipcMain.handle(
   IpcChannels.connectionGetState,
