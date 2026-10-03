@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { countLineFeeds } from "./line-feeds";
 import type { Character, World } from "./worlds-types";
 import { characterLabel, worldLabel } from "./world-utils";
 
@@ -13,16 +14,6 @@ const TIME_BYTES = 8;
 
 function timesFileFor(logFile: string): string {
   return logFile + TIMES_FILE_SUFFIX;
-}
-
-function countNewlines(data: string | Uint8Array): number {
-  let count = 0;
-  if (typeof data === "string") {
-    for (let i = 0; i < data.length; i++) if (data.charCodeAt(i) === 0x0a) count++;
-  } else {
-    for (let i = 0; i < data.length; i++) if (data[i] === 0x0a) count++;
-  }
-  return count;
 }
 
 // Makes a world or character name safe to use as one directory name: path
@@ -77,8 +68,8 @@ export function readLogTail(file: string, maxBytes: number): Uint8Array {
 // The arrival times of the last `lineCount` logged lines, in order, read from
 // the sidecar. A line with no recorded time comes back as null: lines from
 // before the sidecar existed are left-padded with null so the result always
-// has exactly `lineCount` entries, aligned to the log tail (whose newlines
-// are, by definition, the file's last `lineCount` newlines). A torn final
+// has exactly `lineCount` entries, aligned to the log tail (whose line feeds
+// are, by definition, the file's last `lineCount` line feeds). A torn final
 // record — the app died mid-write, leaving a size that isn't a whole number of
 // records — still stands for its line, as a trailing null; records are counted
 // from the start of the file, which repairTimesFile keeps valid on reopen.
@@ -106,7 +97,7 @@ export function readTimesTail(file: string, lineCount: number): Array<number | n
     const times: Array<number | null> = new Array(lineCount - got - (torn ? 1 : 0)).fill(null);
     for (let i = 0; i < got; i++) {
       // NaN marks a line that carries no timestamp (e.g. Moolin's own status
-      // lines); it still gets an entry so the file stays aligned to newlines.
+      // lines); it still gets an entry so the file stays aligned to line feeds.
       const value = buffer.readDoubleLE(i * TIME_BYTES);
       times.push(Number.isNaN(value) ? null : value);
     }
@@ -137,7 +128,7 @@ function repairTimesFile(file: string): void {
 }
 
 // A log's recent bytes plus the matching per-line arrival times; the times
-// align one-to-one with the newlines in `bytes` (see readTimesTail).
+// align one-to-one with the line feeds in `bytes` (see readTimesTail).
 export interface LogHistory {
   bytes: Uint8Array;
   times: Array<number | null>;
@@ -172,7 +163,7 @@ export class SessionLog {
   // pre-populating the scrollback. Call before the first append.
   history(maxBytes: number): LogHistory {
     const bytes = readLogTail(this.file, maxBytes);
-    const times = readTimesTail(timesFileFor(this.file), countNewlines(bytes));
+    const times = readTimesTail(timesFileFor(this.file), countLineFeeds(bytes));
     return { bytes, times };
   }
 
@@ -189,11 +180,11 @@ export class SessionLog {
         this.timesFd = fs.openSync(timesFileFor(this.file), "a");
       }
       writeAll(this.fd, typeof data === "string" ? Buffer.from(data, "utf8") : data);
-      const newlines = countNewlines(data);
-      if (newlines > 0 && this.timesFd !== null) {
-        const buffer = Buffer.alloc(newlines * TIME_BYTES);
+      const lineFeeds = countLineFeeds(data);
+      if (lineFeeds > 0 && this.timesFd !== null) {
+        const buffer = Buffer.alloc(lineFeeds * TIME_BYTES);
         // null → NaN on disk, read back as null (see readTimesTail).
-        for (let i = 0; i < newlines; i++) buffer.writeDoubleLE(time ?? Number.NaN, i * TIME_BYTES);
+        for (let i = 0; i < lineFeeds; i++) buffer.writeDoubleLE(time ?? Number.NaN, i * TIME_BYTES);
         writeAll(this.timesFd, buffer);
       }
     } catch (error) {

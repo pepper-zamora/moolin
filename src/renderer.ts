@@ -8,6 +8,7 @@ import { worldsDialog } from "./worlds-dialog";
 import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
 import { InputUndoStack, type InputSnapshot } from "./input-undo";
 import type { ConnectionState } from "./connection-manager";
+import { countLineFeeds } from "./line-feeds";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 
 window.addEventListener("error", (event) => {
@@ -103,24 +104,14 @@ let timestampsShown = false;
 // The time (epoch ms) to stamp onto each upcoming line, or null for a line
 // that gets no stamp — Moolin's own status lines, Clear Screen's blank filler,
 // and replayed history with no recorded time. Filled in the same order lines
-// are written and consumed one per onLineFeed (which fires once per newline),
-// so every line gets exactly the time recorded for it.
+// are written and consumed one per onLineFeed (which fires once for each byte
+// countLineFeeds counts), so every line gets exactly the time recorded for it.
 const stampQueue: Array<number | null> = [];
-
-function countNewlines(data: string | Uint8Array): number {
-  let count = 0;
-  if (typeof data === "string") {
-    for (let i = 0; i < data.length; i++) if (data.charCodeAt(i) === 0x0a) count++;
-  } else {
-    for (let i = 0; i < data.length; i++) if (data[i] === 0x0a) count++;
-  }
-  return count;
-}
 
 // Writes a chunk and queues `time` (or null) for each line it contains, so the
 // onLineFeed handler stamps them in step.
 function writeStamped(data: string | Uint8Array, time: number | null): void {
-  for (let i = 0, n = countNewlines(data); i < n; i++) stampQueue.push(time);
+  for (let i = 0, n = countLineFeeds(data); i < n; i++) stampQueue.push(time);
   term.write(data);
 }
 
@@ -154,7 +145,7 @@ function cellHeight(): number {
 function stampLine(time: Date): void {
   const buffer = term.buffer.active;
   const cursorAbs = buffer.baseY + buffer.cursorY;
-  // The newline moved the cursor off the line it ended; that line is the one
+  // The line feed moved the cursor off the line it ended; that line is the one
   // just above the cursor. Walk back over wrapped continuation rows so the
   // stamp lands on the logical line's first visual row, not its last.
   let startAbs = cursorAbs - 1;
@@ -252,7 +243,7 @@ function scheduleGutter(): void {
 }
 
 term.onLineFeed(() => {
-  // One queued time per newline; null means this line carries no stamp.
+  // One queued time per line feed; null means this line carries no stamp.
   const time = stampQueue.shift();
   if (time != null) stampLine(new Date(time));
 });
