@@ -187,19 +187,59 @@ function buildMenu(terminal: TerminalWindow): void {
       ],
     },
     {
-      // Not the built-in "editMenu" role: its Cut/Copy/Paste/Select All rely
-      // on Chromium's native edit commands against the focused DOM selection,
-      // which don't reliably reach into xterm.js's canvas/WebGL-rendered
-      // selection. These items carry no accelerator so Ctrl+X/C/V stay owned
-      // by the renderer's own keydown handling (see renderer.ts), and just
-      // forward here for menu-bar/discoverability use.
+      // Not the built-in "editMenu" role: its items rely on Chromium's
+      // native edit commands against the focused DOM selection, which don't
+      // reliably reach into xterm.js's canvas/WebGL-rendered selection (for
+      // Cut/Copy/Paste), and whose native undo stack is unusable here anyway
+      // (see input-undo.ts). Every item below carries a display-only
+      // accelerator (`registerAccelerator: false`): the shortcut text shows
+      // up for discoverability, matching the Worlds/View menus, but the key
+      // itself is never actually bound here — that would intercept it
+      // window-wide, hijacking native editing in the Worlds dialog's own
+      // text fields. The renderer's own keydown handling (see renderer.ts)
+      // stays the single source of truth for what these keys do.
       label: "&Edit",
       submenu: [
-        { label: "Cu&t", click: () => terminal.send(IpcChannels.terminalCutRequested) },
-        { label: "&Copy", click: () => terminal.send(IpcChannels.terminalCopyRequested) },
-        { label: "&Paste", click: () => terminal.send(IpcChannels.terminalPasteRequested) },
+        {
+          label: "&Undo",
+          accelerator: "CmdOrCtrl+Z",
+          registerAccelerator: false,
+          enabled: terminal.canUndoInput,
+          click: () => terminal.send(IpcChannels.terminalUndoRequested),
+        },
+        {
+          label: "&Redo",
+          accelerator: "CmdOrCtrl+Shift+Z",
+          registerAccelerator: false,
+          enabled: terminal.canRedoInput,
+          click: () => terminal.send(IpcChannels.terminalRedoRequested),
+        },
         { type: "separator" },
-        { label: "Select &All", click: () => terminal.send(IpcChannels.terminalSelectAllRequested) },
+        {
+          label: "Cu&t",
+          accelerator: "CmdOrCtrl+X",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalCutRequested),
+        },
+        {
+          label: "&Copy",
+          accelerator: "CmdOrCtrl+C",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalCopyRequested),
+        },
+        {
+          label: "&Paste",
+          accelerator: "CmdOrCtrl+V",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalPasteRequested),
+        },
+        { type: "separator" },
+        {
+          label: "Select &All",
+          accelerator: "CmdOrCtrl+A",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalSelectAllRequested),
+        },
       ],
     },
     {
@@ -227,6 +267,15 @@ function buildMenu(terminal: TerminalWindow): void {
           label: "&Actual Size",
           accelerator: "CmdOrCtrl+0",
           click: () => terminal.send(IpcChannels.terminalZoom, 0),
+        },
+        { type: "separator" },
+        {
+          // Rebound from the terminal convention of Ctrl+Y, which is now
+          // the input box's redo shortcut (see renderer.ts).
+          label: "&Clear Screen",
+          accelerator: "Ctrl+L",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalClearScreenRequested),
         },
         { type: "separator" },
         { role: "togglefullscreen", label: "Toggle &Full Screen" },
@@ -320,6 +369,15 @@ ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
 ipcMain.on(IpcChannels.telnetResize, (event, { cols, rows }: { cols: number; rows: number }) => {
   log("debug", "main", "terminal resized to", `${cols}x${rows}`);
   terminalFor(event)?.connection.resize(cols, rows);
+});
+
+// Keeps the Edit menu's Undo/Redo items' enabled state in sync with the
+// renderer's input-undo stack.
+ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRedo: boolean) => {
+  const terminal = terminalFor(event);
+  if (!terminal) return;
+  terminal.setUndoState(canUndo, canRedo);
+  buildMenu(terminal);
 });
 
 ipcMain.handle(IpcChannels.terminalGetScrollback, (event) => terminalFor(event)?.getScrollback() ?? []);

@@ -35,6 +35,11 @@ export class TerminalWindow {
   readonly connection: ConnectionManager;
   private readonly scrollback = new ScrollbackBuffer(MAX_SCROLLBACK_BYTES);
   private menu: Menu | null = null;
+  // Reported by the renderer whenever the input's undo/redo stacks change,
+  // so the Edit menu's Undo/Redo items can be rebuilt with the right
+  // `enabled` state (see buildMenu in main.ts).
+  canUndoInput = false;
+  canRedoInput = false;
   // The persistent log of this window's connection, or null when not
   // connecting, or when another window already owns that world/character's log.
   private sessionLog: SessionLog | null = null;
@@ -88,6 +93,11 @@ export class TerminalWindow {
       handlers.onClosed(this);
     });
     this.window.loadFile(options.indexHtmlPath);
+  }
+
+  setUndoState(canUndo: boolean, canRedo: boolean): void {
+    this.canUndoInput = canUndo;
+    this.canRedoInput = canRedo;
   }
 
   setMenu(menu: Menu): void {

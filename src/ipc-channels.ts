@@ -24,6 +24,12 @@ export const IpcChannels = {
   terminalCutRequested: "terminal:cutRequested",
   terminalPasteRequested: "terminal:pasteRequested",
   terminalSelectAllRequested: "terminal:selectAllRequested",
+  terminalUndoRequested: "terminal:undoRequested",
+  terminalRedoRequested: "terminal:redoRequested",
+  // renderer -> main: whether the input's undo/redo stacks are non-empty, to
+  // keep the Edit menu's Undo/Redo items' enabled state in sync.
+  terminalUndoStateChanged: "terminal:undoStateChanged",
+  terminalClearScreenRequested: "terminal:clearScreenRequested",
   connectionGetState: "connection:getState",
   connectionState: "connection:state",
   clipboardWriteText: "clipboard:writeText",

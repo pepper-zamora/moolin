@@ -32,6 +32,10 @@ declare global {
       onCutRequested(callback: () => void): void;
       onPasteRequested(callback: () => void): void;
       onSelectAllRequested(callback: () => void): void;
+      onUndoRequested(callback: () => void): void;
+      onRedoRequested(callback: () => void): void;
+      onClearScreenRequested(callback: () => void): void;
+      reportUndoState(canUndo: boolean, canRedo: boolean): void;
       log(level: Exclude<LogLevel, "none">, scope: string, ...args: unknown[]): void;
     };
   }

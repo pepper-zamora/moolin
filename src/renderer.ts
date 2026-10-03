@@ -6,6 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { worldsDialog } from "./worlds-dialog";
 import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
+import { InputUndoStack, type InputSnapshot } from "./input-undo";
 import type { ConnectionState } from "./connection-manager";
 
 window.addEventListener("error", (event) => {
@@ -103,15 +104,53 @@ function resizeInput(): void {
 }
 
 const history = new CommandHistory();
+const inputUndo = new InputUndoStack();
+
+function inputSnapshot(): InputSnapshot {
+  return {
+    value: inputArea.value,
+    selectionStart: inputArea.selectionStart,
+    selectionEnd: inputArea.selectionEnd,
+  };
+}
+
+function reportUndoState(): void {
+  window.moolin.reportUndoState(inputUndo.canUndo(), inputUndo.canRedo());
+}
+
+function applySnapshot(snapshot: InputSnapshot): void {
+  inputArea.value = snapshot.value;
+  inputArea.selectionStart = snapshot.selectionStart;
+  inputArea.selectionEnd = snapshot.selectionEnd;
+  resizeInput();
+}
+
+function undoInput(): void {
+  const snapshot = inputUndo.undo(inputSnapshot());
+  if (!snapshot) return;
+  applySnapshot(snapshot);
+  reportUndoState();
+}
+
+function redoInput(): void {
+  const snapshot = inputUndo.redo(inputSnapshot());
+  if (!snapshot) return;
+  applySnapshot(snapshot);
+  reportUndoState();
+}
 
 function showHistoryEntry(entry: string | null): void {
   if (entry === null) return;
+  inputUndo.breakGroup();
+  reportUndoState();
   inputArea.value = entry;
   inputArea.selectionStart = inputArea.selectionEnd = inputArea.value.length;
   resizeInput();
 }
 
 function sendInput(): void {
+  inputUndo.breakGroup();
+  reportUndoState();
   const text = inputArea.value;
   inputArea.value = "";
   resizeInput();
@@ -167,6 +206,14 @@ inputArea.addEventListener("keydown", (event) => {
 
 inputArea.addEventListener("input", () => resizeInput());
 
+// Captured before the value mutates (unlike "input", which fires after), so
+// the pre-edit state can be pushed as an undo step. Consecutive keystrokes
+// coalesce into one step via InputUndoStack's own debounce.
+inputArea.addEventListener("beforeinput", () => {
+  inputUndo.pushTyping(inputSnapshot(), Date.now());
+  reportUndoState();
+});
+
 window.addEventListener("resize", () => resizeInput());
 
 // Keyboard focus belongs in the input area whenever the window has it,
@@ -210,9 +257,11 @@ function cutSelection(): void {
   const text = inputArea.value.slice(selectionStart, selectionEnd);
   if (text.length === 0) return;
   window.moolin.clipboard.writeText(text);
+  inputUndo.pushDiscrete(inputSnapshot());
   inputArea.value = inputArea.value.slice(0, selectionStart) + inputArea.value.slice(selectionEnd);
   inputArea.selectionStart = inputArea.selectionEnd = selectionStart;
   resizeInput();
+  reportUndoState();
 }
 
 // The terminal is output-only, so pasted text always lands in the input
@@ -225,21 +274,30 @@ async function pasteIntoInput(): Promise<void> {
   const active = document.activeElement === inputArea;
   const start = active ? inputArea.selectionStart : inputArea.value.length;
   const end = active ? inputArea.selectionEnd : inputArea.value.length;
+  inputUndo.pushDiscrete(inputSnapshot());
   inputArea.value = inputArea.value.slice(0, start) + text + inputArea.value.slice(end);
   inputArea.focus();
   inputArea.selectionStart = inputArea.selectionEnd = start + text.length;
   resizeInput();
+  reportUndoState();
 }
 
 window.moolin.onCopyRequested(() => copySelection());
 window.moolin.onCutRequested(() => cutSelection());
 window.moolin.onPasteRequested(() => void pasteIntoInput());
 window.moolin.onSelectAllRequested(() => term.selectAll());
+window.moolin.onUndoRequested(() => undoInput());
+window.moolin.onRedoRequested(() => redoInput());
+window.moolin.onClearScreenRequested(() => clearToOffscreen());
+
+// Starts the Edit menu's Undo/Redo items disabled until there's anything to act on.
+reportUndoState();
 
 // Window-wide keys, captured at the document so they apply wherever focus is
-// and run before xterm's own handling. No accelerator claims Ctrl/Cmd+C or +V
-// at the menu level (see main.ts), so they reach here as normal keydowns;
-// preventDefault suppresses the browser's native (unreliable) copy/paste.
+// and run before xterm's own handling. No menu item registers these as real
+// accelerators (see main.ts), so they reach here as normal keydowns;
+// preventDefault suppresses the browser's native (unreliable, and in the case
+// of undo, already-broken — see input-undo.ts) handling.
 document.addEventListener(
   "keydown",
   (event) => {
@@ -254,7 +312,14 @@ document.addEventListener(
       cutSelection();
     } else if (mod && key === "v") {
       void pasteIntoInput();
-    } else if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === "y") {
+    } else if (mod && key === "z" && !event.shiftKey) {
+      undoInput();
+    } else if (
+      (mod && key === "z" && event.shiftKey) ||
+      (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === "y")
+    ) {
+      redoInput();
+    } else if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === "l") {
       clearToOffscreen();
     } else if (event.key === "PageUp" || event.key === "PageDown") {
       // Home/End are left to the input area.

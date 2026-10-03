@@ -64,6 +64,18 @@ contextBridge.exposeInMainWorld("moolin", {
   onSelectAllRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalSelectAllRequested, () => callback());
   },
+  onUndoRequested: (callback: () => void): void => {
+    ipcRenderer.on(IpcChannels.terminalUndoRequested, () => callback());
+  },
+  onRedoRequested: (callback: () => void): void => {
+    ipcRenderer.on(IpcChannels.terminalRedoRequested, () => callback());
+  },
+  onClearScreenRequested: (callback: () => void): void => {
+    ipcRenderer.on(IpcChannels.terminalClearScreenRequested, () => callback());
+  },
+  reportUndoState: (canUndo: boolean, canRedo: boolean): void => {
+    ipcRenderer.send(IpcChannels.terminalUndoStateChanged, canUndo, canRedo);
+  },
   log: (level: Exclude<LogLevel, "none">, scope: string, ...args: unknown[]): void => {
     if (!isEnabled(currentLogLevel, level)) return;
     ipcRenderer.send(IpcChannels.logEmit, level, scope, args);
