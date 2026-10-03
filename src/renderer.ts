@@ -247,13 +247,10 @@ term.onLineFeed(() => {
   const time = stampQueue.shift();
   if (time != null) stampLine(new Date(time));
 });
+// Re-render on new output and on any scroll — xterm fires onScroll for the
+// wheel and scrollbar as well as for output pushing the buffer up.
 term.onRender(() => scheduleGutter());
 term.onScroll(() => scheduleGutter());
-// onScroll covers buffer scroll; scrolling up through history with the
-// wheel/scrollbar only moves the viewport element, so track that too.
-terminalContainer
-  .querySelector<HTMLElement>(".xterm-viewport")
-  ?.addEventListener("scroll", scheduleGutter, { passive: true });
 
 function lineHeightPx(): number {
   const lh = parseFloat(window.getComputedStyle(inputArea).lineHeight);
@@ -525,9 +522,6 @@ document.addEventListener("contextmenu", (event) => {
   window.moolin.showContextMenu({ hasSelection: term.hasSelection() });
 });
 
-// Replay the main process's in-memory scrollback buffer (survives a reload),
-// then subscribe to live data — in that order, so nothing arriving during the
-// fetch gets written twice.
 // Replays buffered history (the in-memory buffer on reload, or a world's log
 // on connect), queuing the recorded arrival time for each of its lines so the
 // onLineFeed handler restamps them. Lines with no recorded time (null — old
@@ -537,6 +531,9 @@ function writeReplay(replay: ScrollbackReplay): void {
   for (const chunk of replay.chunks) term.write(chunk);
 }
 
+// Replay the main process's in-memory scrollback buffer (survives a reload),
+// then subscribe to live data — in that order, so nothing arriving during the
+// fetch gets written twice.
 async function loadScrollback(): Promise<void> {
   const replay = await window.moolin.getScrollback();
   window.moolin.log("debug", "renderer", "replaying", replay.chunks.length, "buffered chunk(s)");
