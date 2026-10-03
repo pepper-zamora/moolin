@@ -1,6 +1,6 @@
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { Character, MruEntry, World } from "./worlds-types";
 import { DEFAULT_LOGIN_TEMPLATE, isValidPort } from "./world-utils";
 import { log } from "./logger";
@@ -46,8 +46,8 @@ function parseCharacter(value: unknown): Character | null {
 }
 
 // Validates one world record from disk (or from a renderer) and fills in
-// defaults for fields added since it was written, so older files — including
-// moolin v1's {id, name, host, port} records — load as-is. Returns null for
+// defaults for any fields missing since the file was written, so a field
+// added in a later version doesn't break older files. Returns null for
 // anything malformed, so a hand-edited or corrupted entry can't flow straight
 // into net.connect(). An out-of-range port is cleared rather than rejected,
 // since that's just an unfinished edit.
@@ -91,9 +91,7 @@ export function parseWorld(value: unknown): World | null {
   };
 }
 
-// moolin v1 stored MRU entries as bare world ids.
 function parseMruEntry(value: unknown): MruEntry | null {
-  if (isString(value)) return { worldId: value };
   if (!isObject(value) || !isString(value.worldId)) return null;
   if (value.characterId !== undefined && !isString(value.characterId)) return null;
   return value.characterId === undefined
@@ -139,7 +137,7 @@ function writeState(filePath: string, state: WorldsState): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = path.join(dir, `.${path.basename(filePath)}.tmp-${process.pid}`);
-  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2) + "\n", "utf-8");
+  fs.writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
   fs.renameSync(tmpPath, filePath);
 }
 

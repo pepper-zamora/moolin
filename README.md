@@ -150,8 +150,7 @@ Character passwords are stored in this file **in plain text**.
 Writes are atomic (write to a temporary file, then rename). If the file
 exists but can't be read or parsed, the Worlds dialog says so and Moolin
 refuses to save over it, so a typo from hand-editing doesn't cost you your
-worlds. Malformed individual entries are skipped with a warning. Files written
-by moolin v1 or Moolin load as-is.
+worlds. Malformed individual entries are skipped with a warning.
 
 ## Command-line options
 
