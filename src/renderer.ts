@@ -198,6 +198,23 @@ function copySelection(): void {
   }
 }
 
+// The scrollback is read-only, so a scrollback selection can't actually be
+// removed — Cut just falls back to Copy in that case. Otherwise it cuts from
+// the input area like a normal text field.
+function cutSelection(): void {
+  if (term.hasSelection()) {
+    copySelection();
+    return;
+  }
+  const { selectionStart, selectionEnd } = inputArea;
+  const text = inputArea.value.slice(selectionStart, selectionEnd);
+  if (text.length === 0) return;
+  window.moolin.clipboard.writeText(text);
+  inputArea.value = inputArea.value.slice(0, selectionStart) + inputArea.value.slice(selectionEnd);
+  inputArea.selectionStart = inputArea.selectionEnd = selectionStart;
+  resizeInput();
+}
+
 // The terminal is output-only, so pasted text always lands in the input
 // area — at the current cursor/selection if it's focused, otherwise appended
 // at the end.
@@ -215,6 +232,7 @@ async function pasteIntoInput(): Promise<void> {
 }
 
 window.moolin.onCopyRequested(() => copySelection());
+window.moolin.onCutRequested(() => cutSelection());
 window.moolin.onPasteRequested(() => void pasteIntoInput());
 window.moolin.onSelectAllRequested(() => term.selectAll());
 
@@ -232,6 +250,8 @@ document.addEventListener(
     let handled = true;
     if (mod && key === "c") {
       copySelection();
+    } else if (mod && key === "x") {
+      cutSelection();
     } else if (mod && key === "v") {
       void pasteIntoInput();
     } else if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === "y") {

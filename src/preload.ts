@@ -55,6 +55,9 @@ contextBridge.exposeInMainWorld("moolin", {
   onCopyRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalCopyRequested, () => callback());
   },
+  onCutRequested: (callback: () => void): void => {
+    ipcRenderer.on(IpcChannels.terminalCutRequested, () => callback());
+  },
   onPasteRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalPasteRequested, () => callback());
   },

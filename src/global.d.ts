@@ -29,6 +29,7 @@ declare global {
       openExternal(url: string): void;
       showContextMenu(options: { hasSelection: boolean }): void;
       onCopyRequested(callback: () => void): void;
+      onCutRequested(callback: () => void): void;
       onPasteRequested(callback: () => void): void;
       onSelectAllRequested(callback: () => void): void;
       log(level: Exclude<LogLevel, "none">, scope: string, ...args: unknown[]): void;

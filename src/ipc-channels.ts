@@ -21,6 +21,7 @@ export const IpcChannels = {
   terminalZoom: "terminal:zoom",
   terminalContextMenu: "terminal:contextMenu",
   terminalCopyRequested: "terminal:copyRequested",
+  terminalCutRequested: "terminal:cutRequested",
   terminalPasteRequested: "terminal:pasteRequested",
   terminalSelectAllRequested: "terminal:selectAllRequested",
   connectionGetState: "connection:getState",

@@ -187,14 +187,15 @@ function buildMenu(terminal: TerminalWindow): void {
       ],
     },
     {
-      // Not the built-in "editMenu" role: its Copy/Paste/Select All rely on
-      // Chromium's native edit commands against the focused DOM selection,
+      // Not the built-in "editMenu" role: its Cut/Copy/Paste/Select All rely
+      // on Chromium's native edit commands against the focused DOM selection,
       // which don't reliably reach into xterm.js's canvas/WebGL-rendered
-      // selection. These items carry no accelerator so Ctrl+C/V stay owned
+      // selection. These items carry no accelerator so Ctrl+X/C/V stay owned
       // by the renderer's own keydown handling (see renderer.ts), and just
       // forward here for menu-bar/discoverability use.
       label: "&Edit",
       submenu: [
+        { label: "Cu&t", click: () => terminal.send(IpcChannels.terminalCutRequested) },
         { label: "&Copy", click: () => terminal.send(IpcChannels.terminalCopyRequested) },
         { label: "&Paste", click: () => terminal.send(IpcChannels.terminalPasteRequested) },
         { type: "separator" },
@@ -343,6 +344,7 @@ ipcMain.on(IpcChannels.shellOpenExternal, (_event, url: string) => {
 ipcMain.on(IpcChannels.terminalContextMenu, (event, options: { hasSelection: boolean }) => {
   const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const template: Electron.MenuItemConstructorOptions[] = [
+    { label: "Cut", enabled: options.hasSelection, click: () => event.sender.send(IpcChannels.terminalCutRequested) },
     { label: "Copy", enabled: options.hasSelection, click: () => event.sender.send(IpcChannels.terminalCopyRequested) },
     { label: "Paste", click: () => event.sender.send(IpcChannels.terminalPasteRequested) },
     { type: "separator" },
