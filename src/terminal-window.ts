@@ -72,8 +72,8 @@ export class TerminalWindow {
           handlers.onStateChange(this);
           this.send(IpcChannels.connectionState, this.connection.getState());
         },
-        onMessage: (text) => this.write(text),
-        onData: (data) => this.write(data),
+        onMessage: (text) => this.writeStatus(text),
+        onData: (data) => this.writeServerData(data),
         onConnected: (target) => handlers.onConnected(target),
       },
       (level, ...args) => log(level, `telnet:${id}`, ...args),
@@ -138,19 +138,32 @@ export class TerminalWindow {
     this.send(IpcChannels.terminalReset, this.getScrollback());
     if (!this.sessionLog) {
       const label = targetLabel(target.world, target.character);
-      this.write(
+      this.writeStatus(
         `\x1b[33m[warning: logging for ${label} is active in another window; this window will not be logged]\x1b[0m\r\n`,
       );
     }
   }
 
-  // Appends to the scrollback, both live and in the replay buffer, and to
-  // the session log if this window owns one.
-  write(data: TerminalChunk): void {
-    const time = Date.now();
+  // Server output, timestamped with its arrival time (the only lines that get
+  // a timestamp in the gutter).
+  writeServerData(data: TerminalChunk): void {
+    this.write(data, Date.now());
+  }
+
+  // Moolin's own lines — connection status, warnings, echoed commands. Logged
+  // and shown like server output but never timestamped (time null), so the
+  // gutter leaves them blank and the first real server line keeps the stamp.
+  writeStatus(data: TerminalChunk): void {
+    this.write(data, null);
+  }
+
+  // Appends to the scrollback, both live and in the replay buffer, and to the
+  // session log if this window owns one. `time` is the line's arrival time, or
+  // null for lines that carry no timestamp.
+  private write(data: TerminalChunk, time: number | null): void {
     this.sessionLog?.append(data, time);
     this.scrollback.append(data, time);
-    this.send(IpcChannels.telnetData, data);
+    this.send(IpcChannels.telnetData, data, time);
   }
 
   getScrollback(): ScrollbackReplay {

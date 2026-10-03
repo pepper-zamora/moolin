@@ -99,7 +99,12 @@ export function readTimesTail(file: string, lineCount: number): Array<number | n
     }
     const got = Math.floor(read / TIME_BYTES);
     const times: Array<number | null> = new Array(lineCount - got).fill(null);
-    for (let i = 0; i < got; i++) times.push(buffer.readDoubleLE(i * TIME_BYTES));
+    for (let i = 0; i < got; i++) {
+      // NaN marks a line that carries no timestamp (e.g. Moolin's own status
+      // lines); it still gets an entry so the file stays aligned to newlines.
+      const value = buffer.readDoubleLE(i * TIME_BYTES);
+      times.push(Number.isNaN(value) ? null : value);
+    }
     return times;
   } finally {
     fs.closeSync(fd);
@@ -134,8 +139,9 @@ export class SessionLog {
   }
 
   // Appends exactly what the terminal was shown, escape sequences included,
-  // and records `time` (epoch ms) in the sidecar for each line it completes.
-  append(data: string | Uint8Array, time: number): void {
+  // and records `time` (epoch ms, or null for a line with no timestamp) in the
+  // sidecar for each line it completes.
+  append(data: string | Uint8Array, time: number | null): void {
     if (this.closed) return;
     if (!this.stream) {
       try {
@@ -153,7 +159,8 @@ export class SessionLog {
     const newlines = countNewlines(data);
     if (newlines > 0 && this.timesStream) {
       const buffer = Buffer.alloc(newlines * TIME_BYTES);
-      for (let i = 0; i < newlines; i++) buffer.writeDoubleLE(time, i * TIME_BYTES);
+      // null → NaN on disk, read back as null (see readTimesTail).
+      for (let i = 0; i < newlines; i++) buffer.writeDoubleLE(time ?? Number.NaN, i * TIME_BYTES);
       this.timesStream.write(buffer);
     }
   }

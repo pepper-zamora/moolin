@@ -365,7 +365,7 @@ ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
   if (!terminal) return;
   if (!terminal.connection.isConnected()) {
     log("debug", "main", "input while not connected, ignoring:", JSON.stringify(text));
-    terminal.write("\x1b[90m[not connected]\x1b[0m\r\n");
+    terminal.writeStatus("\x1b[90m[not connected]\x1b[0m\r\n");
     return;
   }
   // Echoed in cyan to tell typed commands apart from the world's output;
@@ -374,7 +374,7 @@ ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
   const { echoed } = terminal.connection.sendLine(text);
   const echoCommands = terminal.connection.getConnected()?.world.echoCommands ?? true;
   if (echoed && echoCommands) {
-    terminal.write(`\x1b[36m${text.replace(/\n/g, "\r\n")}\x1b[0m\r\n`);
+    terminal.writeStatus(`\x1b[36m${text.replace(/\n/g, "\r\n")}\x1b[0m\r\n`);
   }
 });
 

@@ -107,6 +107,22 @@ test("history times align to the log tail when it is truncated", async () => {
   reopened.close();
 });
 
+test("the sidecar marks untimed (Moolin) lines as null, keeping alignment", async () => {
+  const file = path.join(tempDir(), "w", "moolin.log");
+  const registry = new SessionLogRegistry();
+  const log = registry.claim(file);
+  assert.ok(log);
+  log.append("[connecting]\r\n", null); // a Moolin status line: no timestamp
+  log.append("server says hi\r\n", 5000); // real server output
+  log.close();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const reopened = registry.claim(file);
+  assert.ok(reopened);
+  assert.deepEqual(reopened.history(1000).times, [null, 5000]);
+  reopened.close();
+});
+
 test("readTimesTail reports unknown (null) times when there is no sidecar", () => {
   const missing = path.join(tempDir(), "nope.times");
   assert.deepEqual(readTimesTail(missing, 3), [null, null, null]);

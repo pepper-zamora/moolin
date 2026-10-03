@@ -20,7 +20,7 @@ declare global {
       getScrollback(): Promise<ScrollbackReplay>;
       onTerminalReset(callback: (replay: ScrollbackReplay) => void): void;
       getConnectionState(): Promise<ConnectionState>;
-      onTelnetData(callback: (data: string | Uint8Array) => void): void;
+      onTelnetData(callback: (data: string | Uint8Array, time: number | null) => void): void;
       onConnectionState(callback: (state: ConnectionState) => void): void;
       onZoom(callback: (direction: number) => void): void;
       clipboard: {

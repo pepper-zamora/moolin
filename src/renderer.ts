@@ -97,16 +97,32 @@ try {
 // can be found by binary search rather than scanning every stamp each render.
 // The arrival time is kept alongside each marker; renderGutter derives the
 // time label and date from it, dedups a run of same-minute lines, and shows
-// the date whenever the local day changes.
+// the date on the first stamped line and wherever the local day changes.
 const lineStamps: Array<{ marker: IMarker; time: Date }> = [];
 let timestampsShown = false;
-// While replaying buffered history, lines are stamped from the arrival times
-// recorded alongside it (replayTimes, consumed one per newline to match
-// xterm's onLineFeed); liveStamping switches stamping to the clock once that
-// replay has been parsed. stampSuppressed skips Clear Screen's blank filler.
-let liveStamping = false;
-let stampSuppressed = false;
-let replayTimes: Array<number | null> = [];
+// The time (epoch ms) to stamp onto each upcoming line, or null for a line
+// that gets no stamp — Moolin's own status lines, Clear Screen's blank filler,
+// and replayed history with no recorded time. Filled in the same order lines
+// are written and consumed one per onLineFeed (which fires once per newline),
+// so every line gets exactly the time recorded for it.
+const stampQueue: Array<number | null> = [];
+
+function countNewlines(data: string | Uint8Array): number {
+  let count = 0;
+  if (typeof data === "string") {
+    for (let i = 0; i < data.length; i++) if (data.charCodeAt(i) === 0x0a) count++;
+  } else {
+    for (let i = 0; i < data.length; i++) if (data[i] === 0x0a) count++;
+  }
+  return count;
+}
+
+// Writes a chunk and queues `time` (or null) for each line it contains, so the
+// onLineFeed handler stamps them in step.
+function writeStamped(data: string | Uint8Array, time: number | null): void {
+  for (let i = 0, n = countNewlines(data); i < n; i++) stampQueue.push(time);
+  term.write(data);
+}
 
 // 12-hour, minute resolution, with a single-letter am/pm suffix: "9:05a",
 // "12:10p". No seconds; a run of lines in the same minute is collapsed to one
@@ -185,23 +201,33 @@ function renderGutter(): void {
     if (marker.isDisposed || row < 0) continue;
     const label = formatTime(time);
     const prev = i > 0 ? lineStamps[i - 1] : null;
-    // Label only the first line of each minute; lines sharing the minute of
-    // the line above them show nothing, so the time reads once per change.
-    if (prev && formatTime(prev.time) === label) continue;
+    // Show the date on the first stamped line and at each day change.
+    const dayChange = prev !== null && dayKey(prev.time) !== dayKey(time);
+    const showDate = prev === null || dayChange;
+    // Label the first line of each minute; a run within the same minute shows
+    // nothing (a day boundary is never same-minute, so it is never collapsed).
+    if (prev !== null && formatTime(prev.time) === label && !dayChange) continue;
     const entry = document.createElement("div");
     entry.className = "gutter-stamp";
     entry.style.top = `${row * cell}px`;
     entry.style.height = `${cell}px`;
     entry.style.lineHeight = `${cell}px`;
-    // On the first stamp, or when the local day changes, float the date just
-    // above the time.
-    if (!prev || dayKey(prev.time) !== dayKey(time)) {
-      const date = document.createElement("span");
-      date.className = "gutter-date";
-      date.textContent = dateLabel(time);
-      entry.appendChild(date);
+    if (showDate && row === 0) {
+      // No row above to float the date onto (the dated line is at the very
+      // top), so show the date in the cell in place of the time.
+      entry.classList.add("gutter-datecell");
+      entry.textContent = dateLabel(time);
+    } else {
+      if (showDate) {
+        // Float the date just above the time, onto the (blank) row above —
+        // which exists because Moolin's own status lines aren't stamped.
+        const date = document.createElement("span");
+        date.className = "gutter-date";
+        date.textContent = dateLabel(time);
+        entry.appendChild(date);
+      }
+      entry.appendChild(document.createTextNode(label));
     }
-    entry.appendChild(document.createTextNode(label));
     entries.push(entry);
   }
   gutter.replaceChildren(...entries);
@@ -218,15 +244,9 @@ function scheduleGutter(): void {
 }
 
 term.onLineFeed(() => {
-  if (stampSuppressed) return;
-  if (liveStamping) {
-    stampLine(new Date());
-  } else {
-    // Replaying: take the recorded arrival time for this line. null means the
-    // time is unknown (e.g. log history), so the line gets no stamp.
-    const time = replayTimes.shift();
-    if (time != null) stampLine(new Date(time));
-  }
+  // One queued time per newline; null means this line carries no stamp.
+  const time = stampQueue.shift();
+  if (time != null) stampLine(new Date(time));
 });
 term.onRender(() => scheduleGutter());
 term.onScroll(() => scheduleGutter());
@@ -331,11 +351,8 @@ let isCleared = false;
 function clearToOffscreen(): void {
   if (isCleared) return;
   term.scrollToBottom();
-  // Don't stamp the blank filler lines this writes.
-  stampSuppressed = true;
-  term.write("\n".repeat(term.rows), () => {
-    stampSuppressed = false;
-  });
+  // The blank filler lines carry no timestamp.
+  writeStamped("\n".repeat(term.rows), null);
   isCleared = true;
 }
 
@@ -512,28 +529,13 @@ document.addEventListener("contextmenu", (event) => {
 // Replay the main process's in-memory scrollback buffer (survives a reload),
 // then subscribe to live data — in that order, so nothing arriving during the
 // fetch gets written twice.
-// Writes replayed history (the in-memory buffer on reload, or a world's log
-// on connect) and arms its recorded arrival times so the onLineFeed handler
-// re-stamps each line as it's parsed. The clock takes back over (liveStamping)
-// once the whole replay is through (see GAPS.md §8).
+// Replays buffered history (the in-memory buffer on reload, or a world's log
+// on connect), queuing the recorded arrival time for each of its lines so the
+// onLineFeed handler restamps them. Lines with no recorded time (null — old
+// history, or Moolin's own lines) get no stamp (see GAPS.md §8).
 function writeReplay(replay: ScrollbackReplay): void {
-  liveStamping = false;
-  replayTimes = replay.times.slice();
-  const { chunks } = replay;
-  if (chunks.length === 0) {
-    replayTimes = [];
-    liveStamping = true;
-    return;
-  }
-  chunks.forEach((chunk, i) => {
-    if (i === chunks.length - 1) {
-      term.write(chunk, () => {
-        liveStamping = true;
-      });
-    } else {
-      term.write(chunk);
-    }
-  });
+  for (const time of replay.times) stampQueue.push(time);
+  for (const chunk of replay.chunks) term.write(chunk);
 }
 
 async function loadScrollback(): Promise<void> {
@@ -545,12 +547,13 @@ async function loadScrollback(): Promise<void> {
   window.moolin.onTerminalReset((replay) => {
     isCleared = false;
     clearStamps();
+    stampQueue.length = 0;
     term.reset();
     writeReplay(replay);
   });
-  window.moolin.onTelnetData((data) => {
+  window.moolin.onTelnetData((data, time) => {
     isCleared = false;
-    term.write(data);
+    writeStamped(data, time);
   });
 }
 void loadScrollback();
