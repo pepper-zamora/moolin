@@ -128,3 +128,36 @@ test("readTimesTail reports unknown (null) times when there is no sidecar", () =
   assert.deepEqual(readTimesTail(missing, 3), [null, null, null]);
   assert.deepEqual(readTimesTail(missing, 0), []);
 });
+
+test("readTimesTail reads a torn final record as an unknown (null) time", () => {
+  const file = path.join(tempDir(), "moolin.log.times");
+  const records = Buffer.alloc(8 * 2 + 3); // two whole records, then 3 torn bytes
+  records.writeDoubleLE(1000, 0);
+  records.writeDoubleLE(2000, 8);
+  fs.writeFileSync(file, records);
+  assert.deepEqual(readTimesTail(file, 3), [1000, 2000, null]);
+  assert.deepEqual(readTimesTail(file, 2), [2000, null]);
+  assert.deepEqual(readTimesTail(file, 4), [null, 1000, 2000, null]);
+});
+
+test("appending after a torn sidecar write keeps later times aligned", async () => {
+  const file = path.join(tempDir(), "w", "moolin.log");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  // As if the app died mid-way through recording the second line's time.
+  fs.writeFileSync(file, "one\r\ntwo\r\n");
+  const records = Buffer.alloc(8 + 3);
+  records.writeDoubleLE(1000, 0);
+  fs.writeFileSync(`${file}.times`, records);
+
+  const registry = new SessionLogRegistry();
+  const log = registry.claim(file);
+  assert.ok(log);
+  log.append("three\r\n", 3000);
+  log.close();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const reopened = registry.claim(file);
+  assert.ok(reopened);
+  assert.deepEqual(reopened.history(1000).times, [1000, null, 3000]);
+  reopened.close();
+});

@@ -75,10 +75,13 @@ export function readLogTail(file: string, maxBytes: number): Uint8Array {
 }
 
 // The arrival times of the last `lineCount` logged lines, in order, read from
-// the sidecar. A line with no recorded time — an older log written before the
-// sidecar existed, or a torn final write — comes back as null, left-padded so
-// the result always has exactly `lineCount` entries, aligned to the log tail
-// (whose newlines are, by definition, the file's last `lineCount` newlines).
+// the sidecar. A line with no recorded time comes back as null: lines from
+// before the sidecar existed are left-padded with null so the result always
+// has exactly `lineCount` entries, aligned to the log tail (whose newlines
+// are, by definition, the file's last `lineCount` newlines). A torn final
+// record — the app died mid-write, leaving a size that isn't a whole number of
+// records — still stands for its line, as a trailing null; records are counted
+// from the start of the file, which repairTimesFile keeps valid on reopen.
 export function readTimesTail(file: string, lineCount: number): Array<number | null> {
   if (lineCount <= 0) return [];
   let fd: number;
@@ -88,8 +91,10 @@ export function readTimesTail(file: string, lineCount: number): Array<number | n
     return new Array(lineCount).fill(null);
   }
   try {
-    const available = Math.floor(fs.fstatSync(fd).size / TIME_BYTES);
-    const take = Math.min(lineCount, available);
+    const size = fs.fstatSync(fd).size;
+    const available = Math.floor(size / TIME_BYTES);
+    const torn = size % TIME_BYTES !== 0;
+    const take = Math.min(lineCount - (torn ? 1 : 0), available);
     const buffer = Buffer.alloc(take * TIME_BYTES);
     let read = 0;
     while (read < buffer.length) {
@@ -98,17 +103,37 @@ export function readTimesTail(file: string, lineCount: number): Array<number | n
       read += n;
     }
     const got = Math.floor(read / TIME_BYTES);
-    const times: Array<number | null> = new Array(lineCount - got).fill(null);
+    const times: Array<number | null> = new Array(lineCount - got - (torn ? 1 : 0)).fill(null);
     for (let i = 0; i < got; i++) {
       // NaN marks a line that carries no timestamp (e.g. Moolin's own status
       // lines); it still gets an entry so the file stays aligned to newlines.
       const value = buffer.readDoubleLE(i * TIME_BYTES);
       times.push(Number.isNaN(value) ? null : value);
     }
+    if (torn) times.push(null);
     return times;
   } finally {
     fs.closeSync(fd);
   }
+}
+
+// Makes a sidecar left with a torn final record (see readTimesTail) whole
+// again before anything is appended to it: the partial record is replaced by
+// a NaN (unknown time) one, so its line keeps an entry and every later record
+// stays aligned to a multiple of TIME_BYTES. A missing file is left missing.
+function repairTimesFile(file: string): void {
+  let size: number;
+  try {
+    size = fs.statSync(file).size;
+  } catch {
+    return;
+  }
+  const partial = size % TIME_BYTES;
+  if (partial === 0) return;
+  fs.truncateSync(file, size - partial);
+  const record = Buffer.alloc(TIME_BYTES);
+  record.writeDoubleLE(Number.NaN);
+  fs.appendFileSync(file, record);
 }
 
 // A log's recent bytes plus the matching per-line arrival times; the times
@@ -146,6 +171,7 @@ export class SessionLog {
     if (!this.stream) {
       try {
         fs.mkdirSync(path.dirname(this.file), { recursive: true });
+        repairTimesFile(timesFileFor(this.file));
       } catch (error) {
         this.fail(error as Error);
         return;
