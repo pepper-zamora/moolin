@@ -59,6 +59,7 @@ export function parseWorld(value: unknown): World | null {
   const tlsAllowUntrusted = optional(value.tlsAllowUntrusted, isBoolean, false);
   const autoLogin = optional(value.autoLogin, isBoolean, false);
   const loginTemplate = optional(value.loginTemplate, isString, DEFAULT_LOGIN_TEMPLATE);
+  const echoCommands = optional(value.echoCommands, isBoolean, true);
   const rawCharacters = value.characters === undefined ? [] : value.characters;
   if (
     name === undefined ||
@@ -67,6 +68,7 @@ export function parseWorld(value: unknown): World | null {
     tlsAllowUntrusted === undefined ||
     autoLogin === undefined ||
     loginTemplate === undefined ||
+    echoCommands === undefined ||
     !Array.isArray(rawCharacters)
   ) {
     return null;
@@ -87,6 +89,7 @@ export function parseWorld(value: unknown): World | null {
     tlsAllowUntrusted,
     autoLogin,
     loginTemplate,
+    echoCommands,
     characters,
   };
 }

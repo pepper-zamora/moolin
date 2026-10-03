@@ -31,6 +31,7 @@ test("parseWorld fills in defaults for fields missing from an older record", () 
     tlsAllowUntrusted: false,
     autoLogin: false,
     loginTemplate: DEFAULT_LOGIN_TEMPLATE,
+    echoCommands: true,
     characters: [],
   });
 });
@@ -44,6 +45,7 @@ test("parseWorld reads a fully-populated record, including characters", () => {
     tls: false,
     autoLogin: true,
     loginTemplate: "co {{character}} {{password}}\\r",
+    echoCommands: false,
     characters: [{ id: "c", name: "Cowpernica", password: "pw" }],
   };
   assert.deepEqual(parseWorld(record), { ...record, tlsAllowUntrusted: false });

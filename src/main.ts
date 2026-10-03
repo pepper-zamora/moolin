@@ -359,9 +359,11 @@ ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
     return;
   }
   // Echoed in cyan to tell typed commands apart from the world's output;
-  // not at all while the server has taken over echoing (password prompts).
+  // not at all while the server has taken over echoing (password prompts), nor
+  // for a world set to not echo commands (one that echoes input itself).
   const { echoed } = terminal.connection.sendLine(text);
-  if (echoed) {
+  const echoCommands = terminal.connection.getConnected()?.world.echoCommands ?? true;
+  if (echoed && echoCommands) {
     terminal.write(`\x1b[36m${text.replace(/\n/g, "\r\n")}\x1b[0m\r\n`);
   }
 });

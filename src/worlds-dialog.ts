@@ -317,6 +317,7 @@ function fillWorldPane(world: World): void {
   field(worldPane, "tlsAllowUntrusted").checked = world.tlsAllowUntrusted;
   field(worldPane, "autoLogin").checked = world.autoLogin;
   field(worldPane, "loginTemplate").value = world.loginTemplate;
+  field(worldPane, "echoCommands").checked = world.echoCommands;
   updateDependentFields(world);
 }
 
@@ -371,6 +372,7 @@ worldPane.addEventListener("input", (event) => {
     case "tls":
     case "tlsAllowUntrusted":
     case "autoLogin":
+    case "echoCommands":
       world[el.name] = el.checked;
       updateDependentFields(world);
       break;

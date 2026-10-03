@@ -17,6 +17,9 @@ export interface World {
   // Send `loginTemplate` on connect when connecting as a character.
   autoLogin: boolean;
   loginTemplate: string;
+  // Echo typed commands back into the scrollback (in cyan). Turn off for
+  // servers that echo your input themselves, to avoid seeing it twice.
+  echoCommands: boolean;
   characters: Character[];
 }
 

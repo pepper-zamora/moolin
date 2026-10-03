@@ -15,6 +15,7 @@ export function newWorld(id: string): World {
     tlsAllowUntrusted: false,
     autoLogin: true,
     loginTemplate: DEFAULT_LOGIN_TEMPLATE,
+    echoCommands: true,
     characters: [],
   };
 }
