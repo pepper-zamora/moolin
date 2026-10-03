@@ -171,8 +171,10 @@ function stampLine(time: Date): void {
 }
 
 function clearStamps(): void {
-  for (const { marker } of lineStamps.slice()) marker.dispose();
-  lineStamps.length = 0;
+  // Empty the list before disposing, so each marker's onDispose handler finds
+  // nothing to remove; splicing them out one by one would be O(n²) across a
+  // full scrollback.
+  for (const { marker } of lineStamps.splice(0)) marker.dispose();
   gutter.replaceChildren();
 }
 
