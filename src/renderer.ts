@@ -194,6 +194,7 @@ function renderGutter(): void {
   const rows = term.rows;
   const cell = cellHeight();
   const entries: HTMLDivElement[] = [];
+  let lastRow = -1; // row of entries' last element, or -1 when there is none
   for (let i = firstVisibleStamp(top); i < lineStamps.length; i++) {
     const { marker, time } = lineStamps[i];
     const row = marker.line - top;
@@ -219,8 +220,12 @@ function renderGutter(): void {
       entry.textContent = dateLabel(time);
     } else {
       if (showDate) {
-        // Float the date just above the time, onto the (blank) row above —
-        // which exists because Moolin's own status lines aren't stamped.
+        // Float the date just above the time, onto the row above. That row is
+        // usually blank (Moolin's own status lines aren't stamped), but where
+        // it has a time of its own — a session crossing midnight, or two days
+        // meeting in replayed history — the date takes its place rather than
+        // being drawn over it.
+        if (lastRow === row - 1) entries.pop();
         const date = document.createElement("span");
         date.className = "gutter-date";
         date.textContent = dateLabel(time);
@@ -229,6 +234,7 @@ function renderGutter(): void {
       entry.appendChild(document.createTextNode(label));
     }
     entries.push(entry);
+    lastRow = row;
   }
   gutter.replaceChildren(...entries);
 }
