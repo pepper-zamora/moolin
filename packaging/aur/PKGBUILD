@@ -1,0 +1,29 @@
+# Maintainer: FILL IN <you@example.com>
+# DRAFT for the AUR package "moolin-bin": repackages the .deb from the GitHub
+# release. Fill in the placeholders, then `updpkgsums` and
+# `makepkg --printsrcinfo > .SRCINFO` before pushing to the AUR.
+pkgname=moolin-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='A MOO/MUSH/MUCK/MUD client with buttery-smooth scrollback'
+arch=('x86_64')
+url='https://github.com/OWNER/moolin'
+license=('MIT')
+depends=('gtk3' 'nss' 'libxss' 'libxtst' 'libnotify' 'xdg-utils' 'at-spi2-core' 'libsecret' 'util-linux-libs')
+provides=('moolin')
+conflicts=('moolin')
+options=('!strip')
+source=("$url/releases/download/v$pkgver/moolin-$pkgver-linux-amd64.deb")
+sha256sums=('SKIP')
+
+package() {
+  bsdtar -xf data.tar.* -C "$pkgdir"
+
+  # The app lives in /opt/Moolin; put the launcher on PATH.
+  install -d "$pkgdir/usr/bin"
+  ln -s /opt/Moolin/moolin "$pkgdir/usr/bin/moolin"
+
+  # Electron's SUID sandbox helper isn't needed (user namespaces are on in
+  # Arch's kernel), and a non-root-owned SUID file is wrong anyway.
+  chmod 755 "$pkgdir/opt/Moolin/chrome-sandbox"
+}

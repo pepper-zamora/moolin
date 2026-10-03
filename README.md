@@ -63,6 +63,24 @@ To launch from a desktop menu on Linux, build once with `npm run build`, then
 copy `moolin.desktop` to `~/.local/share/applications/`. Its paths point at
 `/home/YOUR_USERNAME/Projects/moolin`; edit them if the checkout lives elsewhere.
 
+## Packaging
+
+Installers are built with [electron-builder](https://www.electron.build/)
+(`electron-builder.yml`); output goes to `release/`.
+
+```sh
+npm run pack         # unpacked app only, for a quick check
+npm run dist:linux   # AppImage, deb, rpm, pacman
+npm run dist:win     # NSIS installer and portable exe
+npm run dist:mac     # dmg and zip, x64 and arm64
+```
+
+Each target has to be built on its own OS; `.github/workflows/release.yml`
+does that on every `v*` tag and attaches the results to a GitHub Release. The
+rpm and pacman targets need `rpmbuild` and `bsdtar` installed. macOS and
+Windows builds are unsigned unless the signing secrets named in the workflow
+are set. `packaging/aur/PKGBUILD` is a draft for an AUR `moolin-bin` package.
+
 ## Using Moolin
 
 Press **Ctrl+O** to open the Worlds dialog. **New World** adds a world; fill

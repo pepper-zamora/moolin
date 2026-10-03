@@ -1,0 +1,59 @@
+appId: org.moolin.app
+productName: Moolin
+copyright: Copyright © Moolin contributors
+directories:
+  output: release
+# esbuild bundles everything (xterm included) into dist/, so no node_modules
+# ship; the renderer loads src/index.html and the window icon at runtime.
+files:
+  - package.json
+  - dist/**
+  - "!dist/test/**"
+  - src/index.html
+  - icons/**
+asar: true
+artifactName: moolin-${version}-${os}-${arch}.${ext}
+
+linux:
+  executableName: moolin
+  syncDesktopName: true
+  icon: icons/icon-512.png
+  category: Game;RolePlaying
+  synopsis: A MOO/MUSH/MUCK/MUD client
+  target:
+    - AppImage
+    - deb
+    - rpm
+    - pacman
+  desktop:
+    entry:
+      Name: Moolin
+      GenericName: MUD Client
+      Keywords: MOO;MUD;MUSH;MUCK;telnet;
+      StartupWMClass: moolin
+
+win:
+  icon: icons/icon-512.png
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: moolin-${version}-setup-${arch}.${ext}
+
+portable:
+  artifactName: moolin-${version}-portable-${arch}.${ext}
+
+mac:
+  icon: icons/icon-512.png
+  category: public.app-category.games
+  hardenedRuntime: true
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
