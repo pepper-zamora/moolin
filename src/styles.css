@@ -46,8 +46,10 @@ html, body {
   border-right: 1px solid #333;
   /* Gap between the divider and the scrollback text. On the gutter (not the
      terminal) so it vanishes with the gutter and the terminal stays flush
-     left when timestamps are off; in em so it tracks the font/zoom. */
-  margin-right: 0.25em;
+     left when timestamps are off; in em so it tracks the font/zoom. (0.25em
+     was too subtle against the all-black terminal; this ~matches the
+     timestamp-to-divider gap on the left.) */
+  margin-right: 0.5em;
   font-family: Menlo, Consolas, "DejaVu Sans Mono", monospace;
   font-size: 14px;
   color: #666;
