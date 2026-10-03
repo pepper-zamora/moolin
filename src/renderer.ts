@@ -546,9 +546,15 @@ async function loadScrollback(): Promise<void> {
   // chunks ride along in the message so they stay ordered with live data.
   window.moolin.onTerminalReset((replay) => {
     isCleared = false;
-    clearStamps();
-    stampQueue.length = 0;
-    term.reset();
+    // Reset in step with xterm's write queue rather than right away: output
+    // sent just before the reset (e.g. a "disconnected" status line) may not
+    // be parsed yet. Resetting from a write callback lets that output consume
+    // its own queued times first and keeps it out of the fresh buffer; the
+    // replay is queued behind the reset, so its lines get the replay's times.
+    term.write("", () => {
+      clearStamps();
+      term.reset();
+    });
     writeReplay(replay);
   });
   window.moolin.onTelnetData((data, time) => {
