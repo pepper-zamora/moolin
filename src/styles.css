@@ -18,9 +18,59 @@ html, body {
   height: 100%;
 }
 
-#terminal {
+/* The terminal and its timestamp gutter sit side by side; the row is what
+   flexes to fill the window's height. */
+#terminal-row {
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+}
+
+#terminal {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* A separate column to the left of the terminal, not part of its buffer.
+   Entries are positioned absolutely by renderer.ts to line up with the
+   terminal rows (xterm's cell height isn't just font-size, so alignment is
+   driven by measured pixel offsets, not CSS line-height here). It's purely
+   visual: no pointer events, no text selection, so it never interferes with
+   selecting or clicking the scrollback. */
+#gutter {
+  flex: 0 0 auto;
+  position: relative;
+  overflow: hidden;
+  width: calc(6ch + 12px);
+  background: #0a0a0a;
+  border-right: 1px solid #333;
+  /* Gap between the divider and the scrollback text. On the gutter (not the
+     terminal) so it vanishes with the gutter and the terminal stays flush
+     left when timestamps are off; in em so it tracks the font/zoom. */
+  margin-right: 0.25em;
+  font-family: Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 14px;
+  color: #666;
+  user-select: none;
+  pointer-events: none;
+}
+
+.gutter-stamp {
+  position: absolute;
+  right: 6px;
+  text-align: right;
+  white-space: pre;
+}
+
+/* The date for a day-change line, floated just above its time. */
+.gutter-date {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  font-size: 0.75em;
+  line-height: 1.2;
+  opacity: 0.75;
+  white-space: pre;
 }
 
 #divider {

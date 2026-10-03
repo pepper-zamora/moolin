@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { World, WorldsLoadResult } from "./worlds-types";
 import type { ConnectionState } from "./connection-manager";
 import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
+import type { ScrollbackReplay } from "./scrollback-buffer";
 import { IpcChannels } from "./ipc-channels";
 
 // Preload runs in its own JS context (separate from main.ts's), but shares
@@ -28,9 +29,9 @@ contextBridge.exposeInMainWorld("moolin", {
     ipcRenderer.invoke(IpcChannels.menuPopup, items),
   sendInput: (text: string): void => ipcRenderer.send(IpcChannels.telnetInput, text),
   sendResize: (cols: number, rows: number): void => ipcRenderer.send(IpcChannels.telnetResize, { cols, rows }),
-  getScrollback: (): Promise<Array<string | Uint8Array>> => ipcRenderer.invoke(IpcChannels.terminalGetScrollback),
-  onTerminalReset: (callback: (chunks: Array<string | Uint8Array>) => void): void => {
-    ipcRenderer.on(IpcChannels.terminalReset, (_event, chunks: Array<string | Uint8Array>) => callback(chunks));
+  getScrollback: (): Promise<ScrollbackReplay> => ipcRenderer.invoke(IpcChannels.terminalGetScrollback),
+  onTerminalReset: (callback: (replay: ScrollbackReplay) => void): void => {
+    ipcRenderer.on(IpcChannels.terminalReset, (_event, replay: ScrollbackReplay) => callback(replay));
   },
   getConnectionState: (): Promise<ConnectionState> => ipcRenderer.invoke(IpcChannels.connectionGetState),
   onTelnetData: (callback: (data: string | Uint8Array) => void): void => {
@@ -72,6 +73,9 @@ contextBridge.exposeInMainWorld("moolin", {
   },
   onClearScreenRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalClearScreenRequested, () => callback());
+  },
+  onToggleTimestamps: (callback: (show: boolean) => void): void => {
+    ipcRenderer.on(IpcChannels.terminalToggleTimestamps, (_event, show: boolean) => callback(show));
   },
   reportUndoState: (canUndo: boolean, canRedo: boolean): void => {
     ipcRenderer.send(IpcChannels.terminalUndoStateChanged, canUndo, canRedo);

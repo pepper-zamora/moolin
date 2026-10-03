@@ -5,6 +5,26 @@ import { characterLabel, worldLabel } from "./world-utils";
 
 export const LOG_FILE_NAME = "moolin.log";
 
+// Sidecar beside the log: one little-endian float64 (epoch ms) per logged
+// line, in order, so each line's arrival time can be restored on reconnect.
+// The log itself stays a plain byte stream with nothing extra embedded.
+export const TIMES_FILE_SUFFIX = ".times";
+const TIME_BYTES = 8;
+
+function timesFileFor(logFile: string): string {
+  return logFile + TIMES_FILE_SUFFIX;
+}
+
+function countNewlines(data: string | Uint8Array): number {
+  let count = 0;
+  if (typeof data === "string") {
+    for (let i = 0; i < data.length; i++) if (data.charCodeAt(i) === 0x0a) count++;
+  } else {
+    for (let i = 0; i < data.length; i++) if (data[i] === 0x0a) count++;
+  }
+  return count;
+}
+
 // Makes a world or character name safe to use as one directory name: path
 // separators and characters Windows forbids become "_", and a name that would
 // be empty, "." or ".." (or start with a dot, i.e. hidden) gets a "_" prefix.
@@ -54,9 +74,49 @@ export function readLogTail(file: string, maxBytes: number): Uint8Array {
   }
 }
 
+// The arrival times of the last `lineCount` logged lines, in order, read from
+// the sidecar. A line with no recorded time — an older log written before the
+// sidecar existed, or a torn final write — comes back as null, left-padded so
+// the result always has exactly `lineCount` entries, aligned to the log tail
+// (whose newlines are, by definition, the file's last `lineCount` newlines).
+export function readTimesTail(file: string, lineCount: number): Array<number | null> {
+  if (lineCount <= 0) return [];
+  let fd: number;
+  try {
+    fd = fs.openSync(file, "r");
+  } catch {
+    return new Array(lineCount).fill(null);
+  }
+  try {
+    const available = Math.floor(fs.fstatSync(fd).size / TIME_BYTES);
+    const take = Math.min(lineCount, available);
+    const buffer = Buffer.alloc(take * TIME_BYTES);
+    let read = 0;
+    while (read < buffer.length) {
+      const n = fs.readSync(fd, buffer, read, buffer.length - read, (available - take) * TIME_BYTES + read);
+      if (n === 0) break;
+      read += n;
+    }
+    const got = Math.floor(read / TIME_BYTES);
+    const times: Array<number | null> = new Array(lineCount - got).fill(null);
+    for (let i = 0; i < got; i++) times.push(buffer.readDoubleLE(i * TIME_BYTES));
+    return times;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+// A log's recent bytes plus the matching per-line arrival times; the times
+// align one-to-one with the newlines in `bytes` (see readTimesTail).
+export interface LogHistory {
+  bytes: Uint8Array;
+  times: Array<number | null>;
+}
+
 // An open, append-only log file that one window owns.
 export class SessionLog {
   private stream: fs.WriteStream | null = null;
+  private timesStream: fs.WriteStream | null = null;
   private closed = false;
 
   constructor(
@@ -65,14 +125,17 @@ export class SessionLog {
     private readonly onError: (error: Error) => void,
   ) {}
 
-  // What the log already holds, for pre-populating the scrollback. Call
-  // before the first append.
-  history(maxBytes: number): Uint8Array {
-    return readLogTail(this.file, maxBytes);
+  // What the log already holds, plus each line's arrival time, for
+  // pre-populating the scrollback. Call before the first append.
+  history(maxBytes: number): LogHistory {
+    const bytes = readLogTail(this.file, maxBytes);
+    const times = readTimesTail(timesFileFor(this.file), countNewlines(bytes));
+    return { bytes, times };
   }
 
-  // Appends exactly what the terminal was shown, escape sequences included.
-  append(data: string | Uint8Array): void {
+  // Appends exactly what the terminal was shown, escape sequences included,
+  // and records `time` (epoch ms) in the sidecar for each line it completes.
+  append(data: string | Uint8Array, time: number): void {
     if (this.closed) return;
     if (!this.stream) {
       try {
@@ -83,8 +146,16 @@ export class SessionLog {
       }
       this.stream = fs.createWriteStream(this.file, { flags: "a" });
       this.stream.on("error", (error) => this.fail(error));
+      this.timesStream = fs.createWriteStream(timesFileFor(this.file), { flags: "a" });
+      this.timesStream.on("error", (error) => this.fail(error));
     }
     this.stream.write(data);
+    const newlines = countNewlines(data);
+    if (newlines > 0 && this.timesStream) {
+      const buffer = Buffer.alloc(newlines * TIME_BYTES);
+      for (let i = 0; i < newlines; i++) buffer.writeDoubleLE(time, i * TIME_BYTES);
+      this.timesStream.write(buffer);
+    }
   }
 
   // Flushes and gives up ownership, letting another window claim the file.
@@ -93,6 +164,8 @@ export class SessionLog {
     this.closed = true;
     this.stream?.end();
     this.stream = null;
+    this.timesStream?.end();
+    this.timesStream = null;
     this.release();
   }
 

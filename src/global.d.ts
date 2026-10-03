@@ -1,5 +1,6 @@
 import type { World, WorldsLoadResult } from "./worlds-types";
 import type { ConnectionState } from "./connection-manager";
+import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { LogLevel } from "./logger";
 
 declare global {
@@ -16,8 +17,8 @@ declare global {
       popupMenu(items: Array<{ id: string; label: string }>): Promise<string | null>;
       sendInput(text: string): void;
       sendResize(cols: number, rows: number): void;
-      getScrollback(): Promise<Array<string | Uint8Array>>;
-      onTerminalReset(callback: (chunks: Array<string | Uint8Array>) => void): void;
+      getScrollback(): Promise<ScrollbackReplay>;
+      onTerminalReset(callback: (replay: ScrollbackReplay) => void): void;
       getConnectionState(): Promise<ConnectionState>;
       onTelnetData(callback: (data: string | Uint8Array) => void): void;
       onConnectionState(callback: (state: ConnectionState) => void): void;
@@ -35,6 +36,7 @@ declare global {
       onUndoRequested(callback: () => void): void;
       onRedoRequested(callback: () => void): void;
       onClearScreenRequested(callback: () => void): void;
+      onToggleTimestamps(callback: (show: boolean) => void): void;
       reportUndoState(canUndo: boolean, canRedo: boolean): void;
       log(level: Exclude<LogLevel, "none">, scope: string, ...args: unknown[]): void;
     };

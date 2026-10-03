@@ -1,6 +1,6 @@
 import { BrowserWindow, Menu } from "electron";
 import { ConnectionManager } from "./connection-manager";
-import { ScrollbackBuffer, type TerminalChunk } from "./scrollback-buffer";
+import { ScrollbackBuffer, type ScrollbackReplay, type TerminalChunk } from "./scrollback-buffer";
 import { IpcChannels } from "./ipc-channels";
 import { log } from "./logger";
 import { logPathFor, type SessionLog, type SessionLogRegistry } from "./session-log";
@@ -40,6 +40,10 @@ export class TerminalWindow {
   // `enabled` state (see buildMenu in main.ts).
   canUndoInput = false;
   canRedoInput = false;
+  // Whether the per-line timestamp gutter is shown. Lives here (not just in
+  // the renderer) so the View menu's checkbox keeps its state across menu
+  // rebuilds, and so it can be re-pushed to the renderer after a reload.
+  showTimestamps = false;
   // The persistent log of this window's connection, or null when not
   // connecting, or when another window already owns that world/character's log.
   private sessionLog: SessionLog | null = null;
@@ -81,6 +85,11 @@ export class TerminalWindow {
     this.window.webContents.on("did-fail-load", (_event, code, desc, url) => {
       log("error", "main", `window ${id} did-fail-load`, code, desc, url);
     });
+    // The renderer starts each (re)load with the gutter hidden; re-push the
+    // remembered state so a reload doesn't desync it from the menu checkbox.
+    this.window.webContents.on("did-finish-load", () => {
+      this.send(IpcChannels.terminalToggleTimestamps, this.showTimestamps);
+    });
     // macOS has one application menu, so it follows the focused window.
     this.window.on("focus", () => {
       if (process.platform === "darwin" && this.menu) Menu.setApplicationMenu(this.menu);
@@ -121,10 +130,12 @@ export class TerminalWindow {
     this.sessionLog?.close();
     const file = logPathFor(options.logRoot, target.world, target.character);
     this.sessionLog = options.logs.claim(file);
-    const history = this.sessionLog ? this.sessionLog.history(MAX_SCROLLBACK_BYTES) : new Uint8Array();
+    const history = this.sessionLog
+      ? this.sessionLog.history(MAX_SCROLLBACK_BYTES)
+      : { bytes: new Uint8Array(), times: [] };
     log("debug", "main", `window ${this.window.id} log`, file, this.sessionLog ? "owned" : "owned by another window");
-    this.scrollback.reset(history.length > 0 ? [history] : []);
-    this.send(IpcChannels.terminalReset, this.scrollback.snapshot());
+    this.scrollback.reset(history.bytes.length > 0 ? [history.bytes] : [], history.times);
+    this.send(IpcChannels.terminalReset, this.getScrollback());
     if (!this.sessionLog) {
       const label = targetLabel(target.world, target.character);
       this.write(
@@ -136,12 +147,13 @@ export class TerminalWindow {
   // Appends to the scrollback, both live and in the replay buffer, and to
   // the session log if this window owns one.
   write(data: TerminalChunk): void {
-    this.sessionLog?.append(data);
-    this.scrollback.append(data);
+    const time = Date.now();
+    this.sessionLog?.append(data, time);
+    this.scrollback.append(data, time);
     this.send(IpcChannels.telnetData, data);
   }
 
-  getScrollback(): TerminalChunk[] {
-    return this.scrollback.snapshot();
+  getScrollback(): ScrollbackReplay {
+    return { chunks: this.scrollback.snapshot(), times: this.scrollback.snapshotTimes() };
   }
 }

@@ -37,3 +37,33 @@ test("snapshot is a copy, unaffected by later appends", () => {
   buffer.append("b");
   assert.deepEqual(snapshot, ["a"]);
 });
+
+test("records one line time per newline, in order", () => {
+  const buffer = new ScrollbackBuffer(100);
+  buffer.append("one\ntwo\n", 1000);
+  buffer.append("no newline here", 1500);
+  buffer.append("three\n", 2000);
+  assert.deepEqual(buffer.snapshotTimes(), [1000, 1000, 2000]);
+});
+
+test("drops line times along with the chunks they belong to", () => {
+  const buffer = new ScrollbackBuffer(10);
+  buffer.append("aaaa\n", 1); // 5 bytes
+  buffer.append("bbbb\n", 2); // 5 bytes, still within 10
+  buffer.append("cccc\n", 3); // pushes over 10, drops the first chunk
+  assert.deepEqual(buffer.snapshot(), ["bbbb\n", "cccc\n"]);
+  assert.deepEqual(buffer.snapshotTimes(), [2, 3]);
+});
+
+test("reset forgets line times, since history has no known times", () => {
+  const buffer = new ScrollbackBuffer(100);
+  buffer.append("live\n", 1);
+  buffer.reset(["old\nhistory\n"]);
+  assert.deepEqual(buffer.snapshotTimes(), [null, null]);
+});
+
+test("reset applies provided line times, one per newline", () => {
+  const buffer = new ScrollbackBuffer(100);
+  buffer.reset(["a\nb\nc\n"], [111, 222, 333]);
+  assert.deepEqual(buffer.snapshotTimes(), [111, 222, 333]);
+});

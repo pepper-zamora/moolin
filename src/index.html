@@ -12,7 +12,12 @@
   </head>
   <body>
     <div id="app">
-      <div id="terminal"></div>
+      <div id="terminal-row">
+        <!-- Per-line timestamp column; a sibling of the terminal rather than
+             part of its buffer, kept scroll-synced in renderer.ts. -->
+        <div id="gutter" hidden></div>
+        <div id="terminal"></div>
+      </div>
       <hr id="divider" />
       <textarea id="input-area" rows="1" spellcheck="false" hidden></textarea>
       <div id="status-bar" data-status="disconnected">

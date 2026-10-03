@@ -1,6 +1,6 @@
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type IMarker } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -8,6 +8,7 @@ import { worldsDialog } from "./worlds-dialog";
 import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
 import { InputUndoStack, type InputSnapshot } from "./input-undo";
 import type { ConnectionState } from "./connection-manager";
+import type { ScrollbackReplay } from "./scrollback-buffer";
 
 window.addEventListener("error", (event) => {
   window.moolin.log("error", "renderer", "uncaught error:", event.error ?? event.message);
@@ -64,6 +65,7 @@ function element<T extends HTMLElement>(id: string): T {
 }
 
 const terminalContainer = element<HTMLDivElement>("terminal");
+const gutter = element<HTMLDivElement>("gutter");
 const inputArea = element<HTMLTextAreaElement>("input-area");
 const statusBar = element<HTMLDivElement>("status-bar");
 const statusText = element<HTMLSpanElement>("status-text");
@@ -80,6 +82,159 @@ try {
 } catch {
   // Falls back to the default DOM renderer if WebGL is unavailable.
 }
+
+// --- Line timestamps -------------------------------------------------------
+// A gutter to the left of the terminal showing when each line arrived. xterm
+// has no native gutter, so it's a separate element (see index.html) kept
+// aligned to the viewport here. The time is never written into the terminal
+// buffer: copy, search and the session log keep seeing the untimestamped
+// text, matching MUSHclient's display-only model (see GAPS.md §8).
+//
+// Each stamped line is anchored with an xterm marker, which tracks its line as
+// the buffer scrolls and self-disposes when the line ages out of scrollback.
+// lineStamps stays sorted by marker.line (stamps are appended as new lines
+// arrive, and the oldest scroll out of the front first), so the visible slice
+// can be found by binary search rather than scanning every stamp each render.
+// The arrival time is kept alongside each marker; renderGutter derives the
+// time label and date from it, dedups a run of same-minute lines, and shows
+// the date whenever the local day changes.
+const lineStamps: Array<{ marker: IMarker; time: Date }> = [];
+let timestampsShown = false;
+// While replaying buffered history, lines are stamped from the arrival times
+// recorded alongside it (replayTimes, consumed one per newline to match
+// xterm's onLineFeed); liveStamping switches stamping to the clock once that
+// replay has been parsed. stampSuppressed skips Clear Screen's blank filler.
+let liveStamping = false;
+let stampSuppressed = false;
+let replayTimes: Array<number | null> = [];
+
+// 12-hour, minute resolution, with a single-letter am/pm suffix: "9:05a",
+// "12:10p". No seconds; a run of lines in the same minute is collapsed to one
+// label in renderGutter.
+function formatTime(time: Date): string {
+  const hour = time.getHours();
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  const minute = time.getMinutes().toString().padStart(2, "0");
+  return `${hour12}:${minute}${hour < 12 ? "a" : "p"}`;
+}
+
+// "11/20" (local month/day), floated above the time when the day changes.
+function dateLabel(time: Date): string {
+  return `${time.getMonth() + 1}/${time.getDate()}`;
+}
+
+function dayKey(time: Date): string {
+  return `${time.getFullYear()}-${time.getMonth()}-${time.getDate()}`;
+}
+
+// xterm's cell height isn't simply font-size × line-height (it depends on font
+// metrics), so measure the rendered screen rather than compute it.
+function cellHeight(): number {
+  const screen = terminalContainer.querySelector<HTMLElement>(".xterm-screen");
+  if (screen && term.rows > 0) return screen.clientHeight / term.rows;
+  return lineHeightPx();
+}
+
+function stampLine(time: Date): void {
+  const buffer = term.buffer.active;
+  const cursorAbs = buffer.baseY + buffer.cursorY;
+  // The newline moved the cursor off the line it ended; that line is the one
+  // just above the cursor. Walk back over wrapped continuation rows so the
+  // stamp lands on the logical line's first visual row, not its last.
+  let startAbs = cursorAbs - 1;
+  if (startAbs < 0) return;
+  while (startAbs > 0 && buffer.getLine(startAbs)?.isWrapped) startAbs--;
+  const marker = term.registerMarker(startAbs - cursorAbs);
+  if (!marker) return;
+  const stamp = { marker, time };
+  lineStamps.push(stamp);
+  marker.onDispose(() => {
+    const i = lineStamps.indexOf(stamp);
+    if (i !== -1) lineStamps.splice(i, 1);
+  });
+}
+
+function clearStamps(): void {
+  for (const { marker } of lineStamps.slice()) marker.dispose();
+  lineStamps.length = 0;
+  gutter.replaceChildren();
+}
+
+// First index whose line is at or below the top of the viewport.
+function firstVisibleStamp(top: number): number {
+  let lo = 0;
+  let hi = lineStamps.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (lineStamps[mid].marker.line < top) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+function renderGutter(): void {
+  if (!timestampsShown) return;
+  const top = term.buffer.active.viewportY;
+  const rows = term.rows;
+  const cell = cellHeight();
+  const entries: HTMLDivElement[] = [];
+  for (let i = firstVisibleStamp(top); i < lineStamps.length; i++) {
+    const { marker, time } = lineStamps[i];
+    const row = marker.line - top;
+    if (row >= rows) break;
+    if (marker.isDisposed || row < 0) continue;
+    const label = formatTime(time);
+    const prev = i > 0 ? lineStamps[i - 1] : null;
+    // Label only the first line of each minute; lines sharing the minute of
+    // the line above them show nothing, so the time reads once per change.
+    if (prev && formatTime(prev.time) === label) continue;
+    const entry = document.createElement("div");
+    entry.className = "gutter-stamp";
+    entry.style.top = `${row * cell}px`;
+    entry.style.height = `${cell}px`;
+    entry.style.lineHeight = `${cell}px`;
+    // On the first stamp, or when the local day changes, float the date just
+    // above the time.
+    if (!prev || dayKey(prev.time) !== dayKey(time)) {
+      const date = document.createElement("span");
+      date.className = "gutter-date";
+      date.textContent = dateLabel(time);
+      entry.appendChild(date);
+    }
+    entry.appendChild(document.createTextNode(label));
+    entries.push(entry);
+  }
+  gutter.replaceChildren(...entries);
+}
+
+let gutterScheduled = false;
+function scheduleGutter(): void {
+  if (gutterScheduled) return;
+  gutterScheduled = true;
+  requestAnimationFrame(() => {
+    gutterScheduled = false;
+    renderGutter();
+  });
+}
+
+term.onLineFeed(() => {
+  if (stampSuppressed) return;
+  if (liveStamping) {
+    stampLine(new Date());
+  } else {
+    // Replaying: take the recorded arrival time for this line. null means the
+    // time is unknown (e.g. log history), so the line gets no stamp.
+    const time = replayTimes.shift();
+    if (time != null) stampLine(new Date(time));
+  }
+});
+term.onRender(() => scheduleGutter());
+term.onScroll(() => scheduleGutter());
+// onScroll covers buffer scroll; scrolling up through history with the
+// wheel/scrollbar only moves the viewport element, so track that too.
+terminalContainer
+  .querySelector<HTMLElement>(".xterm-viewport")
+  ?.addEventListener("scroll", scheduleGutter, { passive: true });
 
 function lineHeightPx(): number {
   const lh = parseFloat(window.getComputedStyle(inputArea).lineHeight);
@@ -176,7 +331,11 @@ let isCleared = false;
 function clearToOffscreen(): void {
   if (isCleared) return;
   term.scrollToBottom();
-  term.write("\n".repeat(term.rows));
+  // Don't stamp the blank filler lines this writes.
+  stampSuppressed = true;
+  term.write("\n".repeat(term.rows), () => {
+    stampSuppressed = false;
+  });
   isCleared = true;
 }
 
@@ -289,6 +448,14 @@ window.moolin.onSelectAllRequested(() => term.selectAll());
 window.moolin.onUndoRequested(() => undoInput());
 window.moolin.onRedoRequested(() => redoInput());
 window.moolin.onClearScreenRequested(() => clearToOffscreen());
+window.moolin.onToggleTimestamps((show) => {
+  timestampsShown = show;
+  gutter.hidden = !show;
+  // The gutter takes its width from the terminal when shown (and gives it
+  // back when hidden), so refit cols/rows, then redraw the stamps.
+  resizeInput();
+  scheduleGutter();
+});
 
 // Starts the Edit menu's Undo/Redo items disabled until there's anything to act on.
 reportUndoState();
@@ -345,18 +512,41 @@ document.addEventListener("contextmenu", (event) => {
 // Replay the main process's in-memory scrollback buffer (survives a reload),
 // then subscribe to live data — in that order, so nothing arriving during the
 // fetch gets written twice.
-async function loadScrollback(): Promise<void> {
-  const chunks = await window.moolin.getScrollback();
-  window.moolin.log("debug", "renderer", "replaying", chunks.length, "buffered chunk(s)");
-  for (const chunk of chunks) {
-    term.write(chunk);
+// Writes replayed history (the in-memory buffer on reload, or a world's log
+// on connect) and arms its recorded arrival times so the onLineFeed handler
+// re-stamps each line as it's parsed. The clock takes back over (liveStamping)
+// once the whole replay is through (see GAPS.md §8).
+function writeReplay(replay: ScrollbackReplay): void {
+  liveStamping = false;
+  replayTimes = replay.times.slice();
+  const { chunks } = replay;
+  if (chunks.length === 0) {
+    replayTimes = [];
+    liveStamping = true;
+    return;
   }
+  chunks.forEach((chunk, i) => {
+    if (i === chunks.length - 1) {
+      term.write(chunk, () => {
+        liveStamping = true;
+      });
+    } else {
+      term.write(chunk);
+    }
+  });
+}
+
+async function loadScrollback(): Promise<void> {
+  const replay = await window.moolin.getScrollback();
+  window.moolin.log("debug", "renderer", "replaying", replay.chunks.length, "buffered chunk(s)");
+  writeReplay(replay);
   // Connecting swaps in the world's logged history: start over from it. The
   // chunks ride along in the message so they stay ordered with live data.
-  window.moolin.onTerminalReset((history) => {
+  window.moolin.onTerminalReset((replay) => {
     isCleared = false;
+    clearStamps();
     term.reset();
-    for (const chunk of history) term.write(chunk);
+    writeReplay(replay);
   });
   window.moolin.onTelnetData((data) => {
     isCleared = false;
@@ -398,7 +588,9 @@ window.moolin.onZoom((direction) => {
   window.moolin.log("debug", "renderer", "zoom", direction, "-> fontSize", next);
   term.options.fontSize = next;
   inputArea.style.fontSize = `${next}px`;
+  gutter.style.fontSize = `${next}px`; // keep the gutter's cell height matched
   resizeInput();
+  scheduleGutter();
 });
 
 resizeInput();

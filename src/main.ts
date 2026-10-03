@@ -277,6 +277,16 @@ function buildMenu(terminal: TerminalWindow): void {
           registerAccelerator: false,
           click: () => terminal.send(IpcChannels.terminalClearScreenRequested),
         },
+        {
+          label: "Show &Timestamps",
+          type: "checkbox",
+          checked: terminal.showTimestamps,
+          click: () => {
+            terminal.showTimestamps = !terminal.showTimestamps;
+            terminal.send(IpcChannels.terminalToggleTimestamps, terminal.showTimestamps);
+            buildMenu(terminal); // keep the checkbox in sync with the stored state
+          },
+        },
         { type: "separator" },
         { role: "togglefullscreen", label: "Toggle &Full Screen" },
       ],
@@ -382,7 +392,7 @@ ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRe
   buildMenu(terminal);
 });
 
-ipcMain.handle(IpcChannels.terminalGetScrollback, (event) => terminalFor(event)?.getScrollback() ?? []);
+ipcMain.handle(IpcChannels.terminalGetScrollback, (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [] });
 
 ipcMain.handle(
   IpcChannels.connectionGetState,

@@ -30,6 +30,8 @@ export const IpcChannels = {
   // keep the Edit menu's Undo/Redo items' enabled state in sync.
   terminalUndoStateChanged: "terminal:undoStateChanged",
   terminalClearScreenRequested: "terminal:clearScreenRequested",
+  // main -> renderer: show or hide the per-line timestamp gutter.
+  terminalToggleTimestamps: "terminal:toggleTimestamps",
   connectionGetState: "connection:getState",
   connectionState: "connection:state",
   clipboardWriteText: "clipboard:writeText",

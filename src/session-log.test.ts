@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { logPathFor, readLogTail, sanitizePathSegment, SessionLogRegistry } from "./session-log";
+import { logPathFor, readLogTail, readTimesTail, sanitizePathSegment, SessionLogRegistry } from "./session-log";
 import { newWorld } from "./world-utils";
 
 function tempDir(): string {
@@ -57,16 +57,58 @@ test("append creates directories, keeps escapes, and accumulates across sessions
   const registry = new SessionLogRegistry();
   const first = registry.claim(file);
   assert.ok(first);
-  first.append("\x1b[31mred\x1b[0m\r\n");
-  first.append(new Uint8Array([104, 105, 13, 10]));
+  first.append("\x1b[31mred\x1b[0m\r\n", 1000);
+  first.append(new Uint8Array([104, 105, 13, 10]), 2000);
   first.close();
   await new Promise((resolve) => setTimeout(resolve, 50));
 
   const second = registry.claim(file);
   assert.ok(second);
-  assert.equal(Buffer.from(second.history(1000)).toString(), "\x1b[31mred\x1b[0m\r\nhi\r\n");
-  second.append("more\r\n");
+  assert.equal(Buffer.from(second.history(1000).bytes).toString(), "\x1b[31mred\x1b[0m\r\nhi\r\n");
+  second.append("more\r\n", 3000);
   second.close();
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(fs.readFileSync(file, "utf8"), "\x1b[31mred\x1b[0m\r\nhi\r\nmore\r\n");
+});
+
+test("the sidecar restores each line's arrival time across sessions", async () => {
+  const file = path.join(tempDir(), "w", "moolin.log");
+  const registry = new SessionLogRegistry();
+  const first = registry.claim(file);
+  assert.ok(first);
+  first.append("one\r\n", 1000);
+  first.append("two\r\nthree\r\n", 2000); // one append, two lines, same time
+  first.close();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const second = registry.claim(file);
+  assert.ok(second);
+  assert.deepEqual(second.history(1000).times, [1000, 2000, 2000]);
+  second.close();
+});
+
+test("history times align to the log tail when it is truncated", async () => {
+  const file = path.join(tempDir(), "w", "moolin.log");
+  const registry = new SessionLogRegistry();
+  const log = registry.claim(file);
+  assert.ok(log);
+  log.append("aaaa\r\n", 1); // dropped by the tail cut below
+  log.append("bbbb\r\n", 2);
+  log.append("cccc\r\n", 3);
+  log.close();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const reopened = registry.claim(file);
+  assert.ok(reopened);
+  // Only the last two lines survive a 14-byte tail; their times come with them.
+  const history = reopened.history(14);
+  assert.equal(Buffer.from(history.bytes).toString(), "bbbb\r\ncccc\r\n");
+  assert.deepEqual(history.times, [2, 3]);
+  reopened.close();
+});
+
+test("readTimesTail reports unknown (null) times when there is no sidecar", () => {
+  const missing = path.join(tempDir(), "nope.times");
+  assert.deepEqual(readTimesTail(missing, 3), [null, null, null]);
+  assert.deepEqual(readTimesTail(missing, 0), []);
 });
