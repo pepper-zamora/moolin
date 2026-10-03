@@ -143,10 +143,23 @@ export interface LogHistory {
   times: Array<number | null>;
 }
 
+// Writes all of `bytes` at the end of `fd`'s file (opened for append),
+// looping in case the OS takes it in parts.
+function writeAll(fd: number, bytes: Uint8Array): void {
+  let written = 0;
+  while (written < bytes.length) written += fs.writeSync(fd, bytes, written);
+}
+
 // An open, append-only log file that one window owns.
+//
+// Writes are synchronous so the log and its sidecar always reach the disk
+// together: a window that reads them straight after another's close() (e.g.
+// reconnecting to the same world) sees the two at the same point, where
+// buffered streams could each still be flushing to a different one. Output
+// arrives at the pace people read, so blocking on it is cheap.
 export class SessionLog {
-  private stream: fs.WriteStream | null = null;
-  private timesStream: fs.WriteStream | null = null;
+  private fd: number | null = null;
+  private timesFd: number | null = null;
   private closed = false;
 
   constructor(
@@ -168,37 +181,40 @@ export class SessionLog {
   // sidecar for each line it completes.
   append(data: string | Uint8Array, time: number | null): void {
     if (this.closed) return;
-    if (!this.stream) {
-      try {
+    try {
+      if (this.fd === null) {
         fs.mkdirSync(path.dirname(this.file), { recursive: true });
         repairTimesFile(timesFileFor(this.file));
-      } catch (error) {
-        this.fail(error as Error);
-        return;
+        this.fd = fs.openSync(this.file, "a");
+        this.timesFd = fs.openSync(timesFileFor(this.file), "a");
       }
-      this.stream = fs.createWriteStream(this.file, { flags: "a" });
-      this.stream.on("error", (error) => this.fail(error));
-      this.timesStream = fs.createWriteStream(timesFileFor(this.file), { flags: "a" });
-      this.timesStream.on("error", (error) => this.fail(error));
-    }
-    this.stream.write(data);
-    const newlines = countNewlines(data);
-    if (newlines > 0 && this.timesStream) {
-      const buffer = Buffer.alloc(newlines * TIME_BYTES);
-      // null → NaN on disk, read back as null (see readTimesTail).
-      for (let i = 0; i < newlines; i++) buffer.writeDoubleLE(time ?? Number.NaN, i * TIME_BYTES);
-      this.timesStream.write(buffer);
+      writeAll(this.fd, typeof data === "string" ? Buffer.from(data, "utf8") : data);
+      const newlines = countNewlines(data);
+      if (newlines > 0 && this.timesFd !== null) {
+        const buffer = Buffer.alloc(newlines * TIME_BYTES);
+        // null → NaN on disk, read back as null (see readTimesTail).
+        for (let i = 0; i < newlines; i++) buffer.writeDoubleLE(time ?? Number.NaN, i * TIME_BYTES);
+        writeAll(this.timesFd, buffer);
+      }
+    } catch (error) {
+      this.fail(error as Error);
     }
   }
 
-  // Flushes and gives up ownership, letting another window claim the file.
+  // Closes the files and gives up ownership, letting another window claim them.
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    this.stream?.end();
-    this.stream = null;
-    this.timesStream?.end();
-    this.timesStream = null;
+    for (const fd of [this.fd, this.timesFd]) {
+      if (fd === null) continue;
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Nothing is buffered, so there is nothing left to lose.
+      }
+    }
+    this.fd = null;
+    this.timesFd = null;
     this.release();
   }
 

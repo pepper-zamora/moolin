@@ -52,7 +52,7 @@ test("only the first claimant owns a log; closing releases it", () => {
   assert.ok(registry.claim(file));
 });
 
-test("append creates directories, keeps escapes, and accumulates across sessions", async () => {
+test("append creates directories, keeps escapes, and accumulates across sessions", () => {
   const file = path.join(tempDir(), "w", "c", "moolin.log");
   const registry = new SessionLogRegistry();
   const first = registry.claim(file);
@@ -60,18 +60,16 @@ test("append creates directories, keeps escapes, and accumulates across sessions
   first.append("\x1b[31mred\x1b[0m\r\n", 1000);
   first.append(new Uint8Array([104, 105, 13, 10]), 2000);
   first.close();
-  await new Promise((resolve) => setTimeout(resolve, 50));
 
   const second = registry.claim(file);
   assert.ok(second);
   assert.equal(Buffer.from(second.history(1000).bytes).toString(), "\x1b[31mred\x1b[0m\r\nhi\r\n");
   second.append("more\r\n", 3000);
   second.close();
-  await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(fs.readFileSync(file, "utf8"), "\x1b[31mred\x1b[0m\r\nhi\r\nmore\r\n");
 });
 
-test("the sidecar restores each line's arrival time across sessions", async () => {
+test("the sidecar restores each line's arrival time across sessions", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   const registry = new SessionLogRegistry();
   const first = registry.claim(file);
@@ -79,7 +77,6 @@ test("the sidecar restores each line's arrival time across sessions", async () =
   first.append("one\r\n", 1000);
   first.append("two\r\nthree\r\n", 2000); // one append, two lines, same time
   first.close();
-  await new Promise((resolve) => setTimeout(resolve, 50));
 
   const second = registry.claim(file);
   assert.ok(second);
@@ -87,7 +84,7 @@ test("the sidecar restores each line's arrival time across sessions", async () =
   second.close();
 });
 
-test("history times align to the log tail when it is truncated", async () => {
+test("history times align to the log tail when it is truncated", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   const registry = new SessionLogRegistry();
   const log = registry.claim(file);
@@ -96,7 +93,6 @@ test("history times align to the log tail when it is truncated", async () => {
   log.append("bbbb\r\n", 2);
   log.append("cccc\r\n", 3);
   log.close();
-  await new Promise((resolve) => setTimeout(resolve, 50));
 
   const reopened = registry.claim(file);
   assert.ok(reopened);
@@ -107,7 +103,7 @@ test("history times align to the log tail when it is truncated", async () => {
   reopened.close();
 });
 
-test("the sidecar marks untimed (Moolin) lines as null, keeping alignment", async () => {
+test("the sidecar marks untimed (Moolin) lines as null, keeping alignment", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   const registry = new SessionLogRegistry();
   const log = registry.claim(file);
@@ -115,7 +111,6 @@ test("the sidecar marks untimed (Moolin) lines as null, keeping alignment", asyn
   log.append("[connecting]\r\n", null); // a Moolin status line: no timestamp
   log.append("server says hi\r\n", 5000); // real server output
   log.close();
-  await new Promise((resolve) => setTimeout(resolve, 50));
 
   const reopened = registry.claim(file);
   assert.ok(reopened);
@@ -140,7 +135,7 @@ test("readTimesTail reads a torn final record as an unknown (null) time", () => 
   assert.deepEqual(readTimesTail(file, 4), [null, 1000, 2000, null]);
 });
 
-test("appending after a torn sidecar write keeps later times aligned", async () => {
+test("appending after a torn sidecar write keeps later times aligned", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   fs.mkdirSync(path.dirname(file), { recursive: true });
   // As if the app died mid-way through recording the second line's time.
@@ -154,10 +149,29 @@ test("appending after a torn sidecar write keeps later times aligned", async () 
   assert.ok(log);
   log.append("three\r\n", 3000);
   log.close();
-  await new Promise((resolve) => setTimeout(resolve, 50));
 
   const reopened = registry.claim(file);
   assert.ok(reopened);
   assert.deepEqual(reopened.history(1000).times, [1000, null, 3000]);
   reopened.close();
+});
+
+test("a log reclaimed straight after close reads back everything, times aligned", () => {
+  const file = path.join(tempDir(), "w", "moolin.log");
+  const registry = new SessionLogRegistry();
+  const first = registry.claim(file);
+  assert.ok(first);
+  for (let i = 0; i < 100; i++) first.append(`line ${i}\r\n`, i);
+  first.close();
+
+  // Reconnecting to the same world: no chance for anything to flush between.
+  const second = registry.claim(file);
+  assert.ok(second);
+  const history = second.history(1_000_000);
+  assert.equal(Buffer.from(history.bytes).toString().split("\r\n").length - 1, 100);
+  assert.deepEqual(
+    history.times,
+    Array.from({ length: 100 }, (_, i) => i),
+  );
+  second.close();
 });
