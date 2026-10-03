@@ -196,6 +196,54 @@ currently discards or never negotiates:
   show-only or hide-by-tag turns tags into a lightweight "channel" view
   (e.g. isolate just combat lines, or just tells) without needing full
   spawn/capture windows.
+- **Line timestamps**: recording when each line arrived and optionally
+  showing it. Moolin captures no per-line time at all — both the replay
+  buffer (`src/scrollback-buffer.ts`) and the session log
+  (`src/session-log.ts`) are raw byte streams storing "exactly what the
+  terminal was shown, escape sequences included," with no line model and no
+  embedded clock. How other clients do it varies, and the split matters for
+  Moolin:
+  - [MUSHclient](https://www.gammon.com.au/forum/bbshowpost.php?bbsubject_id=10625)
+    (since v4.62) is the richest: an optional per-line timestamp drawn in a
+    margin *and* a hover tooltip giving the exact time (with the day) for
+    whichever line the pointer is over, configured separately for input /
+    output / note lines, with format codes down to inter-line delta (`%D`)
+    and elapsed-since-startup (`%e`). Crucially the timestamp "is not
+    actually part of the text of the line" — it lives in the draw routine,
+    not the output buffer, so triggers, logging, copy and search all still
+    see the untimestamped text.
+  - [Mudlet](https://wiki.mudlet.org/w/Manual:Date/Time_Functions) stores a
+    timestamp for every line, shows it as a margin prefix toggled by the
+    blue (i) button, and exposes it to scripts via `getTimestamp(console,
+    line)` (format `hh:mm:ss.zzz`).
+  - [TinTin++](https://tintin.mudhalla.net/manual/log.php) has no on-screen
+    line timestamp; `#log timestamp` only prepends times (strftime format)
+    to the *log file*.
+  - [Blightmud](https://github.com/Blightmud/Blightmud/blob/dev/resources/help/settings.md)
+    has none built in either: a `log_timestamps` setting timestamps the
+    session *log*, and a separate community plugin
+    ([blightmud-timestamp](https://github.com/Blightmud/blightmud-timestamp))
+    prepends `[hh:mm:ss]` to displayed lines by rewriting them.
+  MUSHclient's display-only model is the one worth copying here, precisely
+  because of the trigger/search work above: you don't want the clock baked
+  into the line text where a trigger, the scrollback search (this section)
+  or the session log would then have to see and skip it. xterm.js has no
+  dedicated timestamp gutter, but it does have a decorations/marker API
+  (`registerMarker` + `registerDecoration`) that anchors overlay elements to
+  buffer lines — the same mechanism VS Code's terminal uses for its
+  command-navigation gutter marks — so a timestamp margin (and the
+  Blightmud-style per-line tag marks in §1, which would share it) is an
+  overlay layer, not buffer text, keeping the display-only property for
+  free. A natural shape: a checkbox item in the existing **View** menu
+  (`src/main.ts`, alongside Clear Screen / Zoom) toggling the overlay, with
+  the arrival time stamped via a marker as each newline is written in
+  `write()` (`src/terminal-window.ts`), where the wall-clock time is known.
+  The honest limitation is history: lines replayed after a renderer reload,
+  and the log tail loaded on connect, carry no time (the log never recorded
+  one), so a first cut only timestamps lines received live this session
+  unless the log format grows a per-line clock. "Per line" also presumes
+  knowing where lines break, which the byte-chunk buffer doesn't track today
+  — the same missing line/prompt model that EOR/GA detection touches in §6.
 - **Tab completion**: completing a partial word against recent scrollback
   output or command history (Blightmud; also common in Mudlet/MUSHclient).
   Moolin's input box has history recall (Up/Down) but no completion.
@@ -234,7 +282,11 @@ currently discards or never negotiates:
    API" work (xterm.js has a search addon; Electron/Chromium's spellchecker
    is available for free in any text input) rather than new design surface.
    Low-hanging fruit, worth doing first regardless of where the rest of
-   this list goes.
+   this list goes. **Line timestamps** (§8) belong in the same tier: also
+   self-contained and scripting-independent, though slightly more than
+   "wire up a library" since they need an xterm.js decorations overlay and
+   a per-line arrival time captured live — and, done the display-only way,
+   they also lay down the gutter overlay that later tag marks (§1) reuse.
 2. **Triggers** (match + highlight/gag/send/script actions) and **aliases**
    — the two most-depended-on features; almost nothing else in this list is
    useful without them.
