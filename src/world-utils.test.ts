@@ -34,5 +34,8 @@ test("targetLabel names the character and world, with fallbacks for blank names"
   assert.equal(targetLabel(world, character), "Cowpernica - LambdaMOO");
   assert.equal(targetLabel(world, null), "LambdaMOO");
   assert.equal(targetLabel({ ...world, name: "" }, null), "lambda.moo.mud.org");
-  assert.equal(targetLabel({ ...world, name: "" }, { ...character, name: " " }), "Unnamed character - lambda.moo.mud.org");
+  assert.equal(
+    targetLabel({ ...world, name: "" }, { ...character, name: " " }),
+    "Unnamed character - lambda.moo.mud.org",
+  );
 });

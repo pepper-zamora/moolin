@@ -26,7 +26,7 @@ const VERB_BYTES: Record<NegotiationVerb, number> = { do: DO, dont: DONT, will: 
 // server; its payload is discarded rather than buffered without bound.
 export const MAX_SUB_LENGTH = 64 * 1024;
 
-const enum State {
+enum State {
   Data,
   Iac,
   Option,

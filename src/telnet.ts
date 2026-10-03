@@ -1,5 +1,5 @@
-import * as net from "net";
-import * as tls from "tls";
+import * as net from "node:net";
+import * as tls from "node:tls";
 import { TelnetParser, encodeNegotiation, encodeSub, escapeIac, type NegotiationVerb } from "./telnet-protocol";
 import type { LogLevel } from "./logger";
 
@@ -297,7 +297,7 @@ export class TelnetSession {
 
   sendLine(text: string): { echoed: boolean } {
     if (!this.socket) return { echoed: false };
-    this.socket.write(escapeIac(Buffer.from(text.replace(/\n/g, "\r\n") + "\r\n", "utf8")));
+    this.socket.write(escapeIac(Buffer.from(`${text.replace(/\n/g, "\r\n")}\r\n`, "utf8")));
     return { echoed: !this.localEchoSuppressed };
   }
 

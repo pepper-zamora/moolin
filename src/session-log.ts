@@ -1,5 +1,5 @@
-import * as fs from "fs";
-import * as path from "path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Character, World } from "./worlds-types";
 import { characterLabel, worldLabel } from "./world-utils";
 
@@ -9,8 +9,10 @@ export const LOG_FILE_NAME = "moolin.log";
 // separators and characters Windows forbids become "_", and a name that would
 // be empty, "." or ".." (or start with a dot, i.e. hidden) gets a "_" prefix.
 export function sanitizePathSegment(name: string): string {
-  // eslint-disable-next-line no-control-regex
-  const cleaned = name.replace(/[\u0000-\u001f<>:"/\\|?*]/g, "_").trim().replace(/[. ]+$/, "");
+  const cleaned = name
+    .replace(/[\u0000-\u001f<>:"/\\|?*]/g, "_")
+    .trim()
+    .replace(/[. ]+$/, "");
   if (cleaned === "") return "_";
   return cleaned.startsWith(".") ? `_${cleaned}` : cleaned;
 }

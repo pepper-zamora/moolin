@@ -63,11 +63,7 @@ export class WindowManager {
     const bounds = near
       ? cascadedFrom(near.window)
       : {
-          ...centeredOn(
-            screen.getDisplayNearestPoint(screen.getCursorScreenPoint()),
-            TERMINAL_WIDTH,
-            TERMINAL_HEIGHT,
-          ),
+          ...centeredOn(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()), TERMINAL_WIDTH, TERMINAL_HEIGHT),
           width: TERMINAL_WIDTH,
           height: TERMINAL_HEIGHT,
         };

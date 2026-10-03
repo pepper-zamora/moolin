@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as net from "net";
+import * as net from "node:net";
 import { ConnectionManager, type ConnectionManagerHandlers } from "./connection-manager";
 import { newWorld } from "./world-utils";
 import type { Character, ConnectTarget } from "./worlds-types";
@@ -45,7 +45,9 @@ async function waitUntil(condition: () => boolean): Promise<void> {
 
 const cowpernica: Character = { id: "c", name: "Cowpernica", password: "hunter2" };
 
-test("auto-login sends the expanded template after connecting as a character", { timeout: TEST_TIMEOUT_MS }, async () => {
+test("auto-login sends the expanded template after connecting as a character", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
   const { server, port, received } = await recordingServer();
   const world = { ...newWorld("w"), name: "Test", host: "127.0.0.1", port, characters: [cowpernica] };
   const { manager, connected } = managerWithLog();

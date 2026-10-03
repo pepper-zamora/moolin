@@ -3,7 +3,7 @@ import { ConnectionManager } from "./connection-manager";
 import { ScrollbackBuffer, type TerminalChunk } from "./scrollback-buffer";
 import { IpcChannels } from "./ipc-channels";
 import { log } from "./logger";
-import { logPathFor, SessionLog, type SessionLogRegistry } from "./session-log";
+import { logPathFor, type SessionLog, type SessionLogRegistry } from "./session-log";
 import { targetLabel } from "./world-utils";
 import type { ConnectTarget } from "./worlds-types";
 

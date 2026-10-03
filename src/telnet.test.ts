@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as net from "net";
-import * as tls from "tls";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
-import { execSync } from "child_process";
+import * as net from "node:net";
+import * as tls from "node:tls";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { execSync } from "node:child_process";
 import { TelnetSession, type ConnectOptions, type TelnetSessionHandlers, type TlsInfo } from "./telnet";
 
 function options(port: number, overrides: Partial<ConnectOptions> = {}): ConnectOptions {
@@ -115,7 +115,9 @@ test("rejects an untrusted certificate unless the world allows it", { timeout: T
   }
 });
 
-test("connects to a self-signed TLS server when allowed, and reports cert/cipher info", { timeout: TEST_TIMEOUT_MS }, async () => {
+test("connects to a self-signed TLS server when allowed, and reports cert/cipher info", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
   const { server, cleanup } = await selfSignedTlsServer((socket) => socket.write("hello\r\n"));
 
   const { handlers, events } = recordingHandlers();
@@ -194,9 +196,18 @@ test("disconnect() while connecting tears down cleanly without hanging", { timeo
   server.close();
 });
 
-test("negotiates ECHO, NAWS and TTYPE, and stops local echo while the server echoes", { timeout: TEST_TIMEOUT_MS }, async () => {
-  const IAC = 255, SB = 250, SE = 240, WILL = 251, WONT = 252, DO = 253;
-  const ECHO = 1, TTYPE = 24, NAWS = 31;
+test("negotiates ECHO, NAWS and TTYPE, and stops local echo while the server echoes", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const IAC = 255,
+    SB = 250,
+    SE = 240,
+    WILL = 251,
+    WONT = 252,
+    DO = 253;
+  const ECHO = 1,
+    TTYPE = 24,
+    NAWS = 31;
   let serverSocket: net.Socket | undefined;
   const received: number[] = [];
   const server = net.createServer((socket) => {
@@ -243,7 +254,11 @@ test("negotiates ECHO, NAWS and TTYPE, and stops local echo while the server ech
 });
 
 test("refuses options it doesn't support", { timeout: TEST_TIMEOUT_MS }, async () => {
-  const IAC = 255, WILL = 251, WONT = 252, DO = 253, DONT = 254;
+  const IAC = 255,
+    WILL = 251,
+    WONT = 252,
+    DO = 253,
+    DONT = 254;
   const received: number[] = [];
   const server = net.createServer((socket) => {
     socket.on("data", (chunk) => received.push(...chunk));

@@ -74,9 +74,7 @@ let saving: Promise<void> = Promise.resolve();
 function save(): void {
   if (loadError) return;
   const snapshot = structuredClone(worlds);
-  saving = saving
-    .then(() => window.moolin.worlds.save(snapshot))
-    .then((result) => showError(result.error ?? null));
+  saving = saving.then(() => window.moolin.worlds.save(snapshot)).then((result) => showError(result.error ?? null));
 }
 
 // --- Tree ---
@@ -123,7 +121,9 @@ function renderTree(): void {
         cli.setAttribute("aria-selected", String(characterSelected));
         cli.dataset.worldId = world.id;
         cli.dataset.characterId = character.id;
-        cli.append(makeRow(characterLabel(character), { isWorld: false, expanded: false, isSelected: characterSelected }));
+        cli.append(
+          makeRow(characterLabel(character), { isWorld: false, expanded: false, isSelected: characterSelected }),
+        );
         group.append(cli);
       }
       li.append(group);

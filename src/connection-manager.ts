@@ -139,11 +139,15 @@ export class ConnectionManager {
           if (this.session !== session) return;
           this.handlers.onMessage(green(`TLS: ${info.protocol}, ${info.cipherName}`));
           this.handlers.onMessage(
-            green(`cert: ${info.certSubject} issued by ${info.certIssuer}, valid ${info.certValidFrom} to ${info.certValidTo}`),
+            green(
+              `cert: ${info.certSubject} issued by ${info.certIssuer}, valid ${info.certValidFrom} to ${info.certValidTo}`,
+            ),
           );
           if (!info.certValid) {
             this.handlers.onMessage(
-              red(`warning: certificate is not trusted (${info.certValidationError}); connecting anyway as this world allows`),
+              red(
+                `warning: certificate is not trusted (${info.certValidationError}); connecting anyway as this world allows`,
+              ),
             );
           }
         },

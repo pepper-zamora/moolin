@@ -1,5 +1,5 @@
 import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, shell } from "electron";
-import * as path from "path";
+import * as path from "node:path";
 import { parseWorld, readWorldsFile, resolveWorldsPath, saveWorlds, updateMru as updateMruState } from "./worlds";
 import { WindowManager } from "./window-manager";
 import type { TerminalWindow } from "./terminal-window";

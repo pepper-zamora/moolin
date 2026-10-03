@@ -32,7 +32,10 @@ its worlds-and-characters model and dialog, and its input/focus behavior.
   without bound for now.
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
-- **Multi-line input** that grows as you type, with shell-like history.
+- **Multi-line input** that grows as you type, with shell-like history and its
+  own undo/redo (coalesced typing, and atomic steps for cut/paste).
+- **Cut, copy and paste** that work against either the scrollback selection or
+  the input area, whichever was selected last.
 - **Recent connections** on the Worlds menu, Ctrl+1 to Ctrl+5.
 
 ## Getting started
@@ -121,8 +124,10 @@ Nothing else is added, so end the template with `\r` (most servers) or
 | Up / Down                | Previous / next command, from the first / last line     |
 | Ctrl+Up / Ctrl+Down      | Previous / next command, from anywhere                  |
 | Page Up / Page Down      | Scroll the scrollback                                   |
-| Ctrl+Y                   | Clear the screen (earlier output stays scrollable)      |
-| Ctrl+C / Ctrl+V          | Copy the selection / paste into the input area          |
+| Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
+| Ctrl+X / Ctrl+C / Ctrl+V | Cut / copy the selection / paste into the input area    |
+| Ctrl+Z                   | Undo in the input area                                  |
+| Ctrl+Shift+Z / Ctrl+Y    | Redo in the input area                                  |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default font size                    |
 | Ctrl+R                   | Reload the window (the connection and scrollback stay)  |
 
@@ -163,6 +168,8 @@ by moolin v1 or Moolin load as-is.
 | `npm run dev`       | Rebuild on change (reload the window to pick it up)      |
 | `npm test`          | Run the unit tests (`src/*.test.ts`, Node's test runner) |
 | `npm run typecheck` | Typecheck only                                          |
+| `npm run lint`      | Lint `src/` with [Biome](https://biomejs.dev/) (`npm run lint:fix` to apply safe fixes) |
+| `npm run format`    | Format `src/` with Biome (`npm run format:check` to check without writing) |
 
 The TLS tests generate a throwaway certificate with `openssl`, which must be
 on the `PATH`.
@@ -184,6 +191,7 @@ on the `PATH`.
 | `src/renderer.ts`         | The terminal window's page: scrollback, input area, keys                  |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
 | `src/command-history.ts`  | Input history                                                             |
+| `src/input-undo.ts`       | Input area undo/redo                                                     |
 | `src/ipc-channels.ts`     | IPC channel names shared by main and preload                              |
 
 ## License

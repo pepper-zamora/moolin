@@ -2,7 +2,7 @@
 // they must stay free of Node and Electron imports.
 import type { Character, World } from "./worlds-types";
 
-export const DEFAULT_LOGIN_TEMPLATE = "co \"{{character}}\" {{password}}\\r";
+export const DEFAULT_LOGIN_TEMPLATE = 'co "{{character}}" {{password}}\\r';
 export const DEFAULT_PORT = 7777;
 
 export function newWorld(id: string): World {
@@ -48,8 +48,8 @@ export function targetLabel(world: World, character: Character | null): string {
 // Expands {{character}} and {{password}}, plus the escapes \r, \n and \\.
 // Done in one pass so substituted text is never itself unescaped.
 export function expandLoginTemplate(template: string, character: string, password: string): string {
-  return template.replace(/\\([\\rn])|\{\{(character|password)\}\}/g, (_match, escape?: string, key?: string) => {
-    if (escape) return escape === "r" ? "\r" : escape === "n" ? "\n" : "\\";
+  return template.replace(/\\([\\rn])|\{\{(character|password)\}\}/g, (_match, escaped?: string, key?: string) => {
+    if (escaped) return escaped === "r" ? "\r" : escaped === "n" ? "\n" : "\\";
     return key === "character" ? character : password;
   });
 }
