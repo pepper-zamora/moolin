@@ -16,7 +16,7 @@ its worlds-and-characters model and dialog, and its input/focus behavior.
 - **Worlds and characters.** Save worlds (host, port, TLS) and the characters
   you play on each, then connect to a world, or to a world as a character.
 - **Auto-login.** Connecting as a character can send a login command built
-  from a per-world template, e.g. `co {{character}} {{password}}\r`.
+  from a per-world template, e.g. `co "{{character}}" {{password}}\r`.
 - **TLS, explicitly.** Each world either uses TLS or doesn't; Moolin never
   guesses, so a connection can't be silently downgraded. Certificates are
   verified unless the world opts into accepting untrusted (e.g. self-signed)
@@ -88,7 +88,7 @@ sends the world's login command once connected. In the template:
 | `\\`            | a backslash              |
 
 Nothing else is added, so end the template with `\r` (most servers) or
-`\r\n`. The default is `co {{character}} {{password}}\r`.
+`\r\n`. The default is `co "{{character}}" {{password}}\r`.
 
 ### Keyboard shortcuts
 

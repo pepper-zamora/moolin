@@ -55,7 +55,7 @@ test("auto-login sends the expanded template after connecting as a character", {
     await connected;
     assert.deepEqual(manager.getState(), { status: "connected", secure: false, label: "Cowpernica - Test" });
     await waitUntil(() => received().length > 0);
-    assert.equal(received(), "co Cowpernica hunter2\r");
+    assert.equal(received(), 'co "Cowpernica" hunter2\r');
   } finally {
     manager.disconnect();
     server.close();

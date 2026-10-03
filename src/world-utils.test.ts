@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { expandLoginTemplate, isConnectable, newWorld, targetLabel, DEFAULT_LOGIN_TEMPLATE } from "./world-utils";
 
 test("expandLoginTemplate substitutes the character and password", () => {
-  assert.equal(expandLoginTemplate(DEFAULT_LOGIN_TEMPLATE, "Cowpernica", "hunter2"), "co Cowpernica hunter2\r");
+  assert.equal(expandLoginTemplate(DEFAULT_LOGIN_TEMPLATE, "Cowpernica", "hunter2"), 'co "Cowpernica" hunter2\r');
 });
 
 test("expandLoginTemplate handles \\r, \\n and \\\\ escapes", () => {

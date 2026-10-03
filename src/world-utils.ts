@@ -2,7 +2,7 @@
 // they must stay free of Node and Electron imports.
 import type { Character, World } from "./worlds-types";
 
-export const DEFAULT_LOGIN_TEMPLATE = "co {{character}} {{password}}\\r";
+export const DEFAULT_LOGIN_TEMPLATE = "co \"{{character}}\" {{password}}\\r";
 export const DEFAULT_PORT = 7777;
 
 export function newWorld(id: string): World {
