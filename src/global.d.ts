@@ -17,6 +17,7 @@ declare global {
       sendInput(text: string): void;
       sendResize(cols: number, rows: number): void;
       getScrollback(): Promise<Array<string | Uint8Array>>;
+      onTerminalReset(callback: (chunks: Array<string | Uint8Array>) => void): void;
       getConnectionState(): Promise<ConnectionState>;
       onTelnetData(callback: (data: string | Uint8Array) => void): void;
       onConnectionState(callback: (state: ConnectionState) => void): void;

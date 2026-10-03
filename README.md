@@ -24,6 +24,12 @@ its worlds-and-characters model and dialog, and its input/focus behavior.
 - **Scrollback that survives a reload.** 100,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R) or a renderer crash doesn't lose it.
+- **Persistent logs.** Everything a window shows, colors included, is appended
+  to `~/Documents/Moolin/<world>/<character>/moolin.log` (just `<world>/` when
+  connecting without a character). Connecting pre-populates the scrollback with
+  the last 2 MiB of that log. If several windows are connected to the same
+  world and character, only the first reads and writes the log. The log grows
+  without bound for now.
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history.

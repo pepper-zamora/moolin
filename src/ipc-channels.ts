@@ -16,6 +16,8 @@ export const IpcChannels = {
   telnetResize: "telnet:resize",
   telnetData: "telnet:data",
   terminalGetScrollback: "terminal:getScrollback",
+  // main -> renderer: the scrollback was replaced; clear and write these chunks.
+  terminalReset: "terminal:reset",
   terminalZoom: "terminal:zoom",
   terminalContextMenu: "terminal:contextMenu",
   terminalCopyRequested: "terminal:copyRequested",

@@ -4,6 +4,7 @@ import { parseWorld, readWorldsFile, resolveWorldsPath, saveWorlds, updateMru as
 import { WindowManager } from "./window-manager";
 import type { TerminalWindow } from "./terminal-window";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
+import { SessionLogRegistry } from "./session-log";
 import { IpcChannels } from "./ipc-channels";
 import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-types";
 import { targetLabel } from "./world-utils";
@@ -43,7 +44,14 @@ const INDEX_HTML = path.join(__dirname, "..", "src", "index.html");
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 
 const windowManager = new WindowManager(
-  { appIcon: APP_ICON, preloadPath: PRELOAD_PATH, rendererArgs, indexHtmlPath: INDEX_HTML },
+  {
+    appIcon: APP_ICON,
+    preloadPath: PRELOAD_PATH,
+    rendererArgs,
+    indexHtmlPath: INDEX_HTML,
+    logRoot: path.join(app.getPath("documents"), "Moolin"),
+    logs: new SessionLogRegistry((file, error) => log("error", "main", "session log failed", file, error.message)),
+  },
   {
     onStateChange: (terminal) => buildMenu(terminal),
     onConnected: (target) => updateMru(target),

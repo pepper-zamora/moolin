@@ -1,4 +1,5 @@
 import { screen, type BrowserWindow, type WebContents } from "electron";
+import type { SessionLogRegistry } from "./session-log";
 import { TerminalWindow, type TerminalWindowHandlers } from "./terminal-window";
 import { log } from "./logger";
 
@@ -37,6 +38,9 @@ export interface WindowManagerOptions {
   preloadPath: string;
   rendererArgs: string[];
   indexHtmlPath: string;
+  // Where session logs live, and who currently owns which.
+  logRoot: string;
+  logs: SessionLogRegistry;
 }
 
 // Owns every terminal window (one per connection) and maps an IPC sender

@@ -16,6 +16,10 @@ export interface ConnectionState {
 }
 
 export interface ConnectionManagerHandlers {
+  // A connection attempt to `target` is about to begin, before any of its
+  // output — the point to switch whatever records the window's output over
+  // to that target.
+  onConnecting: (target: ConnectTarget) => void;
   // Status or secure state changed (connecting, connected, or any
   // disconnect) — refresh anything derived from it (menu, title, input box).
   onStateChange: () => void;
@@ -92,6 +96,7 @@ export class ConnectionManager {
     const host = world.host.trim();
     const port = world.port;
     this.log("info", "connecting to", `${host}:${port}`, `(${label})`, world.tls ? "over TLS" : "");
+    this.handlers.onConnecting(target);
     this.handlers.onMessage(yellow(`connecting to ${label} (${host}:${port}${world.tls ? ", TLS" : ""})...`));
 
     // Every callback checks it still belongs to the current session: a

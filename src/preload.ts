@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld("moolin", {
   sendInput: (text: string): void => ipcRenderer.send(IpcChannels.telnetInput, text),
   sendResize: (cols: number, rows: number): void => ipcRenderer.send(IpcChannels.telnetResize, { cols, rows }),
   getScrollback: (): Promise<Array<string | Uint8Array>> => ipcRenderer.invoke(IpcChannels.terminalGetScrollback),
+  onTerminalReset: (callback: (chunks: Array<string | Uint8Array>) => void): void => {
+    ipcRenderer.on(IpcChannels.terminalReset, (_event, chunks: Array<string | Uint8Array>) => callback(chunks));
+  },
   getConnectionState: (): Promise<ConnectionState> => ipcRenderer.invoke(IpcChannels.connectionGetState),
   onTelnetData: (callback: (data: string | Uint8Array) => void): void => {
     ipcRenderer.on(IpcChannels.telnetData, (_event, data: string | Uint8Array) => callback(data));

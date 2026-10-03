@@ -30,6 +30,7 @@ function managerWithLog(): { manager: ConnectionManager; messages: string[]; con
   let resolveConnected: (target: ConnectTarget) => void = () => {};
   const connected = new Promise<ConnectTarget>((resolve) => (resolveConnected = resolve));
   const handlers: ConnectionManagerHandlers = {
+    onConnecting: () => {},
     onStateChange: () => {},
     onMessage: (text) => messages.push(text),
     onData: () => {},

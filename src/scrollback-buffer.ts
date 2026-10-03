@@ -6,8 +6,8 @@ function byteLength(data: TerminalChunk): number {
 
 // In-memory replay buffer so a window's scrollback survives a renderer
 // reload/crash. Keeps the most recent chunks up to `maxBytes`, dropping whole
-// chunks from the front. Disk logging is a separate, opt-in feature — this is
-// not persisted.
+// chunks from the front. Not persisted itself; the persistent record is the
+// session log (see session-log.ts), whose tail is loaded in here on connect.
 export class ScrollbackBuffer {
   private chunks: TerminalChunk[] = [];
   private bytes = 0;
@@ -20,6 +20,13 @@ export class ScrollbackBuffer {
     while (this.bytes > this.maxBytes && this.chunks.length > 0) {
       this.bytes -= byteLength(this.chunks.shift() as TerminalChunk);
     }
+  }
+
+  // Replaces the contents, e.g. with a log's history when a window connects.
+  reset(chunks: TerminalChunk[]): void {
+    this.chunks = [];
+    this.bytes = 0;
+    for (const chunk of chunks) this.append(chunk);
   }
 
   snapshot(): TerminalChunk[] {

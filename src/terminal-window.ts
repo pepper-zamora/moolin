@@ -3,6 +3,8 @@ import { ConnectionManager } from "./connection-manager";
 import { ScrollbackBuffer, type TerminalChunk } from "./scrollback-buffer";
 import { IpcChannels } from "./ipc-channels";
 import { log } from "./logger";
+import { logPathFor, SessionLog, type SessionLogRegistry } from "./session-log";
+import { targetLabel } from "./world-utils";
 import type { ConnectTarget } from "./worlds-types";
 
 const MAX_SCROLLBACK_BYTES = 2 * 1024 * 1024;
@@ -20,6 +22,8 @@ export interface TerminalWindowOptions {
   preloadPath: string;
   rendererArgs: string[];
   indexHtmlPath: string;
+  logRoot: string;
+  logs: SessionLogRegistry;
   bounds: { x: number; y: number; width: number; height: number };
 }
 
@@ -31,6 +35,9 @@ export class TerminalWindow {
   readonly connection: ConnectionManager;
   private readonly scrollback = new ScrollbackBuffer(MAX_SCROLLBACK_BYTES);
   private menu: Menu | null = null;
+  // The persistent log of this window's connection, or null when not
+  // connecting, or when another window already owns that world/character's log.
+  private sessionLog: SessionLog | null = null;
 
   constructor(options: TerminalWindowOptions, handlers: TerminalWindowHandlers) {
     this.window = new BrowserWindow({
@@ -48,6 +55,7 @@ export class TerminalWindow {
 
     this.connection = new ConnectionManager(
       {
+        onConnecting: (target) => this.startLog(target, options),
         onStateChange: () => {
           // Closing the window disconnects it, which lands here after the
           // BrowserWindow is destroyed; there is no menu left to refresh.
@@ -75,6 +83,8 @@ export class TerminalWindow {
     this.window.on("closed", () => {
       log("debug", "main", `window ${id} closed`);
       this.connection.disconnect();
+      this.sessionLog?.close();
+      this.sessionLog = null;
       handlers.onClosed(this);
     });
     this.window.loadFile(options.indexHtmlPath);
@@ -93,8 +103,30 @@ export class TerminalWindow {
     if (!this.window.isDestroyed()) this.window.webContents.send(channel, ...args);
   }
 
-  // Appends to the scrollback, both live and in the replay buffer.
+  // Switches to `target`'s log. If this window gets to own it, the scrollback
+  // is replaced by the log's tail; otherwise (another window is connected to
+  // the same world/character and logging it) the window starts empty and
+  // doesn't log, so nothing is recorded twice.
+  private startLog(target: ConnectTarget, options: TerminalWindowOptions): void {
+    this.sessionLog?.close();
+    const file = logPathFor(options.logRoot, target.world, target.character);
+    this.sessionLog = options.logs.claim(file);
+    const history = this.sessionLog ? this.sessionLog.history(MAX_SCROLLBACK_BYTES) : new Uint8Array();
+    log("debug", "main", `window ${this.window.id} log`, file, this.sessionLog ? "owned" : "owned by another window");
+    this.scrollback.reset(history.length > 0 ? [history] : []);
+    this.send(IpcChannels.terminalReset, this.scrollback.snapshot());
+    if (!this.sessionLog) {
+      const label = targetLabel(target.world, target.character);
+      this.write(
+        `\x1b[33m[warning: logging for ${label} is active in another window; this window will not be logged]\x1b[0m\r\n`,
+      );
+    }
+  }
+
+  // Appends to the scrollback, both live and in the replay buffer, and to
+  // the session log if this window owns one.
   write(data: TerminalChunk): void {
+    this.sessionLog?.append(data);
     this.scrollback.append(data);
     this.send(IpcChannels.telnetData, data);
   }

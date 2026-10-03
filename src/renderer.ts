@@ -266,6 +266,13 @@ async function loadScrollback(): Promise<void> {
   for (const chunk of chunks) {
     term.write(chunk);
   }
+  // Connecting swaps in the world's logged history: start over from it. The
+  // chunks ride along in the message so they stay ordered with live data.
+  window.moolin.onTerminalReset((history) => {
+    isCleared = false;
+    term.reset();
+    for (const chunk of history) term.write(chunk);
+  });
   window.moolin.onTelnetData((data) => {
     isCleared = false;
     term.write(data);
