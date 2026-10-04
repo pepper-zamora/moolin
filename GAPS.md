@@ -24,10 +24,9 @@ of the following:
 
 - **Match types**: plain substring, start/exact match, wildcards (`*`,
   `%1`/`%2` capture groups in MUSHclient-style clients), and full Perl-style
-  regex with capture groups (Mudlet `matches[]`, Blightmust capture tables).
+  regex with capture groups (Mudlet `matches[]`, Blightmud capture tables).
 - **Actions beyond "send a command"**:
-  - **Highlight/recolor** the matched text or whole line (the gap you
-    already knew about).
+  - **Highlight/recolor** the matched text or whole line.
   - **Gag**: delete the matching line from the display (and optionally from
     the log) entirely — used to hide noisy spam.
   - **Substitute/rewrite** the line's text before it's displayed.
@@ -137,7 +136,7 @@ Without any of these, a Moolin user connecting to a modern GMCP/MSDP-aware
 game sees only plain text where other clients would show gauges, maps or
 clickable exits.
 
-Two smaller telnet-level gaps worth a separate mention, since they're not
+Three smaller telnet-level gaps worth a separate mention, since they're not
 MUD-specific add-on protocols but plain telnet options Moolin's parser
 currently discards or never negotiates:
 

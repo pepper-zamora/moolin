@@ -6,8 +6,9 @@ export function parseLogLevel(raw: string | undefined): LogLevel {
   return raw !== undefined && (LEVELS as string[]).includes(raw) ? (raw as LogLevel) : "none";
 }
 
-// "--log-level=<level>" works identically in main and preload since both see
-// the same process.argv (same OS process, different JS execution contexts).
+// Reads "--log-level=<level>" from an argv. Main parses its own command line;
+// preload runs in the renderer's process, whose argv carries the flag only
+// because main passes it down via additionalArguments (see main.ts).
 export function getCliLogLevel(argv: string[]): LogLevel {
   const prefix = "--log-level=";
   const flag = argv.find((arg) => arg.startsWith(prefix));

@@ -47,12 +47,11 @@ Telnet ECHO (RFC 857) is about *remote character echo*: a party that says
 from the other side. On a classic line-mode terminal talking to a Unix
 host, the server doing this is normal and expected. It's close to
 meaningless for a MUD, though, since Moolin never streams keystrokes
-char-by-char in the first place — `sendLine()` always hands the server one
-complete line at a time (see [telnet.ts:298](src/telnet.ts#L298)). There's
-nothing for the server to echo back character-by-character even if it
-wanted to, and the input box already shows what's being typed the instant
-it's typed, independent of any telnet negotiation. So in practice, for
-everything except password prompts, ECHO should be — and today effectively
+char-by-char in the first place — `sendLine()` in [telnet.ts](src/telnet.ts)
+always hands the server one complete line at a time. There's nothing for
+the server to echo back character-by-character even if it wanted to, and
+the input box already shows what's being typed the instant it's typed,
+independent of any telnet negotiation. So in practice, for everything except password prompts, ECHO should be — and today effectively
 is — off: Moolin never proposes it itself, and the only `WILL ECHO` a MUD
 sends is the password-masking idiom (server takes over "echoing" by
 deliberately echoing nothing, client stops showing typed characters for the
@@ -63,10 +62,10 @@ worth adding.
 
 What *is* configurable, and isn't related to the ECHO option at all, is
 whether Moolin writes the command you typed into the scrollback after
-sending it. That's synthetic: a few lines in
-[main.ts](src/main.ts#L400-L407) that print the typed text back into the
-scrollback in cyan purely so a transcript/log shows what was typed, mirroring
-the command next to the server's response, since most MUDs don't echo
+sending it. That's synthetic: a few lines in the `telnetInput` handler in
+[main.ts](src/main.ts) that print the typed text back into the scrollback
+in cyan purely so a transcript/log shows what was typed, mirroring the
+command next to the server's response, since most MUDs don't echo
 commands back themselves on a full-duplex connection. It's gated on the same
 `echoed` flag as real ECHO negotiation (suppressed during password entry),
 but otherwise it's a display choice Moolin makes, not a protocol behavior.

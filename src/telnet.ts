@@ -264,11 +264,10 @@ export class TelnetSession {
 
     const parser = new TelnetParser();
     // One entry per supported option instead of a switch per verb, so adding
-    // an option (GMCP/MSDP/MCCP are MUD-specific extensions layered on top of
-    // telnet that would need this — out of scope for this pass) means adding
-    // one registry entry rather than touching the dispatch below. Anything
-    // with no entry (or no matching callback on its entry) falls back to
-    // refusing/ignoring.
+    // an option (e.g. GMCP or MSDP; see PROTOCOLS.md) means adding one
+    // registry entry rather than touching the dispatch below. MCCP needs more:
+    // decompression has to sit before the parser. Anything with no entry (or
+    // no matching callback on its entry) falls back to refusing/ignoring.
     const optionHandlers = this.buildOptionHandlers();
 
     socket.on("data", (chunk: Buffer) => {

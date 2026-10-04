@@ -196,6 +196,10 @@ argument to use another file:
 npm start -- ~/my-worlds.json
 ```
 
+Moolin runs as a single process, so this only takes effect for the first
+launch: launching again while Moolin is running opens a new window that uses
+the running instance's worlds file, whatever path is passed.
+
 Character passwords are stored in this file **in plain text**.
 
 Writes are atomic (write to a temporary file, then rename). If the file
@@ -248,6 +252,7 @@ on the `PATH`.
 | `src/telnet.ts`           | A telnet session over TCP or TLS, with per-option negotiation handlers    |
 | `src/telnet-protocol.ts`  | Telnet byte-stream parser and command encoding (no I/O)                   |
 | `src/worlds.ts`           | Reading, validating and writing the worlds file                           |
+| `src/worlds-types.ts`     | The World, Character and MRU types shared by main and renderer            |
 | `src/preferences.ts`      | Reading and writing app-wide preferences                                  |
 | `src/world-utils.ts`      | World helpers shared by main and renderer (defaults, labels, login templates) |
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
@@ -263,6 +268,7 @@ on the `PATH`.
 | `src/command-history.ts`  | Input history                                                             |
 | `src/input-undo.ts`       | Input area undo/redo                                                     |
 | `src/ipc-channels.ts`     | IPC channel names shared by main and preload                              |
+| `src/logger.ts`           | Leveled logging to the terminal, set by `--log-level`                     |
 
 ## License
 

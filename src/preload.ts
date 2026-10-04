@@ -5,9 +5,9 @@ import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import { IpcChannels } from "./ipc-channels";
 
-// Preload runs in its own JS context (separate from main.ts's), but shares
-// the same process.argv, so it can gate log calls locally without an IPC
-// round-trip just to find out logging is off.
+// Preload runs in the renderer's process, but main.ts appends
+// "--log-level=..." to its argv (additionalArguments), so it can gate log
+// calls locally without an IPC round-trip just to find out logging is off.
 const currentLogLevel = getCliLogLevel(process.argv);
 
 contextBridge.exposeInMainWorld("moolin", {
