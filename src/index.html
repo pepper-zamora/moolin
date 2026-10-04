@@ -68,7 +68,7 @@
       <div id="security-popup" hidden></div>
     </div>
 
-    <dialog id="worlds-dialog">
+    <dialog id="worlds-dialog" class="app-dialog">
       <div class="worlds-layout">
         <div class="worlds-sidebar">
           <ul id="worlds-tree" role="tree" aria-label="Worlds" tabindex="0"></ul>
@@ -141,6 +141,17 @@
             <button id="connect-btn" type="button" class="primary" aria-keyshortcuts="Alt+C"><u>C</u>onnect</button>
           </div>
         </div>
+      </div>
+    </dialog>
+
+    <dialog id="preferences-dialog" class="app-dialog">
+      <div class="prefs-layout">
+        <label class="check"><input id="pref-show-timestamps" type="checkbox" /> Show timestamps</label>
+        <label class="check"><input id="pref-check-updates" type="checkbox" /> Check for updates at startup</label>
+        <label class="check">
+          Font size <input id="pref-font-size" type="number" min="8" max="32" step="2" />
+        </label>
+        <ul id="pref-font-list" role="radiogroup" aria-label="Font"></ul>
       </div>
     </dialog>
 

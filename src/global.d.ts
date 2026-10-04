@@ -2,6 +2,7 @@ import type { World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { LogLevel } from "./logger";
+import type { Preferences } from "./preferences";
 
 declare global {
   interface Window {
@@ -38,6 +39,14 @@ declare global {
       onFindRequested(callback: (action: "open" | "next" | "previous") => void): void;
       onClearScreenRequested(callback: () => void): void;
       onToggleTimestamps(callback: (show: boolean) => void): void;
+      onSetFont(callback: (font: { fontFamily: string; fontSize: number }) => void): void;
+      initialFont: { fontId: string; fontSize: number };
+      fitToContentOnLoad: boolean;
+      reportInitialSize(size: { width: number; height: number }): void;
+      preferences: {
+        onOpen(callback: (prefs: Preferences) => void): void;
+        save(partial: Partial<Preferences>): Promise<void>;
+      };
       reportUndoState(canUndo: boolean, canRedo: boolean): void;
       log(level: Exclude<LogLevel, "none">, scope: string, ...args: unknown[]): void;
     };

@@ -4,6 +4,8 @@ import type { WindowState } from "./connection-manager";
 import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import { IpcChannels } from "./ipc-channels";
+import { parseFontArgs } from "./fonts";
+import type { Preferences } from "./preferences";
 
 // Preload runs in the renderer's process, but main.ts appends
 // "--log-level=..." to its argv (additionalArguments), so it can gate log
@@ -85,6 +87,28 @@ contextBridge.exposeInMainWorld("moolin", {
   },
   onToggleTimestamps: (callback: (show: boolean) => void): void => {
     ipcRenderer.on(IpcChannels.terminalToggleTimestamps, (_event, show: boolean) => callback(show));
+  },
+  onSetFont: (callback: (font: { fontFamily: string; fontSize: number }) => void): void => {
+    ipcRenderer.on(IpcChannels.terminalSetFont, (_event, font: { fontFamily: string; fontSize: number }) =>
+      callback(font),
+    );
+  },
+  // The font/size a freshly opened window's Terminal should construct with,
+  // read from argv (see parseFontArgs) so it's available before the first
+  // paint rather than arriving a tick late over IPC.
+  initialFont: parseFontArgs(process.argv),
+  // Set only for a window opened without an existing one to cascade from
+  // (see WindowManager); such a window reports its measured content size
+  // once so main.ts can size it to fit an 80x25 terminal before centering it.
+  fitToContentOnLoad: process.argv.includes("--fit-to-content"),
+  reportInitialSize: (size: { width: number; height: number }): void => {
+    ipcRenderer.send(IpcChannels.terminalInitialSize, size);
+  },
+  preferences: {
+    onOpen: (callback: (prefs: Preferences) => void): void => {
+      ipcRenderer.on(IpcChannels.preferencesOpen, (_event, prefs: Preferences) => callback(prefs));
+    },
+    save: (partial: Partial<Preferences>): Promise<void> => ipcRenderer.invoke(IpcChannels.preferencesSave, partial),
   },
   reportUndoState: (canUndo: boolean, canRedo: boolean): void => {
     ipcRenderer.send(IpcChannels.terminalUndoStateChanged, canUndo, canRedo);
