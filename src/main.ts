@@ -191,7 +191,7 @@ async function checkForUpdates(parentWindow: BrowserWindow | undefined, manual: 
       defaultId: 1,
       cancelId: 0,
       message: "A new release of Moolin is available",
-      detail: `Moolin ${result.release.version} is available; you have ${current}. Download opens the release's page on GitHub.`,
+      detail: `Moolin ${result.release.version} is available; you have ${current}.\n\nDownload opens the release's page on GitHub.`,
     });
     if (response === 1) void shell.openExternal(result.release.url);
   } else if (manual && result.status === "up-to-date") {
