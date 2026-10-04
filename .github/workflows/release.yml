@@ -43,6 +43,10 @@ jobs:
       - run: npm ci
       - run: npm test
         if: runner.os == 'Linux'
+      # Catches the Mac build not starting/working at all; Linux and Windows
+      # aren't covered here yet (see TODO.md).
+      - run: npm run smoke
+        if: runner.os == 'macOS'
       # Signing is optional: with no secrets set, macOS and Windows builds
       # come out unsigned. The macOS secrets are passed on only to the macOS
       # build, and only when set: electron-builder takes even an empty

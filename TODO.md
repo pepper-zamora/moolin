@@ -17,14 +17,6 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
 - **macOS.** Nothing has run the macOS build yet. Test the `.dmg` on a Mac,
   both Apple silicon and Intel if possible, and check the README's
   Gatekeeper steps against what macOS actually shows.
-- **Smoke check on macOS in CI.** `npm run smoke` only runs on Linux, since it
-  sandboxes Moolin with Linux's `XDG_CONFIG_HOME`. Make it work on macOS too
-  and run it in CI, on GitHub's Apple silicon runners, so every push to `dev`
-  checks that the Mac build actually starts and works. It can't check the
-  Gatekeeper steps, which need a person, but it would catch the Mac build
-  breaking. (Running macOS in a local VM isn't a good substitute: Apple's
-  license only allows Apple hardware, and on an AMD PC it would be Intel-only
-  and unreliable.)
 - **rpm and pacman packages.** Built by CI but never installed. Test them on
   Fedora and Arch, for example in a VM.
 
