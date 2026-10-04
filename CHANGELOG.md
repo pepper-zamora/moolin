@@ -12,13 +12,16 @@ renames that section to the new version and date.
 
 ### Added
 
-- A Preferences dialog (Worlds → Preferences…), replacing the placeholder:
-  show timestamps, check for updates at startup, and the terminal's default
-  font and size, with a live sample of each curated font.
+- A Preferences dialog (Worlds → Preferences…, or Ctrl+,/Cmd+,), replacing
+  the placeholder: show timestamps, check for updates at startup, and the
+  terminal's default font and size, with a live sample of each curated font.
 - A freshly opened window now sizes itself to show 80x25 characters at its
   starting font, centered on screen, instead of a fixed size.
 - A first-ever launch (no worlds file yet) now starts with LambdaMOO and a
   Guest character already set up, instead of an empty Worlds dialog.
+- Iosevka Moolin, a custom [Iosevka](https://typeof.net/Iosevka/) build
+  bundled with the app, is now the default terminal font (`npm run
+  build:font` rebuilds it from `font/private-build-plans.toml`).
 
 ### Fixed
 

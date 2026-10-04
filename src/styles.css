@@ -1,3 +1,32 @@
+/* Moolin's own Iosevka build (see font/private-build-plans.toml and "npm run
+   font:build"), bundled with the app so it's available without installing
+   anything. Four faces cover what xterm actually switches between (SGR bold
+   and italic); the build also has Condensed/Extended widths, unused here. */
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+}
+
 :root {
   color-scheme: dark;
 }
