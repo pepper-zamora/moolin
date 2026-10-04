@@ -275,7 +275,7 @@ function buildMenu(terminal: TerminalWindow): void {
         },
         ...(mruItems.length > 0 ? ([{ type: "separator" }, ...mruItems] as Electron.MenuItemConstructorOptions[]) : []),
         { type: "separator" },
-        { label: "&Preferences…", click: () => openPreferences(terminal) },
+        { label: "&Preferences…", accelerator: "CmdOrCtrl+,", click: () => openPreferences(terminal) },
         { type: "separator" },
         { role: "quit", label: "&Quit" },
       ],

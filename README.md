@@ -255,6 +255,7 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Ctrl+N                   | New world                                               |
 | Ctrl+K                   | Disconnect (asks first)                                 |
 | Ctrl+W                   | Close the window                                        |
+| Ctrl+,                   | Open the Preferences dialog                             |
 | Ctrl+1 … Ctrl+5          | Connect to a recent world or character                  |
 | Enter / Shift+Enter      | Send / insert a newline                                 |
 | Up / Down                | Previous / next command, from the first / last line     |
@@ -323,7 +324,7 @@ individual entries are skipped with a warning.
 
 ## Preferences
 
-Worlds → Preferences… opens a dialog for app-wide settings: whether to show
+Worlds → Preferences… (Ctrl+,, Cmd+, on macOS) opens a dialog for app-wide settings: whether to show
 timestamps, whether to check for updates at startup, and the terminal's
 default font and size. The default is Iosevka Moolin, a custom build of
 [Iosevka](https://typeof.net/Iosevka/) bundled with the app (see
