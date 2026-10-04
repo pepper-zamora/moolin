@@ -2,7 +2,8 @@
 
 This is a developer-directed review of telnet option negotiation as Moolin
 implements it, and of the MUD-specific protocols layered on top of telnet
-that Moolin doesn't implement yet (GMCP, MSDP, MXP, MCCP, MSP). For each
+that Moolin doesn't implement yet (GMCP, MSDP, MXP, MCCP, MSP), plus a
+note on how vertical tab and form feed in world output are handled. For each
 unimplemented one: what it's *for*, and why Moolin's codebase specifically
 would benefit from it. This is not a wire-format reference — see the linked
 specs for byte layouts.
@@ -77,6 +78,27 @@ changing it takes effect in an already-connected window only on reconnect.
 Everything else — including the protocols below — currently gets the
 blanket refuse-and-ignore treatment, which is safe (no server-visible
 breakage) but leaves real features on the table.
+
+## Vertical tab and form feed in world output
+
+Not a telnet option, but a related question about the byte stream: what to
+do with VT (`\v`, 0x0B) and FF (`\f`, 0x0C) when a world sends them.
+Moolin passes both through to xterm.js unchanged, and xterm treats each as
+a plain line feed: its parser maps LF, VT and FF to the same `lineFeed()`,
+which (with Moolin's `convertEol` option) also returns to column 0. So a
+form feed starts a new line rather than clearing the screen or starting a
+new "page", and a vertical tab starts a new line rather than moving to a
+vertical tab stop. Both are kept as-is in the session log.
+
+Since each one is a line, it also gets its own arrival time: the
+timestamp code counts LF, VT and FF alike (`countLineFeeds` in
+[line-feeds.ts](src/line-feeds.ts)), so the times stay lined up with
+xterm's lines (see [GAPS.md](GAPS.md) §8).
+
+This is a deliberate choice, but a provisional one: it's xterm's behavior,
+kept because nothing yet calls for anything else. Revisit it if a real
+world turns out to rely on another meaning, such as a form feed that's
+meant to clear the screen.
 
 ## MCCP — MUD Client Compression Protocol
 
