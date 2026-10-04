@@ -1,4 +1,4 @@
-# Maintainer: FILL IN <you@example.com>
+# Maintainer: Pepper Zamora <264642097+pepper-zamora@users.noreply.github.com>
 # DRAFT for the AUR package "moolin-bin": repackages the .deb from the GitHub
 # release. Fill in the placeholders, then `updpkgsums` and
 # `makepkg --printsrcinfo > .SRCINFO` before pushing to the AUR.
@@ -7,7 +7,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc='A MOO/MUSH/MUCK/MUD client with buttery-smooth scrollback'
 arch=('x86_64')
-url='https://github.com/OWNER/moolin'
+url='https://github.com/pepper-zamora/moolin'
 license=('MIT')
 depends=('gtk3' 'nss' 'libxss' 'libxtst' 'libnotify' 'xdg-utils' 'at-spi2-core' 'libsecret' 'util-linux-libs')
 provides=('moolin')

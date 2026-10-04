@@ -4,7 +4,11 @@
   "version": "0.1.0",
   "description": "A MOO/MUSH/MUCK/MUD client with buttery-smooth scrollback",
   "license": "MIT",
-  "author": "Pepper Zamora",
+  "author": {
+    "name": "Pepper Zamora",
+    "email": "264642097+pepper-zamora@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/pepper-zamora/moolin",
   "main": "dist/main.js",
   "private": true,
   "scripts": {
