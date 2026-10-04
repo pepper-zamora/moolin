@@ -395,10 +395,11 @@ function fillWorldPane(world: World): void {
   updateDependentFields(world);
 }
 
-// Fields that only apply when another one is checked.
+// Fields that only apply when another one is checked. The login command is
+// deliberately not one: it stays editable with auto-login off, so it can be
+// set up before auto-login is turned on (it's simply not sent until then).
 function updateDependentFields(world: World): void {
   field(worldPane, "tlsAllowUntrusted").disabled = !!loadError || !world.tls;
-  field(worldPane, "loginTemplate").disabled = !!loadError || !world.autoLogin;
 }
 
 function fillCharacterPane(character: Character): void {
