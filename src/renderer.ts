@@ -423,18 +423,29 @@ inputArea.addEventListener("beforeinput", () => {
 window.addEventListener("resize", () => resizeInput());
 
 // Keyboard focus belongs in the input area whenever the window has it,
-// unless the Worlds dialog is open, the find widget has it, or there's no
-// connection to type to. The connection details popup is left alone while
-// the pointer is over it, so its text can be selected and copied.
-// Clicking the scrollback (e.g. to select text) would otherwise take it;
-// xterm's mouse selection doesn't need focus, so it still works.
-document.addEventListener("focusout", () => {
-  setTimeout(() => {
-    if (worldsDialog.isOpen() || inputArea.disabled) return;
-    if (findWidget.root.contains(document.activeElement) || securityStatus.isHovered()) return;
-    if (document.activeElement !== inputArea) inputArea.focus();
-  });
-});
+// unless the Worlds dialog is open or the find widget has it. The connection
+// details popup is left alone while the pointer is over it, so its text can
+// be selected and copied. The scrollback never keeps focus: xterm takes it
+// on every click (its mouse selection doesn't need it), so it's handed back
+// to the input area, or, while there's no connection to type to, just taken
+// away, leaving keys to the window (and its menu shortcuts).
+function reclaimFocus(): void {
+  if (worldsDialog.isOpen()) return;
+  const active = document.activeElement;
+  if (findWidget.root.contains(active) || securityStatus.isHovered()) return;
+  if (!inputArea.disabled) {
+    if (active !== inputArea) inputArea.focus();
+  } else if (active === term.textarea) {
+    term.textarea.blur();
+  }
+}
+// Checked wherever focus goes, once the event that moved it is done. Both
+// directions are needed: in a window that isn't active, focus moves without
+// any focusout (clicking an inactive window's scrollback hands xterm focus
+// straight from nothing), and the window's own activation is a third way in.
+document.addEventListener("focusout", () => setTimeout(reclaimFocus));
+document.addEventListener("focusin", () => setTimeout(reclaimFocus));
+window.addEventListener("focus", () => setTimeout(reclaimFocus));
 
 // Selecting text in the input means Ctrl+C should copy that, not a stale
 // scrollback selection.
