@@ -93,10 +93,13 @@ are set. `packaging/aur/PKGBUILD` is a draft for an AUR `moolin-bin` package.
 
 ## Using Moolin
 
-Press **Ctrl+O** to open the Worlds dialog. **New World** adds a world; fill
-in its host and port. Right-click a world (or press Shift+F10) to add
-characters to it. Select a world or character and press **Connect** (or
-Enter, or double-click).
+Press **Ctrl+O** to open the Worlds dialog. Its tree has a **Global** root
+(for settings shared by every world; there are none yet), with each world
+(globe icon) under it and each world's characters (silhouette icon) under
+that. **New World** adds a world; fill in its host and port. With a world or
+one of its characters selected, **New Character** adds a character to that
+world (as does right-clicking a world, or Shift+F10). Select a world or
+character and press **Connect** (or Enter, or double-click).
 
 While a window isn't connected, a status strip takes the place of the input
 area. Type commands in the input area at the bottom; the scrollback above is
@@ -139,8 +142,10 @@ Nothing else is added, so end the template with `\r` (most servers) or
 | Ctrl+R                   | Reload the window (the connection and scrollback stay)  |
 
 In the Worlds dialog: arrow keys move through the tree (Right/Left expand and
-collapse), Enter connects, Delete deletes, Shift+F10 opens the context menu,
-and Escape closes it.
+collapse, and Left on a collapsed item goes to its parent), Enter connects,
+Delete deletes, Shift+F10 opens the context menu, Alt+N, Alt+H and Alt+C press
+New World, New Character and Connect, and Escape (or a click outside the
+dialog) closes it. Changes are saved as you make them.
 
 ## The worlds file
 

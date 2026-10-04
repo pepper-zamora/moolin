@@ -30,7 +30,10 @@
       <div class="worlds-layout">
         <div class="worlds-sidebar">
           <ul id="worlds-tree" role="tree" aria-label="Worlds" tabindex="0"></ul>
-          <button id="new-world-btn" type="button">New World</button>
+          <div class="tree-buttons">
+            <button id="new-world-btn" type="button" aria-keyshortcuts="Alt+N"><u>N</u>ew World</button>
+            <button id="new-character-btn" type="button" aria-keyshortcuts="Alt+H">New C<u>h</u>aracter</button>
+          </div>
         </div>
 
         <div class="worlds-content">
@@ -38,7 +41,14 @@
 
           <div id="empty-pane" class="pane">
             <p class="placeholder">
-              Select a world or character, or create a new world. Right-click a world to add characters.
+              Select a world or character, or create a new world. Select a world to add characters to it.
+            </p>
+          </div>
+
+          <div id="global-pane" class="pane" hidden>
+            <p class="placeholder">
+              Settings here apply to every world and character unless the world or character sets its own.
+              There are no global settings yet.
             </p>
           </div>
 
@@ -71,8 +81,7 @@
           </form>
 
           <div class="worlds-buttons">
-            <button id="close-btn" type="button">Close</button>
-            <button id="connect-btn" type="button" class="primary">Connect</button>
+            <button id="connect-btn" type="button" class="primary" aria-keyshortcuts="Alt+C"><u>C</u>onnect</button>
           </div>
         </div>
       </div>

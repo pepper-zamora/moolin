@@ -185,15 +185,23 @@ html, body {
   list-style: none;
 }
 
+/* Tree rows indent by depth, like VS Code's explorer: a twisty (chevron)
+   slot on every row, then an icon, then the label. */
+#worlds-tree {
+  --indent: 12px;
+  --row-pad: 4px;
+  --twisty: 16px;
+}
+
 .tree-row {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 6px;
+  height: 22px;
+  padding-left: calc(var(--row-pad) + var(--depth) * var(--indent));
+  padding-right: 6px;
   cursor: default;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   user-select: none;
 }
 
@@ -201,13 +209,60 @@ html, body {
 .tree-row.selected { background: #04395e; }
 #worlds-tree:focus .tree-row.selected { background: #094771; }
 
-.tree-row.character { padding-left: 26px; }
+.tree-row.global .tree-label { font-weight: 600; }
 
-.tree-toggle {
-  display: inline-block;
-  width: 14px;
-  text-align: center;
-  opacity: 0.7;
+.tree-twisty,
+.tree-icon {
+  flex: none;
+  display: inline-flex;
+  width: var(--twisty);
+  height: 16px;
+}
+
+.tree-twisty svg,
+.tree-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tree-twisty svg {
+  opacity: 0.8;
+  transition: transform 0.1s;
+}
+
+.tree-twisty.expanded svg { transform: rotate(90deg); }
+.tree-icon.world-icon { color: #75beff; }
+.tree-icon.character-icon { color: #d7ba7d; }
+
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Indent guide: a line down an expanded item's children, under its twisty. */
+#worlds-tree ul[role="group"] {
+  position: relative;
+}
+
+#worlds-tree ul[role="group"]::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--row-pad) + var(--depth) * var(--indent) + var(--twisty) / 2);
+  border-left: 1px solid #585858;
+  pointer-events: none;
+}
+
+.tree-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+#worlds-dialog .tree-buttons button {
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .worlds-content {
@@ -287,6 +342,14 @@ html, body {
 #worlds-dialog button {
   cursor: pointer;
   min-width: 80px;
+}
+
+#worlds-dialog button u {
+  text-decoration: none;
+}
+
+#worlds-dialog.show-mnemonics button u {
+  text-decoration: underline;
 }
 
 #worlds-dialog button.primary {
