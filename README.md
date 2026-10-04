@@ -74,7 +74,11 @@ from source never check at startup.
 
 - **One window per connection.** Connecting from a window that already has a
   connection opens the new one in a window of its own. All windows run in one
-  process; launching Moolin again just opens another window.
+  process; launching Moolin again just opens another window. A freshly
+  opened window (not one opened this way, which instead cascades from the
+  window it came from) sizes itself to show 80x25 characters at its starting
+  font, centered on screen; if that wouldn't fit the screen, it falls back to
+  75% of it instead.
 - **Worlds and characters.** Save worlds (host, port, TLS) and the characters
   you play on each, then connect to a world, or to a world as a character.
 - **Auto-login.** Connecting as a character can send a login command built
@@ -199,6 +203,11 @@ each release, and what's changed since the last one.
 
 ## Using Moolin
 
+The first time Moolin runs (no worlds file yet — see below), it starts with
+one world already set up: LambdaMOO, with a Guest character, ready to
+connect to. Deleting it is permanent, the same as deleting anything else you
+add.
+
 Press **Ctrl+O** (**Cmd+O** on macOS) to open the Worlds dialog. Its tree has a **Global** root
 (for settings shared by every world; there are none yet), with each world
 (globe icon) under it and each world's characters (silhouette icon) under
@@ -298,6 +307,9 @@ Moolin runs as a single process, so this only takes effect for the first
 launch: launching again while Moolin is running opens a new window that uses
 the running instance's worlds file, whatever path is passed.
 
+If the file doesn't exist yet, Moolin creates it with one world already in
+it — LambdaMOO, with a Guest character — rather than starting empty.
+
 Character passwords are stored in this file **in plain text**.
 
 Writes are atomic (write to a temporary file, then rename), and each one
@@ -311,9 +323,19 @@ individual entries are skipped with a warning.
 
 ## Preferences
 
-App-wide settings (whether new windows show timestamps, and whether to check
-for updates at startup) are kept in `preferences.json` in the usual per-app
-config folder:
+Worlds → Preferences… opens a dialog for app-wide settings: whether to show
+timestamps, whether to check for updates at startup, and the terminal's
+default font and size. Each curated font is shown with a live sample
+highlighting characters that commonly look alike in a monospace font (`0O`,
+`1lI`, `rn` vs `m`, and so on), so you can judge it before picking it; a font
+that isn't actually installed just falls back to the next one in its CSS
+stack, which the sample makes obvious. Changes save and apply immediately:
+showTimestamps is this window's own setting too (same as the View menu's
+checkbox), while the font/size and update-check setting also become the
+default for windows opened after. There's no Save or Cancel — like the
+Worlds dialog, it saves as you go.
+
+Settings are kept in `preferences.json` in the usual per-app config folder:
 
 | OS      | Location                                          |
 | ------- | ------------------------------------------------- |

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, shell } from "electron";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   backupPathFor,
@@ -6,6 +7,7 @@ import {
   readWorldsFile,
   resolveWorldsPath,
   saveWorlds,
+  seedDefaultWorlds,
   updateMru as updateMruState,
 } from "./worlds";
 import { WindowManager } from "./window-manager";
@@ -13,11 +15,18 @@ import type { TerminalWindow } from "./terminal-window";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
 import { SessionLogRegistry } from "./session-log";
 import { IpcChannels } from "./ipc-channels";
-import { preferencesPath, readPreferences, writePreferences } from "./preferences";
+import {
+  preferencesPath,
+  readPreferences,
+  sanitizePreferences,
+  writePreferences,
+  type Preferences,
+} from "./preferences";
 import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-types";
 import { targetLabel } from "./world-utils";
 import type { WindowState } from "./connection-manager";
 import { checkForUpdate } from "./update-check";
+import { fontFamilyFor } from "./fonts";
 
 function cliArgs(): string[] {
   return app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
@@ -43,8 +52,12 @@ const logLevel = getCliLogLevel(process.argv);
 configureLogger(logLevel);
 // Renderer/preload processes are separate OS processes with their own argv
 // (Chromium's internal --type=renderer flags, not ours) — hand the level
-// down explicitly so preload.ts can compute the same value.
-const rendererArgs = [`--log-level=${logLevel}`];
+// down explicitly so preload.ts can compute the same value. Computed fresh
+// per window (not a fixed array) since the font prefs it carries can change
+// at runtime via the Preferences dialog.
+function rendererArgs(): string[] {
+  return [`--log-level=${logLevel}`, `--font-id=${prefs.fontId}`, `--font-size=${prefs.fontSize}`];
+}
 
 const worldsPath = resolveWorldsPath(getCliWorldsArg());
 
@@ -56,6 +69,19 @@ if (!isPrimaryInstance) {
   app.quit();
 } else {
   log("info", "main", "starting, worldsPath =", worldsPath);
+  // A first-ever launch gets LambdaMOO and its Guest character already set
+  // up, rather than an empty Worlds dialog with nothing to click. Written
+  // once, immediately, rather than left to a read-time fallback, so the ids
+  // it hands out are stable from the very first read (the Worlds dialog's
+  // load, an early connect's MRU update, ...).
+  if (!fs.existsSync(worldsPath)) {
+    try {
+      saveWorlds(worldsPath, seedDefaultWorlds());
+      log("info", "main", "seeded the default world (LambdaMOO) at", worldsPath);
+    } catch (err) {
+      log("warn", "main", "could not seed the default world:", (err as Error).message);
+    }
+  }
 }
 
 const MAX_MRU = 5;
@@ -174,11 +200,11 @@ function openWorldsDialog(terminal: TerminalWindow, createNew: boolean): void {
 }
 
 function openPreferences(terminal: TerminalWindow): void {
-  void dialog.showMessageBox(terminal.window, {
-    type: "info",
-    message: "Preferences",
-    detail: "Not yet implemented.",
-  });
+  terminal.window.focus();
+  // showTimestamps is per-window state (see the View menu's checkbox below);
+  // the dialog edits this window's actual value, which may have drifted from
+  // the stored default if only this window's checkbox was toggled.
+  terminal.send(IpcChannels.preferencesOpen, { ...prefs, showTimestamps: terminal.showTimestamps });
 }
 
 // How long after startup the automatic update check runs, so it doesn't
@@ -508,6 +534,36 @@ ipcMain.handle(
   IpcChannels.terminalGetScrollback,
   (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0 },
 );
+
+// A freshly opened (non-cascaded) window's one-shot report of how big its
+// content needs to be to show an 80x25 terminal at its starting font.
+ipcMain.on(IpcChannels.terminalInitialSize, (event, size: { width: number; height: number }) => {
+  windowManager.applyInitialSize(event.sender, size);
+});
+
+// The Preferences dialog's changes save and apply immediately: showTimestamps
+// is this window's own per-window state (same as the View menu's checkbox),
+// while checkForUpdates and the font/size also become the default for new
+// windows; the font change additionally re-renders this window's terminal.
+ipcMain.handle(IpcChannels.preferencesSave, (event, partial: Partial<Preferences>) => {
+  const merged = sanitizePreferences(partial, prefs);
+  prefs.showTimestamps = merged.showTimestamps;
+  prefs.checkForUpdates = merged.checkForUpdates;
+  prefs.fontId = merged.fontId;
+  prefs.fontSize = merged.fontSize;
+  writePreferences(prefsPath, prefs);
+  const terminal = terminalFor(event);
+  if (terminal) {
+    if (partial.showTimestamps !== undefined) {
+      terminal.showTimestamps = prefs.showTimestamps;
+      terminal.send(IpcChannels.terminalToggleTimestamps, terminal.showTimestamps);
+      buildMenu(terminal); // keep the View menu's checkbox in sync
+    }
+    if (partial.fontId !== undefined || partial.fontSize !== undefined) {
+      terminal.send(IpcChannels.terminalSetFont, { fontFamily: fontFamilyFor(prefs.fontId), fontSize: prefs.fontSize });
+    }
+  }
+});
 
 ipcMain.handle(
   IpcChannels.connectionGetState,

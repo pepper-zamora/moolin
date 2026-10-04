@@ -125,6 +125,28 @@ export function readWorldsFile(filePath: string): WorldsReadResult {
   return { state: backup.state, recovered: { file: filePath, error: result.error } };
 }
 
+// A first-ever launch (no worlds file yet) starts with LambdaMOO and its
+// Guest character already set up, rather than an empty Worlds dialog with
+// nothing to click. Called once at startup (see main.ts), before anything
+// else reads the file, so the ids it hands out are the only ones ever
+// written — not re-rolled on every read of a file that still doesn't exist.
+export function seedDefaultWorlds(): World[] {
+  return [
+    {
+      id: crypto.randomUUID(),
+      name: "LambdaMOO",
+      host: "lambda.moo.mud.org",
+      port: 8888,
+      tls: false,
+      tlsAllowUntrusted: false,
+      autoLogin: true,
+      loginTemplate: DEFAULT_LOGIN_TEMPLATE,
+      echoCommands: true,
+      characters: [{ id: crypto.randomUUID(), name: "Guest", password: "guest" }],
+    },
+  ];
+}
+
 function readStateFile(filePath: string): WorldsReadResult & { missing?: boolean } {
   const empty = (): WorldsState => ({ worlds: [], mru: [] });
   let raw: string;

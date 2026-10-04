@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { worldsDialog } from "./worlds-dialog";
+import { preferencesDialog } from "./preferences-dialog";
 import { FindWidget } from "./find-widget";
 import { SecurityStatus } from "./security-status";
 import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
@@ -13,6 +14,7 @@ import type { WindowState } from "./connection-manager";
 import { countLineFeeds } from "./line-feeds";
 import { LiveReplay } from "./live-replay";
 import type { ScrollbackReplay } from "./scrollback-buffer";
+import { fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
 
 window.addEventListener("error", (event) => {
   window.moolin.log("error", "renderer", "uncaught error:", event.error ?? event.message);
@@ -26,10 +28,12 @@ const APP_NAME = "Moolin";
 // Configurable cap; the actual limit is also capped at 1/4 of the window height.
 const MAX_INPUT_LINES = 8;
 
-const DEFAULT_FONT_SIZE = 14;
-const MIN_FONT_SIZE = 8;
-const MAX_FONT_SIZE = 32;
-const FONT_SIZE_STEP = 2;
+// The default font/size this window's terminal starts with, from main.ts via
+// argv (see parseFontArgs); kept mutable so "Actual Size" (direction 0 below)
+// and a newly saved Preferences default track the latest choice, not the
+// value this window happened to start with.
+const initialFont = window.moolin.initialFont;
+let preferredFontSize = initialFont.fontSize;
 
 const term = new Terminal({
   scrollback: 100000,
@@ -39,8 +43,8 @@ const term = new Terminal({
   allowProposedApi: true, // the search addon's match highlighting uses decorations
   // A strip beside the scrollbar marking where search matches are.
   overviewRuler: { width: 10 },
-  fontFamily: "Menlo, Consolas, 'DejaVu Sans Mono', monospace",
-  fontSize: DEFAULT_FONT_SIZE,
+  fontFamily: fontFamilyFor(initialFont.fontId),
+  fontSize: initialFont.fontSize,
   theme: {
     background: "#000000",
     // Focus lives in the input area, so the scrollback is never focused;
@@ -90,12 +94,31 @@ const loggingStatus = element<HTMLSpanElement>("logging-status");
 
 term.open(terminalContainer);
 
+// Keeps the input area and gutter's font matched to the terminal's, since
+// neither is xterm's own DOM; used at startup and whenever the font changes
+// (terminal-native zoom, or a new default saved in the Preferences dialog).
+function applyFont(fontFamily: string, fontSize: number): void {
+  inputArea.style.fontFamily = fontFamily;
+  inputArea.style.fontSize = `${fontSize}px`;
+  gutter.style.fontFamily = fontFamily;
+  gutter.style.fontSize = `${fontSize}px`; // keep the gutter's cell height matched
+  resizeInput();
+  scheduleGutter();
+}
+applyFont(fontFamilyFor(initialFont.fontId), initialFont.fontSize);
+
 const findWidget = new FindWidget(term, () => {
   if (!inputArea.disabled) inputArea.focus();
 });
 
+// True while either modal <dialog> (Worlds, Preferences) is open, so the
+// input area doesn't steal focus or keyboard shortcuts from their own fields.
+function modalOpen(): boolean {
+  return worldsDialog.isOpen() || preferencesDialog.isOpen();
+}
+
 const securityStatus = new SecurityStatus(() => {
-  if (!inputArea.disabled && !findWidget.isOpen() && !worldsDialog.isOpen()) inputArea.focus();
+  if (!inputArea.disabled && !findWidget.isOpen() && !modalOpen()) inputArea.focus();
 });
 
 term.onResize(({ cols, rows }) => {
@@ -165,6 +188,13 @@ function cellHeight(): number {
   const screen = terminalContainer.querySelector<HTMLElement>(".xterm-screen");
   if (screen && term.rows > 0) return screen.clientHeight / term.rows;
   return lineHeightPx();
+}
+
+// Same idea, for width (see the fitToContentOnLoad report at the bottom of
+// this file).
+function cellWidth(): number {
+  const screen = terminalContainer.querySelector<HTMLElement>(".xterm-screen");
+  return screen && term.cols > 0 ? screen.clientWidth / term.cols : 0;
 }
 
 function stampLine(time: Date): void {
@@ -430,7 +460,7 @@ window.addEventListener("resize", () => resizeInput());
 // to the input area, or, while there's no connection to type to, just taken
 // away, leaving keys to the window (and its menu shortcuts).
 function reclaimFocus(): void {
-  if (worldsDialog.isOpen()) return;
+  if (modalOpen()) return;
   const active = document.activeElement;
   if (findWidget.root.contains(active) || securityStatus.isHovered()) return;
   if (!inputArea.disabled) {
@@ -535,8 +565,8 @@ reportUndoState();
 document.addEventListener(
   "keydown",
   (event) => {
-    // The Worlds dialog's fields keep the browser's native keys.
-    if (worldsDialog.isOpen()) return;
+    // Both dialogs' fields keep the browser's native keys.
+    if (modalOpen()) return;
     const mod = (event.ctrlKey || event.metaKey) && !event.altKey;
     const key = event.key.toLowerCase();
     // The find widget's search field keeps the browser's native editing keys.
@@ -580,8 +610,8 @@ document.addEventListener(
 );
 
 document.addEventListener("contextmenu", (event) => {
-  // Leave the Worlds dialog's fields their native context menu.
-  if (worldsDialog.isOpen()) return;
+  // Leave either dialog's fields their native context menu.
+  if (modalOpen()) return;
   event.preventDefault();
   // Any selection Copy would act on (see copySelection).
   const hasSelection =
@@ -641,6 +671,11 @@ worldsDialog.dialog.addEventListener("close", () => {
   if (!inputArea.disabled) inputArea.focus();
 });
 
+window.moolin.preferences.onOpen((prefs) => preferencesDialog.open(prefs));
+preferencesDialog.dialog.addEventListener("close", () => {
+  if (!inputArea.disabled) inputArea.focus();
+});
+
 // The input area is only usable while connected. The status bar below it
 // says what the window is connected to, with the connection's security shown
 // at its far right.
@@ -662,25 +697,46 @@ function applyConnectionState(state: WindowState): void {
   loggingStatus.setAttribute("aria-label", loggingStatus.title);
   securityStatus.update(state);
   resizeInput();
-  if (connected && !worldsDialog.isOpen()) inputArea.focus();
+  if (connected && !modalOpen()) inputArea.focus();
 }
 window.moolin.getConnectionState().then(applyConnectionState);
 window.moolin.onConnectionState(applyConnectionState);
 
 // Terminal-native "zoom": resizes the actual font (and re-fits cols/rows),
 // rather than Chromium's CSS page zoom, which breaks the WebGL canvas/scrollbar.
+// direction 0 ("Actual Size") resets to the preferred size, not a fixed one,
+// so it tracks whatever's currently saved in the Preferences dialog.
 window.moolin.onZoom((direction) => {
-  const current = term.options.fontSize ?? DEFAULT_FONT_SIZE;
+  const current = term.options.fontSize ?? preferredFontSize;
   const next =
     direction === 0
-      ? DEFAULT_FONT_SIZE
+      ? preferredFontSize
       : Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, current + direction * FONT_SIZE_STEP));
   window.moolin.log("debug", "renderer", "zoom", direction, "-> fontSize", next);
   term.options.fontSize = next;
-  inputArea.style.fontSize = `${next}px`;
-  gutter.style.fontSize = `${next}px`; // keep the gutter's cell height matched
-  resizeInput();
-  scheduleGutter();
+  applyFont(term.options.fontFamily ?? fontFamilyFor(initialFont.fontId), next);
+});
+
+// A new default font/size saved in the Preferences dialog; applies
+// immediately to this window, same as zoom, but can also change the family.
+window.moolin.onSetFont(({ fontFamily, fontSize }) => {
+  preferredFontSize = fontSize;
+  term.options.fontFamily = fontFamily;
+  term.options.fontSize = fontSize;
+  applyFont(fontFamily, fontSize);
 });
 
 resizeInput();
+
+// A freshly opened (non-cascaded) window asks main.ts to size it so this
+// terminal shows 80x25 characters, centered on screen (see WindowManager).
+// Cell size and the chrome around the terminal (gutter, divider, input area,
+// status bar) are both measured rather than computed, for the same reason
+// cellHeight() is: they depend on the actual font and layout, not just the
+// numbers that went into them.
+if (window.moolin.fitToContentOnLoad) {
+  window.moolin.reportInitialSize({
+    width: cellWidth() * 80 + (window.innerWidth - terminalContainer.clientWidth),
+    height: cellHeight() * 25 + (window.innerHeight - terminalContainer.clientHeight),
+  });
+}

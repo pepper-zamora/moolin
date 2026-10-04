@@ -34,6 +34,15 @@ export const IpcChannels = {
   terminalClearScreenRequested: "terminal:clearScreenRequested",
   // main -> renderer: show or hide the per-line timestamp gutter.
   terminalToggleTimestamps: "terminal:toggleTimestamps",
+  // main -> renderer: apply a newly chosen default font/size to this window.
+  terminalSetFont: "terminal:setFont",
+  // renderer -> main: this window's measured content size for an 80x25
+  // terminal at its starting font, for sizing a freshly opened window.
+  terminalInitialSize: "terminal:initialSize",
+  // main -> renderer: open the Preferences dialog with the current settings.
+  preferencesOpen: "preferences:open",
+  // renderer -> main: save changed preferences (merged over the current ones).
+  preferencesSave: "preferences:save",
   connectionGetState: "connection:getState",
   connectionState: "connection:state",
   clipboardWriteText: "clipboard:writeText",

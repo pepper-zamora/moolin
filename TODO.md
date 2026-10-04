@@ -5,18 +5,12 @@ gets its own branch when we pick it up; move it out of this list then.
 Larger feature ideas (triggers, aliases, a mapper and so on) live in
 [GAPS.md](GAPS.md) instead.
 
-## App
-
-- **Preferences dialog.** Worlds → Preferences… is a placeholder that says
-  "Not yet implemented". The two settings there are so far (timestamps, the
-  update check) are menu checkboxes. Either build the dialog or remove the
-  menu item until there's one.
-
 ## Testing
 
-- **macOS.** Nothing has run the macOS build yet. Test the `.dmg` on a Mac,
-  both Apple silicon and Intel if possible, and check the README's
-  Gatekeeper steps against what macOS actually shows.
+- **macOS.** Apple silicon confirmed: the "damaged and can't be opened"
+  Gatekeeper quarantine message appears as expected, and the README's fix
+  (`xattr -dr com.apple.quarantine /Applications/Moolin.app`) works as
+  documented. Intel Mac still untested.
 - **rpm and pacman packages.** Built by CI but never installed. Test them on
   Fedora and Arch, for example in a VM.
 

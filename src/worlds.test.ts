@@ -3,8 +3,16 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { backupPathFor, parseWorld, readWorldsFile, resolveWorldsPath, saveWorlds, updateMru } from "./worlds";
-import { DEFAULT_LOGIN_TEMPLATE, newWorld } from "./world-utils";
+import {
+  backupPathFor,
+  parseWorld,
+  readWorldsFile,
+  resolveWorldsPath,
+  saveWorlds,
+  seedDefaultWorlds,
+  updateMru,
+} from "./worlds";
+import { DEFAULT_LOGIN_TEMPLATE, isConnectable, newWorld } from "./world-utils";
 
 function withTempDir(fn: (dir: string) => void): void {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-worlds-test-"));
@@ -74,6 +82,23 @@ test("a missing or empty file reads as no worlds, without an error", () => {
     fs.writeFileSync(path.join(dir, "empty"), "\n");
     assert.deepEqual(readWorldsFile(path.join(dir, "empty")), { state: { worlds: [], mru: [] } });
   });
+});
+
+test("seedDefaultWorlds gives a connectable LambdaMOO with a Guest character, each with its own id", () => {
+  const [lambdaMoo] = seedDefaultWorlds();
+  assert.equal(lambdaMoo.name, "LambdaMOO");
+  assert.equal(lambdaMoo.host, "lambda.moo.mud.org");
+  assert.equal(lambdaMoo.port, 8888);
+  assert.equal(lambdaMoo.tls, false);
+  assert.equal(isConnectable(lambdaMoo), true);
+  assert.equal(lambdaMoo.characters.length, 1);
+  const [guest] = lambdaMoo.characters;
+  assert.equal(guest.name, "Guest");
+  assert.equal(guest.password, "guest");
+  assert.notEqual(lambdaMoo.id, guest.id);
+  // parseWorld/parseCharacter are the read path's own validation; a seeded
+  // world should pass it just like one loaded from disk would.
+  assert.deepEqual(parseWorld(JSON.parse(JSON.stringify(lambdaMoo))), lambdaMoo);
 });
 
 test("an unparseable file is reported, and saving over it is refused", () => {
