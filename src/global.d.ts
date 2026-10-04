@@ -35,6 +35,7 @@ declare global {
       onSelectAllRequested(callback: () => void): void;
       onUndoRequested(callback: () => void): void;
       onRedoRequested(callback: () => void): void;
+      onFindRequested(callback: (action: "open" | "next" | "previous") => void): void;
       onClearScreenRequested(callback: () => void): void;
       onToggleTimestamps(callback: (show: boolean) => void): void;
       reportUndoState(canUndo: boolean, canRedo: boolean): void;

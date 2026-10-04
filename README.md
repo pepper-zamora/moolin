@@ -37,6 +37,10 @@ its worlds-and-characters model and dialog, and its input/focus behavior.
   and are kept in `moolin.log.times` so logged history keeps its times on
   reconnect. The last setting chosen is remembered for new windows (see
   [Preferences](#preferences)).
+- **Scrollback search.** Edit > Find (Ctrl+F) opens a find box at the top
+  right of the window, with match-case, whole-word and regular-expression
+  toggles. Every match is highlighted, and marked beside the scrollbar, and
+  the matches update as new output arrives.
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
@@ -135,11 +139,17 @@ Nothing else is added, so end the template with `\r` (most servers) or
 | Ctrl+Up / Ctrl+Down      | Previous / next command, from anywhere                  |
 | Page Up / Page Down      | Scroll the scrollback                                   |
 | Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
+| Ctrl+F                   | Find in the scrollback                                  |
+| F3 / Shift+F3            | Next / previous match                                   |
 | Ctrl+X / Ctrl+C / Ctrl+V | Cut / copy the selection / paste into the input area    |
 | Ctrl+Z                   | Undo in the input area                                  |
 | Ctrl+Shift+Z / Ctrl+Y    | Redo in the input area                                  |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default font size                    |
 | Ctrl+R                   | Reload the window (the connection and scrollback stay)  |
+
+In the find box: Enter / Shift+Enter go to the next / previous match,
+Alt+C / Alt+W / Alt+R toggle match case, whole word and regular expression,
+and Escape closes it.
 
 In the Worlds dialog: arrow keys move through the tree (Right/Left expand and
 collapse, and Left on a collapsed item goes to its parent), Enter connects,
@@ -217,6 +227,7 @@ on the `PATH`.
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
 | `src/renderer.ts`         | The terminal window's page: scrollback, timestamp gutter, input area, keys |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
+| `src/find-widget.ts`      | The scrollback find box                                                   |
 | `src/command-history.ts`  | Input history                                                             |
 | `src/input-undo.ts`       | Input area undo/redo                                                     |
 | `src/ipc-channels.ts`     | IPC channel names shared by main and preload                              |

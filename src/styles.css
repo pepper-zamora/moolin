@@ -24,6 +24,7 @@ html, body {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
+  position: relative; /* anchors the find widget */
 }
 
 #terminal {
@@ -73,6 +74,107 @@ html, body {
   line-height: 1.2;
   opacity: 0.75;
   white-space: pre;
+}
+
+/* Scrollback find widget, styled after VS Code's: hangs from the top edge
+   at the right, clear of the scrollbar and its overview ruler. */
+#find-widget {
+  position: absolute;
+  top: 0;
+  right: 28px;
+  z-index: 10; /* above xterm's canvas layers */
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 4px 4px 6px;
+  background: #252526;
+  color: #ccc;
+  border-radius: 0 0 4px 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.find-field {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  width: 260px;
+  padding: 0 2px 0 0;
+  background: #3c3c3c;
+  border: 1px solid #3c3c3c;
+  border-radius: 2px;
+}
+
+.find-field:focus-within {
+  border-color: #007fd4;
+}
+
+#find-widget.no-results .find-field,
+#find-widget.invalid .find-field {
+  border-color: #be1100;
+}
+
+#find-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 4px;
+  background: transparent;
+  color: #ccc;
+  border: none;
+  outline: none;
+  font: inherit;
+}
+
+#find-input::placeholder {
+  color: #888;
+}
+
+#find-widget button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+#find-widget .find-toggle {
+  min-width: 22px;
+  font-family: Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 12px;
+}
+
+#find-widget .find-toggle:hover,
+#find-widget .find-action:hover {
+  background: rgba(90, 93, 94, 0.5);
+}
+
+#find-widget .find-toggle[aria-pressed="true"] {
+  background: rgba(36, 137, 219, 0.51);
+  border-color: #007acc;
+  color: #fff;
+}
+
+#find-widget .find-action {
+  width: 22px;
+  font-size: 14px;
+}
+
+#find-count {
+  min-width: 72px;
+  margin: 0 4px 0 6px;
+  white-space: nowrap;
+}
+
+#find-widget.no-results #find-count,
+#find-widget.invalid #find-count {
+  color: #f48771;
 }
 
 #divider {

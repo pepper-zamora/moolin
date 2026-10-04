@@ -73,6 +73,11 @@ contextBridge.exposeInMainWorld("moolin", {
   onRedoRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalRedoRequested, () => callback());
   },
+  onFindRequested: (callback: (action: "open" | "next" | "previous") => void): void => {
+    ipcRenderer.on(IpcChannels.terminalFindRequested, (_event, action: "open" | "next" | "previous") =>
+      callback(action),
+    );
+  },
   onClearScreenRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalClearScreenRequested, () => callback());
   },

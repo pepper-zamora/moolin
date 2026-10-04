@@ -246,6 +246,25 @@ function buildMenu(terminal: TerminalWindow): void {
           registerAccelerator: false,
           click: () => terminal.send(IpcChannels.terminalSelectAllRequested),
         },
+        { type: "separator" },
+        {
+          label: "&Find…",
+          accelerator: "CmdOrCtrl+F",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalFindRequested, "open"),
+        },
+        {
+          label: "Find &Next",
+          accelerator: "F3",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalFindRequested, "next"),
+        },
+        {
+          label: "Find Pre&vious",
+          accelerator: "Shift+F3",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalFindRequested, "previous"),
+        },
       ],
     },
     {

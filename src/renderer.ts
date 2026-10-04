@@ -5,6 +5,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { worldsDialog } from "./worlds-dialog";
+import { FindWidget } from "./find-widget";
 import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
 import { InputUndoStack, type InputSnapshot } from "./input-undo";
 import type { ConnectionState } from "./connection-manager";
@@ -33,6 +34,9 @@ const term = new Terminal({
   convertEol: true,
   disableStdin: true, // scrollback is output-only; all typing goes to #input-area
   cursorInactiveStyle: "none", // term never actually has focus, so the hollow "inactive" cursor is just noise
+  allowProposedApi: true, // the search addon's match highlighting uses decorations
+  // A strip beside the scrollbar marking where search matches are.
+  overviewRuler: { width: 10 },
   fontFamily: "Menlo, Consolas, 'DejaVu Sans Mono', monospace",
   fontSize: DEFAULT_FONT_SIZE,
   theme: {
@@ -72,6 +76,10 @@ const statusBar = element<HTMLDivElement>("status-bar");
 const statusText = element<HTMLSpanElement>("status-text");
 
 term.open(terminalContainer);
+
+const findWidget = new FindWidget(term, () => {
+  if (!inputArea.hidden) inputArea.focus();
+});
 
 term.onResize(({ cols, rows }) => {
   window.moolin.log("debug", "renderer", "terminal resized to", `${cols}x${rows}`);
@@ -389,12 +397,14 @@ inputArea.addEventListener("beforeinput", () => {
 window.addEventListener("resize", () => resizeInput());
 
 // Keyboard focus belongs in the input area whenever the window has it,
-// unless the Worlds dialog is open or there's no connection to type to.
+// unless the Worlds dialog is open, the find widget has it, or there's no
+// connection to type to.
 // Clicking the scrollback (e.g. to select text) would otherwise take it;
 // xterm's mouse selection doesn't need focus, so it still works.
 document.addEventListener("focusout", () => {
   setTimeout(() => {
     if (worldsDialog.isOpen() || inputArea.hidden) return;
+    if (findWidget.root.contains(document.activeElement)) return;
     if (document.activeElement !== inputArea) inputArea.focus();
   });
 });
@@ -460,6 +470,10 @@ window.moolin.onPasteRequested(() => void pasteIntoInput());
 window.moolin.onSelectAllRequested(() => term.selectAll());
 window.moolin.onUndoRequested(() => undoInput());
 window.moolin.onRedoRequested(() => redoInput());
+window.moolin.onFindRequested((action) => {
+  if (action === "open") findWidget.open();
+  else findWidget.findFromMenu(action);
+});
 window.moolin.onClearScreenRequested(() => clearToOffscreen());
 window.moolin.onToggleTimestamps((show) => {
   timestampsShown = show;
@@ -485,8 +499,18 @@ document.addEventListener(
     if (worldsDialog.isOpen()) return;
     const mod = (event.ctrlKey || event.metaKey) && !event.altKey;
     const key = event.key.toLowerCase();
+    // The find widget's search field keeps the browser's native editing keys.
+    const editingFind = findWidget.root.contains(document.activeElement);
     let handled = true;
-    if (mod && key === "c") {
+    if (mod && !event.shiftKey && key === "f") {
+      findWidget.open();
+    } else if (event.key === "F3" && !mod && !event.altKey) {
+      findWidget.findFromMenu(event.shiftKey ? "previous" : "next");
+    } else if (event.key === "Escape" && findWidget.isOpen()) {
+      findWidget.close();
+    } else if (editingFind && mod && ["c", "x", "v", "z", "y"].includes(key)) {
+      handled = false;
+    } else if (mod && key === "c") {
       copySelection();
     } else if (mod && key === "x") {
       cutSelection();

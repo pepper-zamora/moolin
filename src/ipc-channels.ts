@@ -29,6 +29,8 @@ export const IpcChannels = {
   // renderer -> main: whether the input's undo/redo stacks are non-empty, to
   // keep the Edit menu's Undo/Redo items' enabled state in sync.
   terminalUndoStateChanged: "terminal:undoStateChanged",
+  // main -> renderer: Edit menu's Find / Find Next / Find Previous.
+  terminalFindRequested: "terminal:findRequested",
   terminalClearScreenRequested: "terminal:clearScreenRequested",
   // main -> renderer: show or hide the per-line timestamp gutter.
   terminalToggleTimestamps: "terminal:toggleTimestamps",

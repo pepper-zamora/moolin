@@ -189,8 +189,10 @@ currently discards or never negotiates:
   protocol; not common elsewhere and lower priority.
 - **Spell checking** of outgoing text (MUSHclient).
 - **Searchable/filterable scrollback** beyond plain text search (Mudlet
-  logs are searchable; Blightmud has a text-search mode in its TUI). Moolin's
-  scrollback has no search at all currently.
+  logs are searchable; Blightmud has a text-search mode in its TUI). Moolin
+  has plain text search (Edit > Find, with case, whole-word and regex
+  options) but nothing beyond it, such as filtering to matching lines or
+  searching the on-disk logs.
 - **Tag-aware scrollback filtering**: the view-side counterpart to
   Blightmud's trigger-tagging (§1) — once lines can be tagged, being able to
   show-only or hide-by-tag turns tags into a lightweight "channel" view
@@ -297,8 +299,9 @@ currently discards or never negotiates:
    API" work (xterm.js has a search addon; Electron/Chromium's spellchecker
    is available for free in any text input) rather than new design surface.
    Low-hanging fruit, worth doing first regardless of where the rest of
-   this list goes. (**Line timestamps**, once in this tier, are done; see
-   §8. Their gutter is where later tag marks (§1) could go.)
+   this list goes. (**Scrollback search** is done, via `addon-search`.
+   **Line timestamps**, once in this tier, are done too; see §8. Their
+   gutter is where later tag marks (§1) could go.)
 2. **Triggers** (match + highlight/gag/send/script actions) and **aliases**
    — the two most-depended-on features; almost nothing else in this list is
    useful without them.
