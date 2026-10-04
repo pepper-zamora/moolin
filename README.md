@@ -325,11 +325,16 @@ individual entries are skipped with a warning.
 
 Worlds → Preferences… opens a dialog for app-wide settings: whether to show
 timestamps, whether to check for updates at startup, and the terminal's
-default font and size. Each curated font is shown with a live sample
-highlighting characters that commonly look alike in a monospace font (`0O`,
-`1lI`, `rn` vs `m`, and so on), so you can judge it before picking it; a font
-that isn't actually installed just falls back to the next one in its CSS
-stack, which the sample makes obvious. Changes save and apply immediately:
+default font and size. The default is Iosevka Moolin, a custom build of
+[Iosevka](https://typeof.net/Iosevka/) bundled with the app (see
+[`npm run build:font`](#commands)), so there's a deliberately-chosen
+monospace font out of the box rather than whatever happens to be installed.
+Each curated font is shown with a live sample highlighting characters that
+commonly look alike in a monospace font (`0O`, `1lI`, `rn` vs `m`, and so
+on), so you can judge it before picking it; one that isn't actually
+installed (everything but Iosevka Moolin relies on the system already
+having it) just falls back to the next one in its CSS stack, which the
+sample makes obvious. Changes save and apply immediately:
 showTimestamps is this window's own setting too (same as the View menu's
 checkbox), while the font/size and update-check setting also become the
 default for windows opened after. There's no Save or Cancel — like the
@@ -378,9 +383,22 @@ A missing or unreadable file just means the defaults.
 | `npm run typecheck` | Typecheck only                                          |
 | `npm run lint`      | Lint `src/` with [Biome](https://biomejs.dev/) (`npm run lint:fix` to apply safe fixes) |
 | `npm run format`    | Format `src/` with Biome (`npm run format:check` to check without writing) |
+| `npm run build:font` | Rebuild the bundled default font from `font/private-build-plans.toml` (see below) |
 
 The TLS tests generate a throwaway certificate with `openssl`, which must be
 on the `PATH`.
+
+`npm run build:font` (`scripts/build-font.mjs`) rebuilds Iosevka Moolin, the
+custom [Iosevka](https://typeof.net/Iosevka/) build Moolin bundles as its
+default font (`font/`). It's not part of `npm run build`: it clones the full
+[be5invis/Iosevka](https://github.com/be5invis/Iosevka) build toolchain
+(much heavier than anything else this project needs) into
+`font/.iosevka-src/` the first time it's run, reusing it on later runs, and
+only needs rerunning when `private-build-plans.toml` changes. Set
+`IOSEVKA_SRC` to point at a checkout of your own instead of letting it
+clone one. The four built faces (Regular, Bold, Italic, BoldItalic — what
+xterm actually switches between for SGR bold/italic) are committed, along
+with the font's SIL Open Font License text (`font/LICENSE-IosevkaMoolin.md`).
 
 `npm run smoke` (`scripts/smoke.mjs`) covers what the unit tests can't
 reach: the renderer in a real window. It launches Moolin in a throwaway
@@ -410,6 +428,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/worlds.ts`           | Reading, validating and writing the worlds file                           |
 | `src/worlds-types.ts`     | The World, Character and MRU types shared by main and renderer            |
 | `src/preferences.ts`      | Reading and writing app-wide preferences                                  |
+| `src/fonts.ts`            | The curated monospace font list, size bounds and sample text              |
 | `src/world-utils.ts`      | World helpers shared by main and renderer (defaults, labels, login templates) |
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
 | `src/session-log.ts`      | Persistent per-world/character logs, their `.times` sidecar, and which window owns each |
@@ -417,6 +436,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
 | `src/renderer.ts`         | The terminal window's page: scrollback, gutter, input area, status bar, keys |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
+| `src/preferences-dialog.ts` | The Preferences dialog                                                  |
 | `src/tabs.ts`             | Tab strips (the Worlds dialog's), with ‹ › scrolling when they overflow   |
 | `src/find-widget.ts`      | The scrollback find box                                                   |
 | `src/live-replay.ts`      | Merging a window's scrollback replay with its live output, without repeats |
@@ -433,3 +453,7 @@ MIT; see [LICENSE](LICENSE).
 The icon is a remix of "Woman with roses" by j4p4n from
 [OpenClipart](https://openclipart.org/), dedicated to the public domain under
 [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+The bundled default font, Iosevka Moolin (`font/`), is a custom build of
+[Iosevka](https://typeof.net/Iosevka/) by Belleve Invis, licensed under the
+[SIL Open Font License 1.1](font/LICENSE-IosevkaMoolin.md).

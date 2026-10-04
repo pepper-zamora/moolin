@@ -1,0 +1,83 @@
+[buildPlans.IosevkaMoolin]
+family = "Iosevka Moolin"
+spacing = "normal"
+serifs = "slab"
+noCvSs = true
+exportGlyphNames = true
+
+  [buildPlans.IosevkaMoolin.variants]
+  inherits = "ss20"
+
+    [buildPlans.IosevkaMoolin.variants.design]
+    three = "flat-top-serifed"
+    seven = "straight-serifed-crossbar"
+    zero = "dotted"
+    capital-q = "closed-swash"
+    capital-z = "curly-serifed-with-horizontal-crossbar"
+    f = "tailed-crossbar-at-half-ascender-height"
+    g = "double-storey"
+    i = "zshaped"
+    k = "cursive-top-left-and-bottom-right-serifed"
+    l = "zshaped"
+    m = "short-leg-serifed"
+    z = "curly-serifed-with-horizontal-crossbar"
+    lower-iota = "zshaped"
+    asterisk = "turn-hex-mid"
+
+    [buildPlans.IosevkaMoolin.variants.italic]
+    three = "flat-top-serifed"
+    seven = "straight-serifed-crossbar"
+    zero = "dotted"
+    capital-q = "closed-swash"
+    capital-z = "curly-serifed-with-horizontal-crossbar"
+    f = "tailed-crossbar-at-half-ascender-height"
+    g = "double-storey"
+    h = "tailed-motion-serifed"
+    i = "serifed-diagonal-tailed"
+    k = "cursive-top-left-and-bottom-right-serifed"
+    l = "zshaped"
+    m = "top-left-and-bottom-right-serifed"
+    n = "tailed-motion-serifed"
+    z = "curly-serifed-with-horizontal-crossbar"
+    lower-iota = "zshaped"
+    asterisk = "turn-hex-mid"
+
+  [buildPlans.IosevkaMoolin.ligations]
+  inherits = "dlig"
+
+[buildPlans.IosevkaMoolin.weights.Regular]
+shape = 400
+menu = 400
+css = 400
+
+[buildPlans.IosevkaMoolin.weights.Bold]
+shape = 700
+menu = 700
+css = 700
+
+[buildPlans.IosevkaMoolin.widths.Normal]
+shape = 500
+menu = 5
+css = "normal"
+
+[buildPlans.IosevkaMoolin.widths.Extended]
+shape = 600
+menu = 7
+css = "expanded"
+
+[buildPlans.IosevkaMoolin.widths.Condensed]
+shape = 416
+menu = 3
+css = "condensed"
+
+[buildPlans.IosevkaMoolin.slopes.Upright]
+angle = 0
+shape = "upright"
+menu = "upright"
+css = "normal"
+
+[buildPlans.IosevkaMoolin.slopes.Italic]
+angle = 9.4
+shape = "italic"
+menu = "italic"
+css = "italic"

@@ -728,15 +728,25 @@ window.moolin.onSetFont(({ fontFamily, fontSize }) => {
 
 resizeInput();
 
-// A freshly opened (non-cascaded) window asks main.ts to size it so this
-// terminal shows 80x25 characters, centered on screen (see WindowManager).
-// Cell size and the chrome around the terminal (gutter, divider, input area,
-// status bar) are both measured rather than computed, for the same reason
-// cellHeight() is: they depend on the actual font and layout, not just the
-// numbers that went into them.
-if (window.moolin.fitToContentOnLoad) {
-  window.moolin.reportInitialSize({
-    width: cellWidth() * 80 + (window.innerWidth - terminalContainer.clientWidth),
-    height: cellHeight() * 25 + (window.innerHeight - terminalContainer.clientHeight),
-  });
-}
+// A bundled @font-face (the default, Iosevka Moolin — see styles.css) loads
+// asynchronously even though it's local, not fetched; xterm measures cell
+// size once and doesn't re-measure on its own when a face it's using finishes
+// loading. Re-fitting once fonts are actually ready catches that, and is
+// cheap/harmless for a system font that was already available immediately.
+document.fonts.ready.then(() => {
+  fitAddon.fit();
+  scheduleGutter();
+
+  // A freshly opened (non-cascaded) window asks main.ts to size it so this
+  // terminal shows 80x25 characters, centered on screen (see WindowManager).
+  // Cell size and the chrome around the terminal (gutter, divider, input
+  // area, status bar) are both measured rather than computed, for the same
+  // reason cellHeight() is: they depend on the actual font and layout, not
+  // just the numbers that went into them.
+  if (window.moolin.fitToContentOnLoad) {
+    window.moolin.reportInitialSize({
+      width: cellWidth() * 80 + (window.innerWidth - terminalContainer.clientWidth),
+      height: cellHeight() * 25 + (window.innerHeight - terminalContainer.clientHeight),
+    });
+  }
+});

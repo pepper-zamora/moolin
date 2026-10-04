@@ -10,9 +10,13 @@ export interface MonospaceFont {
   cssFamily: string;
 }
 
-export const DEFAULT_FONT_ID = "system-default";
+export const DEFAULT_FONT_ID = "iosevka-moolin";
 
 export const MONOSPACE_FONTS: MonospaceFont[] = [
+  // Moolin's own custom Iosevka build, bundled with the app via @font-face
+  // (see styles.css and font/private-build-plans.toml) rather than relying
+  // on anything installed, so it's there by default on a fresh install.
+  { id: "iosevka-moolin", label: "Iosevka Moolin", cssFamily: `"Iosevka Moolin", Menlo, Consolas, monospace` },
   { id: "system-default", label: "System Default", cssFamily: `Menlo, Consolas, "DejaVu Sans Mono", monospace` },
   { id: "menlo", label: "Menlo", cssFamily: `Menlo, monospace` },
   { id: "sf-mono", label: "SF Mono", cssFamily: `"SF Mono", Menlo, monospace` },

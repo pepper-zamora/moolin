@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { preferencesPath, readPreferences, writePreferences } from "./preferences";
 
-const DEFAULTS = { showTimestamps: false, checkForUpdates: true, fontId: "system-default", fontSize: 14 };
+const DEFAULTS = { showTimestamps: false, checkForUpdates: true, fontId: "iosevka-moolin", fontSize: 14 };
 
 function withTempDir(fn: (dir: string) => void): void {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-prefs-test-"));
