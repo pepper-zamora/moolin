@@ -32,7 +32,9 @@ its worlds-and-characters model and dialog, and its input/focus behavior.
   to `~/Documents/Moolin/<world>/<character>/moolin.log` (just `<world>/` when
   connecting without a character). Connecting pre-populates the scrollback with
   the last 2 MiB of that log. If several windows are connected to the same
-  world and character, only the first reads and writes the log. The log grows
+  world and character, only the first reads and writes the log. The status
+  bar shows which: a scroll beside the security shield when the window is
+  logging, a red "no" sign when another window has the log. The log grows
   without bound for now, as does the `moolin.log.times` file beside it (see
   timestamps, below); delete or prune the two together.
 - **Line timestamps.** View > Show Timestamps adds a gutter showing when each

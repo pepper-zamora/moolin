@@ -9,7 +9,7 @@ import { IpcChannels } from "./ipc-channels";
 import { preferencesPath, readPreferences, writePreferences } from "./preferences";
 import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-types";
 import { targetLabel } from "./world-utils";
-import type { ConnectionState } from "./connection-manager";
+import type { WindowState } from "./connection-manager";
 
 function cliArgs(): string[] {
   return app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
@@ -428,8 +428,8 @@ ipcMain.handle(
 
 ipcMain.handle(
   IpcChannels.connectionGetState,
-  (event): ConnectionState =>
-    terminalFor(event)?.connection.getState() ?? { status: "disconnected", label: null, address: null, tls: null },
+  (event): WindowState =>
+    terminalFor(event)?.getState() ?? { status: "disconnected", label: null, address: null, tls: null, logging: false },
 );
 
 // The clipboard module is unavailable to the sandboxed preload/renderer

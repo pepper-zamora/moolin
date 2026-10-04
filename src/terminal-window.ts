@@ -1,10 +1,9 @@
 import { BrowserWindow, Menu } from "electron";
-import { ConnectionManager } from "./connection-manager";
+import { ConnectionManager, type WindowState } from "./connection-manager";
 import { ScrollbackBuffer, type ScrollbackReplay, type TerminalChunk } from "./scrollback-buffer";
 import { IpcChannels } from "./ipc-channels";
 import { log } from "./logger";
 import { logPathFor, type SessionLog, type SessionLogRegistry } from "./session-log";
-import { targetLabel } from "./world-utils";
 import type { ConnectTarget } from "./worlds-types";
 
 const MAX_SCROLLBACK_BYTES = 2 * 1024 * 1024;
@@ -76,7 +75,7 @@ export class TerminalWindow {
           // BrowserWindow is destroyed; there is no menu left to refresh.
           if (this.window.isDestroyed()) return;
           handlers.onStateChange(this);
-          this.send(IpcChannels.connectionState, this.connection.getState());
+          this.send(IpcChannels.connectionState, this.getState());
         },
         onMessage: (text) => this.writeStatus(text),
         onData: (data) => this.writeServerData(data),
@@ -131,7 +130,8 @@ export class TerminalWindow {
   // Switches to `target`'s log. If this window gets to own it, the scrollback
   // is replaced by the log's tail; otherwise (another window is connected to
   // the same world/character and logging it) the window starts empty and
-  // doesn't log, so nothing is recorded twice.
+  // doesn't log, so nothing is recorded twice. The status bar shows which
+  // (see getState).
   private startLog(target: ConnectTarget, options: TerminalWindowOptions): void {
     this.sessionLog?.close();
     const file = logPathFor(options.logRoot, target.world, target.character);
@@ -143,12 +143,6 @@ export class TerminalWindow {
     this.scrollback.reset(history.bytes.length > 0 ? [history.bytes] : [], history.times);
     this.seq++;
     this.send(IpcChannels.terminalReset, this.getScrollback());
-    if (!this.sessionLog) {
-      const label = targetLabel(target.world, target.character);
-      this.writeStatus(
-        `\x1b[33m[warning: logging for ${label} is active in another window; this window will not be logged]\x1b[0m\r\n`,
-      );
-    }
   }
 
   // Server output, timestamped with its arrival time (the only lines that get
@@ -171,6 +165,11 @@ export class TerminalWindow {
     this.sessionLog?.append(data, time);
     this.scrollback.append(data, time);
     this.send(IpcChannels.telnetData, data, time, ++this.seq);
+  }
+
+  getState(): WindowState {
+    const connection = this.connection.getState();
+    return { ...connection, logging: connection.status !== "disconnected" && this.sessionLog !== null };
   }
 
   getScrollback(): ScrollbackReplay {

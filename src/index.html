@@ -36,6 +36,19 @@
       <textarea id="input-area" rows="1" spellcheck="false" disabled></textarea>
       <div id="status-bar" data-status="disconnected">
         <span id="status-text">Not connected</span>
+        <!-- Whether this window is writing the session log: a scroll when it
+             is, a "no" sign when another window connected to the same
+             world/character already owns the log. -->
+        <span id="logging-status" role="img" hidden>
+          <svg class="logging-on" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <path d="M5 13.5 H3.6 a1.6 1.6 0 0 1 0 -3.2 H5 M5 13.5 h5.4 a1.6 1.6 0 0 0 1.6 -1.6 V5.7 M5 13.5 a1.6 1.6 0 0 0 1.6 -1.6 V10.3 H3.6 M5 10.3 V4.1 a1.6 1.6 0 0 1 1.6 -1.6 H12.4 a1.6 1.6 0 0 1 0 3.2 H12 M10.8 2.5 a1.6 1.6 0 0 1 1.6 1.6" />
+            <path class="scroll-text" d="M7 5.6 H10 M7 7.6 H10 M7 9.6 H9" />
+          </svg>
+          <svg class="logging-off" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <circle cx="8" cy="8" r="5.9" />
+            <path d="M3.8 3.8 L12.2 12.2" />
+          </svg>
+        </span>
         <!-- Connection security, far right: a shield whose color and mark
              (check / question mark / cross, so it never relies on color
              alone) give trusted TLS / untrusted certificate / plaintext.

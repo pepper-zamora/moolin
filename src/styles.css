@@ -228,8 +228,34 @@ html, body {
   white-space: nowrap;
 }
 
-.security-icon {
+.security-icon,
+#logging-status {
   display: flex;
+}
+
+#logging-status {
+  cursor: default;
+}
+
+#logging-status svg {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#logging-status .logging-on {
+  stroke: #b8b8b8;
+  stroke-width: 1.1;
+}
+
+#logging-status .logging-off {
+  stroke: #f85149;
+  stroke-width: 1.8;
+}
+
+#logging-status[data-logging="on"] .logging-off,
+#logging-status[data-logging="off"] .logging-on {
+  display: none;
 }
 
 #security-shield {

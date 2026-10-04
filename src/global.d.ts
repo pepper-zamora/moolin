@@ -1,5 +1,5 @@
 import type { World, WorldsLoadResult } from "./worlds-types";
-import type { ConnectionState } from "./connection-manager";
+import type { WindowState } from "./connection-manager";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { LogLevel } from "./logger";
 
@@ -19,9 +19,9 @@ declare global {
       sendResize(cols: number, rows: number): void;
       getScrollback(): Promise<ScrollbackReplay>;
       onTerminalReset(callback: (replay: ScrollbackReplay) => void): void;
-      getConnectionState(): Promise<ConnectionState>;
+      getConnectionState(): Promise<WindowState>;
       onTelnetData(callback: (data: string | Uint8Array, time: number | null, seq: number) => void): void;
-      onConnectionState(callback: (state: ConnectionState) => void): void;
+      onConnectionState(callback: (state: WindowState) => void): void;
       onZoom(callback: (direction: number) => void): void;
       clipboard: {
         writeText(text: string): void;

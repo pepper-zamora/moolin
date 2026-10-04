@@ -9,7 +9,7 @@ import { FindWidget } from "./find-widget";
 import { SecurityStatus } from "./security-status";
 import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
 import { InputUndoStack, type InputSnapshot } from "./input-undo";
-import type { ConnectionState } from "./connection-manager";
+import type { WindowState } from "./connection-manager";
 import { countLineFeeds } from "./line-feeds";
 import { LiveReplay } from "./live-replay";
 import type { ScrollbackReplay } from "./scrollback-buffer";
@@ -79,6 +79,7 @@ const gutter = element<HTMLDivElement>("gutter");
 const inputArea = element<HTMLTextAreaElement>("input-area");
 const statusBar = element<HTMLDivElement>("status-bar");
 const statusText = element<HTMLSpanElement>("status-text");
+const loggingStatus = element<HTMLSpanElement>("logging-status");
 
 term.open(terminalContainer);
 
@@ -613,7 +614,7 @@ worldsDialog.dialog.addEventListener("close", () => {
 // The input area is only usable while connected. The status bar below it
 // says what the window is connected to, with the connection's security shown
 // at its far right.
-function applyConnectionState(state: ConnectionState): void {
+function applyConnectionState(state: WindowState): void {
   const connected = state.status === "connected";
   document.title = connected && state.label ? `${state.label} - ${APP_NAME}` : APP_NAME;
   inputArea.disabled = !connected;
@@ -624,6 +625,11 @@ function applyConnectionState(state: ConnectionState): void {
       : state.status === "connecting"
         ? `Connecting to ${state.label}…`
         : "Not connected";
+  // Shown while connected, like the security shield beside it.
+  loggingStatus.hidden = !connected;
+  loggingStatus.dataset.logging = state.logging ? "on" : "off";
+  loggingStatus.title = state.logging ? "Logging is enabled." : "Logging is disabled.";
+  loggingStatus.setAttribute("aria-label", loggingStatus.title);
   securityStatus.update(state);
   resizeInput();
   if (connected && !worldsDialog.isOpen()) inputArea.focus();

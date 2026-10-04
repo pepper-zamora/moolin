@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { World, WorldsLoadResult } from "./worlds-types";
-import type { ConnectionState } from "./connection-manager";
+import type { WindowState } from "./connection-manager";
 import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import { IpcChannels } from "./ipc-channels";
@@ -33,14 +33,14 @@ contextBridge.exposeInMainWorld("moolin", {
   onTerminalReset: (callback: (replay: ScrollbackReplay) => void): void => {
     ipcRenderer.on(IpcChannels.terminalReset, (_event, replay: ScrollbackReplay) => callback(replay));
   },
-  getConnectionState: (): Promise<ConnectionState> => ipcRenderer.invoke(IpcChannels.connectionGetState),
+  getConnectionState: (): Promise<WindowState> => ipcRenderer.invoke(IpcChannels.connectionGetState),
   onTelnetData: (callback: (data: string | Uint8Array, time: number | null, seq: number) => void): void => {
     ipcRenderer.on(IpcChannels.telnetData, (_event, data: string | Uint8Array, time: number | null, seq: number) =>
       callback(data, time, seq),
     );
   },
-  onConnectionState: (callback: (state: ConnectionState) => void): void => {
-    ipcRenderer.on(IpcChannels.connectionState, (_event, state: ConnectionState) => callback(state));
+  onConnectionState: (callback: (state: WindowState) => void): void => {
+    ipcRenderer.on(IpcChannels.connectionState, (_event, state: WindowState) => callback(state));
   },
   onZoom: (callback: (direction: number) => void): void => {
     ipcRenderer.on(IpcChannels.terminalZoom, (_event, direction: number) => callback(direction));

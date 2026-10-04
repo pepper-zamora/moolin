@@ -19,6 +19,14 @@ export interface ConnectionState {
   tls: TlsInfo | null;
 }
 
+// What the renderer is told about its window: the connection, plus whether
+// the window is writing it to the session log.
+export interface WindowState extends ConnectionState {
+  // False when another window connected to the same world/character already
+  // owns that log, and while disconnected.
+  logging: boolean;
+}
+
 export interface ConnectionManagerHandlers {
   // A connection attempt to `target` is about to begin, before any of its
   // output — the point to switch whatever records the window's output over
