@@ -1,5 +1,11 @@
 # Moolin
 
+A cross-platform MOO / MUSH / MUD client written by AI to Pepper's personal
+tastes. When this repository was first published, every line of its code and
+documentation had been written by AI (Anthropic's Claude), at the direction of
+Pepper, an experienced player on social servers such as LambdaMOO, who decided
+what it should do and how it should feel to use.
+
 A desktop client for MOOs, MUSHes, MUCKs and MUDs, with buttery-smooth
 scrollback. Built on Electron and xterm.js (WebGL-rendered), for Linux,
 Windows and macOS.
