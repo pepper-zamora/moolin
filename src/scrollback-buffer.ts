@@ -10,6 +10,10 @@ export type TerminalChunk = string | Uint8Array;
 export interface ScrollbackReplay {
   chunks: TerminalChunk[];
   times: Array<number | null>;
+  // The window's output sequence number as of this replay: every live write
+  // or reset numbered at or below it is already reflected here (see
+  // TerminalWindow).
+  seq: number;
 }
 
 function byteLength(data: TerminalChunk): number {

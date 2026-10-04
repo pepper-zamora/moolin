@@ -423,7 +423,7 @@ ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRe
 
 ipcMain.handle(
   IpcChannels.terminalGetScrollback,
-  (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [] },
+  (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0 },
 );
 
 ipcMain.handle(

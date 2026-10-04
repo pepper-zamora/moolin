@@ -47,6 +47,12 @@ export class TerminalWindow {
   // The persistent log of this window's connection, or null when not
   // connecting, or when another window already owns that world/character's log.
   private sessionLog: SessionLog | null = null;
+  // Numbers each write and reset sent to the renderer, so a renderer that
+  // fetches the scrollback (getScrollback) while live output is also arriving
+  // can tell which live messages that replay already contains. The replay
+  // comes back over a different IPC path from the live messages, so the two
+  // aren't ordered relative to each other.
+  private seq = 0;
 
   constructor(options: TerminalWindowOptions, handlers: TerminalWindowHandlers) {
     this.window = new BrowserWindow({
@@ -135,6 +141,7 @@ export class TerminalWindow {
       : { bytes: new Uint8Array(), times: [] };
     log("debug", "main", `window ${this.window.id} log`, file, this.sessionLog ? "owned" : "owned by another window");
     this.scrollback.reset(history.bytes.length > 0 ? [history.bytes] : [], history.times);
+    this.seq++;
     this.send(IpcChannels.terminalReset, this.getScrollback());
     if (!this.sessionLog) {
       const label = targetLabel(target.world, target.character);
@@ -163,10 +170,10 @@ export class TerminalWindow {
   private write(data: TerminalChunk, time: number | null): void {
     this.sessionLog?.append(data, time);
     this.scrollback.append(data, time);
-    this.send(IpcChannels.telnetData, data, time);
+    this.send(IpcChannels.telnetData, data, time, ++this.seq);
   }
 
   getScrollback(): ScrollbackReplay {
-    return { chunks: this.scrollback.snapshot(), times: this.scrollback.snapshotTimes() };
+    return { chunks: this.scrollback.snapshot(), times: this.scrollback.snapshotTimes(), seq: this.seq };
   }
 }

@@ -237,6 +237,7 @@ on the `PATH`.
 | `src/renderer.ts`         | The terminal window's page: scrollback, gutter, input area, status bar, keys |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
 | `src/find-widget.ts`      | The scrollback find box                                                   |
+| `src/live-replay.ts`      | Merging a window's scrollback replay with its live output, without repeats |
 | `src/security-status.ts`  | The status bar's security shield and its connection details popup         |
 | `src/command-history.ts`  | Input history                                                             |
 | `src/input-undo.ts`       | Input area undo/redo                                                     |

@@ -11,6 +11,7 @@ import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
 import { InputUndoStack, type InputSnapshot } from "./input-undo";
 import type { ConnectionState } from "./connection-manager";
 import { countLineFeeds } from "./line-feeds";
+import { LiveReplay } from "./live-replay";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 
 window.addEventListener("error", (event) => {
@@ -566,32 +567,41 @@ function writeReplay(replay: ScrollbackReplay): void {
   for (const chunk of replay.chunks) term.write(chunk);
 }
 
-// Replay the main process's in-memory scrollback buffer (survives a reload),
-// then subscribe to live data — in that order, so nothing arriving during the
-// fetch gets written twice.
+// Starts over from a replay: the connect-time switch to a world's logged
+// history. Reset in step with xterm's write queue rather than right away:
+// output sent just before the reset (e.g. a "disconnected" status line) may
+// not be parsed yet. Resetting from a write callback lets that output consume
+// its own queued times first and keeps it out of the fresh buffer; the replay
+// is queued behind the reset, so its lines get the replay's times.
+function applyReset(replay: ScrollbackReplay): void {
+  isCleared = false;
+  term.write("", () => {
+    clearStamps();
+    term.reset();
+  });
+  writeReplay(replay);
+}
+
+function applyData(data: string | Uint8Array, time: number | null): void {
+  isCleared = false;
+  writeStamped(data, time);
+}
+
+// Replay the main process's in-memory scrollback buffer (survives a reload,
+// and catches a new window up on what was written before its page loaded),
+// then follow live output. Subscribing before fetching, and letting LiveReplay
+// drop what the replay already contains, keeps any line from being lost or
+// shown twice (see live-replay.ts).
 async function loadScrollback(): Promise<void> {
+  const live = new LiveReplay(writeReplay, (event) => {
+    if (event.kind === "data") applyData(event.data, event.time);
+    else applyReset(event.replay);
+  });
+  window.moolin.onTerminalReset((replay) => live.receive({ kind: "reset", replay }));
+  window.moolin.onTelnetData((data, time, seq) => live.receive({ kind: "data", data, time, seq }));
   const replay = await window.moolin.getScrollback();
   window.moolin.log("debug", "renderer", "replaying", replay.chunks.length, "buffered chunk(s)");
-  writeReplay(replay);
-  // Connecting swaps in the world's logged history: start over from it. The
-  // chunks ride along in the message so they stay ordered with live data.
-  window.moolin.onTerminalReset((replay) => {
-    isCleared = false;
-    // Reset in step with xterm's write queue rather than right away: output
-    // sent just before the reset (e.g. a "disconnected" status line) may not
-    // be parsed yet. Resetting from a write callback lets that output consume
-    // its own queued times first and keeps it out of the fresh buffer; the
-    // replay is queued behind the reset, so its lines get the replay's times.
-    term.write("", () => {
-      clearStamps();
-      term.reset();
-    });
-    writeReplay(replay);
-  });
-  window.moolin.onTelnetData((data, time) => {
-    isCleared = false;
-    writeStamped(data, time);
-  });
+  live.replay(replay);
 }
 void loadScrollback();
 
