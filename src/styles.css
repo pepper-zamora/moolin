@@ -513,6 +513,78 @@ html, body {
   min-height: 0;
 }
 
+/* Tabs over the content pane (tabs.ts): underlined labels like VS Code's
+   settings editor. The list scrolls sideways when the tabs overflow, with
+   its scrollbar hidden in favor of the ‹ › buttons. */
+.tab-strip {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.tab-strip [role="tablist"] {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab-strip [role="tablist"]::-webkit-scrollbar {
+  display: none;
+}
+
+#worlds-dialog .tab-strip [role="tab"] {
+  flex: none;
+  min-width: 0;
+  padding: 4px 12px 5px;
+  background: transparent;
+  color: #9d9d9d;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+#worlds-dialog .tab-strip [role="tab"]:hover {
+  color: #d4d4d4;
+}
+
+#worlds-dialog .tab-strip [role="tab"][aria-selected="true"] {
+  color: #e7e7e7;
+  border-bottom-color: #0e639c;
+}
+
+#worlds-dialog .tab-strip [role="tab"]:focus-visible {
+  outline: 1px solid #007fd4;
+  outline-offset: -1px;
+}
+
+#worlds-dialog .tab-strip .tab-scroll {
+  flex: none;
+  min-width: 0;
+  width: 22px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+#worlds-dialog .tab-strip .tab-scroll:hover:not(:disabled) {
+  background: #3c3c3c;
+}
+
+.tab-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .pane {
   flex: 1;
   display: flex;

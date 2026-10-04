@@ -81,46 +81,61 @@
         <div class="worlds-content">
           <div id="worlds-error" class="worlds-error" hidden></div>
 
-          <div id="empty-pane" class="pane">
-            <p class="placeholder">
-              Select a world or character, or create a new world. Select a world to add characters to it.
-            </p>
+          <!-- One tab per kind of thing a world, character or the global
+               root can have (Settings now; Triggers and others later). The
+               ‹ › buttons, together at the right end, scroll the tabs and
+               appear only when they don't fit on one row; see tabs.ts. -->
+          <div id="worlds-tab-strip" class="tab-strip">
+            <div id="worlds-tabs" role="tablist" aria-label="Sections">
+              <button id="settings-tab" role="tab" type="button" aria-selected="true" aria-controls="settings-panel" aria-keyshortcuts="Alt+S"><u>S</u>ettings</button>
+            </div>
+            <button class="tab-scroll tab-scroll-prev" type="button" aria-label="Scroll tabs left" hidden>&#x2039;</button>
+            <button class="tab-scroll tab-scroll-next" type="button" aria-label="Scroll tabs right" hidden>&#x203a;</button>
           </div>
 
-          <div id="global-pane" class="pane" hidden>
-            <p class="placeholder">
-              Settings here apply to every world and character unless the world or character sets its own.
-              There are no global settings yet.
-            </p>
+          <div id="settings-panel" class="tab-panel" role="tabpanel" aria-labelledby="settings-tab">
+            <div id="empty-pane" class="pane">
+              <p class="placeholder">
+                Select a world or character, or create a new world. Select a world to add characters to it.
+              </p>
+            </div>
+
+            <div id="global-pane" class="pane" hidden>
+              <p class="placeholder">
+                Settings here apply to every world and character unless the world or character sets its own.
+                There are no global settings yet.
+              </p>
+            </div>
+
+            <form id="world-pane" class="pane" hidden>
+              <label>Name <input name="name" type="text" spellcheck="false" /></label>
+              <label>Host <input name="host" type="text" spellcheck="false" /></label>
+              <label>Port <input name="port" type="number" min="1" max="65535" /></label>
+              <label class="check"><input name="tls" type="checkbox" /> Use TLS</label>
+              <label class="check indented">
+                <input name="tlsAllowUntrusted" type="checkbox" /> Accept untrusted certificates (self-signed, expired)
+              </label>
+              <label class="check"><input name="autoLogin" type="checkbox" /> Log in characters automatically</label>
+              <label>Login command <input name="loginTemplate" type="text" spellcheck="false" /></label>
+              <p class="hint">
+                {{character}} and {{password}} are replaced with the character's name and password. \r sends a
+                carriage return, \n a line feed, \\ a backslash.
+              </p>
+              <label class="check"><input name="echoCommands" type="checkbox" /> Echo typed commands into the scrollback</label>
+            </form>
+
+            <form id="character-pane" class="pane" hidden>
+              <label>Name <input name="name" type="text" spellcheck="false" /></label>
+              <label>
+                Password
+                <span class="password-row">
+                  <input name="password" type="password" spellcheck="false" />
+                  <button id="show-password-btn" type="button">Show</button>
+                </span>
+              </label>
+            </form>
+
           </div>
-
-          <form id="world-pane" class="pane" hidden>
-            <label>Name <input name="name" type="text" spellcheck="false" /></label>
-            <label>Host <input name="host" type="text" spellcheck="false" /></label>
-            <label>Port <input name="port" type="number" min="1" max="65535" /></label>
-            <label class="check"><input name="tls" type="checkbox" /> Use TLS</label>
-            <label class="check indented">
-              <input name="tlsAllowUntrusted" type="checkbox" /> Accept untrusted certificates (self-signed, expired)
-            </label>
-            <label class="check"><input name="autoLogin" type="checkbox" /> Log in characters automatically</label>
-            <label>Login command <input name="loginTemplate" type="text" spellcheck="false" /></label>
-            <p class="hint">
-              {{character}} and {{password}} are replaced with the character's name and password. \r sends a
-              carriage return, \n a line feed, \\ a backslash.
-            </p>
-            <label class="check"><input name="echoCommands" type="checkbox" /> Echo typed commands into the scrollback</label>
-          </form>
-
-          <form id="character-pane" class="pane" hidden>
-            <label>Name <input name="name" type="text" spellcheck="false" /></label>
-            <label>
-              Password
-              <span class="password-row">
-                <input name="password" type="password" spellcheck="false" />
-                <button id="show-password-btn" type="button">Show</button>
-              </span>
-            </label>
-          </form>
 
           <div class="worlds-buttons">
             <button id="connect-btn" type="button" class="primary" aria-keyshortcuts="Alt+C"><u>C</u>onnect</button>

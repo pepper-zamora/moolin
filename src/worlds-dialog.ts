@@ -3,6 +3,7 @@
 // (via the main process) on each committed change.
 import type { Character, World } from "./worlds-types";
 import { characterLabel, isConnectable, newCharacter, newWorld, worldLabel } from "./world-utils";
+import { TabStrip } from "./tabs";
 
 // "global" is the root node, whose settings apply to every world and
 // character beneath it.
@@ -25,6 +26,11 @@ const worldPane = element<HTMLFormElement>("world-pane");
 const characterPane = element<HTMLFormElement>("character-pane");
 const showPasswordBtn = element<HTMLButtonElement>("show-password-btn");
 const connectBtn = element<HTMLButtonElement>("connect-btn");
+const sidebar = dialog.querySelector<HTMLElement>(".worlds-sidebar") as HTMLElement;
+const tabStrip = element<HTMLDivElement>("worlds-tab-strip");
+const settingsTab = element<HTMLButtonElement>("settings-tab");
+// The selected tab carries over between selections and dialog openings.
+const tabs = new TabStrip(tabStrip);
 
 function field(form: HTMLFormElement, name: string): HTMLInputElement {
   return form.elements.namedItem(name) as HTMLInputElement;
@@ -509,9 +515,84 @@ window.moolin.worlds.onChanged(() => {
   if (dialog.open) void load();
 });
 
-// Alt+letter presses the button whose label has that letter underlined.
-// Alt+W, Alt+E and Alt+V are left alone: they open the menu bar's menus.
-const mnemonics: Record<string, HTMLButtonElement> = { n: newWorldBtn, h: newCharacterBtn, c: connectBtn };
+// --- Keyboard navigation ---
+//
+// Tab and Shift+Tab move through the dialog in reading order: the tree, its
+// New World / New Character buttons, the tab strip (one stop: the selected
+// tab), the selected tab's fields, then Connect. On top of that:
+// - in the tree: arrows, Home/End, Enter, Delete and the context menu keys
+//   (see the tree's keydown handler above);
+// - in the tab strip: Left/Right and Home/End move between tabs (tabs.ts);
+// - anywhere: Ctrl+Page Down / Ctrl+Page Up (or Ctrl+Tab / Ctrl+Shift+Tab)
+//   switch to the next/previous tab, F6 / Shift+F6 jump between the tree,
+//   the tab strip and the selected tab's first field, Alt+letter presses a
+//   button or selects a tab by its underlined letter, and Escape closes.
+
+// The dialog's areas for F6, in order.
+const areas = ["tree", "tabs", "panel"] as const;
+type Area = (typeof areas)[number];
+
+function areaOf(el: Element | null): Area {
+  if (el && sidebar.contains(el)) return "tree";
+  if (el && tabStrip.contains(el)) return "tabs";
+  return "panel";
+}
+
+// The first field in the selected tab's panel, if it has any.
+function firstPanelField(): HTMLElement | null {
+  const panel = document.getElementById(tabs.selected().getAttribute("aria-controls") ?? "");
+  if (!panel) return null;
+  const candidates = panel.querySelectorAll<HTMLElement>("input, button, select, textarea, [tabindex]");
+  return (
+    Array.from(candidates).find(
+      (el) => !(el as HTMLInputElement).disabled && el.tabIndex >= 0 && el.offsetParent !== null,
+    ) ?? null
+  );
+}
+
+function focusArea(area: Area): boolean {
+  if (area === "tree") tree.focus();
+  else if (area === "tabs") tabs.selected().focus();
+  else {
+    const field = firstPanelField();
+    if (!field) return false;
+    field.focus();
+  }
+  return true;
+}
+
+dialog.addEventListener("keydown", (event) => {
+  const ctrlOnly = event.ctrlKey && !event.altKey && !event.metaKey;
+  const plain = !event.ctrlKey && !event.altKey && !event.metaKey;
+  if (ctrlOnly && !event.shiftKey && (event.key === "PageDown" || event.key === "PageUp")) {
+    event.preventDefault();
+    // Focus follows the switch from inside the tabs or their panel, where
+    // the field that had it may have just been hidden; from the tree, the
+    // tree keeps it.
+    tabs.step(event.key === "PageDown" ? 1 : -1, { focus: areaOf(document.activeElement) !== "tree" });
+  } else if (ctrlOnly && event.key === "Tab") {
+    event.preventDefault();
+    tabs.step(event.shiftKey ? -1 : 1, { focus: areaOf(document.activeElement) !== "tree" });
+  } else if (plain && event.key === "F6") {
+    event.preventDefault();
+    const step = event.shiftKey ? -1 : 1;
+    const start = areas.indexOf(areaOf(document.activeElement));
+    // Skip an area with nothing to focus (a panel with no fields).
+    for (let i = 1; i <= areas.length; i++) {
+      if (focusArea(areas[(start + step * i + areas.length * 2) % areas.length])) break;
+    }
+  }
+});
+
+// Alt+letter presses the button (or selects the tab) whose label has that
+// letter underlined. Alt+W, Alt+E and Alt+V are left alone: they open the
+// menu bar's menus.
+const mnemonics: Record<string, HTMLButtonElement> = {
+  n: newWorldBtn,
+  h: newCharacterBtn,
+  c: connectBtn,
+  s: settingsTab,
+};
 
 dialog.addEventListener("keydown", (event) => {
   if (event.key === "Alt") dialog.classList.add("show-mnemonics");

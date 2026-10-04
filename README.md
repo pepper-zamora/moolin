@@ -111,6 +111,10 @@ one of its characters selected, **New Character** adds a character to that
 world (as does right-clicking a world, or Shift+F10). Select a world or
 character and press **Connect** (or Enter, or double-click).
 
+The selected item's details are in tabs to the right of the tree; for now
+there is just **Settings**, with more (such as triggers) to come. When the
+tabs don't fit on one row, ‹ › buttons at the right end scroll through them.
+
 A connection keeps the settings its world had when it connected: changes
 saved in the Worlds dialog, including **Echo typed commands into the
 scrollback** and the world's name, apply to windows already connected to that
@@ -162,11 +166,25 @@ In the find box: Enter / Shift+Enter go to the next / previous match,
 Alt+C / Alt+W / Alt+R toggle match case, whole word and regular expression,
 and Escape closes it.
 
-In the Worlds dialog: arrow keys move through the tree (Right/Left expand and
-collapse, and Left on a collapsed item goes to its parent), Enter connects,
-Delete deletes, Shift+F10 opens the context menu, Alt+N, Alt+H and Alt+C press
-New World, New Character and Connect, and Escape (or a click outside the
-dialog) closes it. Changes are saved as you make them.
+In the Worlds dialog, Tab and Shift+Tab move through it in order: the tree,
+New World and New Character, the tabs (one stop, on the selected tab), the
+selected tab's fields, then Connect.
+
+| Keys                              | Action                                                        |
+| --------------------------------- | ------------------------------------------------------------- |
+| Up / Down, Home / End             | Move through the tree                                         |
+| Right / Left                      | In the tree: expand / collapse (Left on a collapsed item goes to its parent) |
+| Enter                             | In the tree: connect                                          |
+| Delete                            | In the tree: delete the world or character                    |
+| Shift+F10                         | In the tree: open the context menu                            |
+| Left / Right, Home / End          | On the tabs: previous / next, first / last tab                |
+| Ctrl+Page Down / Ctrl+Page Up     | Next / previous tab, from anywhere in the dialog              |
+| Ctrl+Tab / Ctrl+Shift+Tab         | Next / previous tab, likewise                                 |
+| F6 / Shift+F6                     | Jump between the tree, the tabs and the selected tab's fields |
+| Alt+N / Alt+H / Alt+C / Alt+S     | New World / New Character / Connect / the Settings tab        |
+| Escape                            | Close the dialog (as does a click outside it)                 |
+
+Changes are saved as you make them.
 
 ## The worlds file
 
@@ -238,6 +256,7 @@ on the `PATH`.
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
 | `src/renderer.ts`         | The terminal window's page: scrollback, gutter, input area, status bar, keys |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
+| `src/tabs.ts`             | Tab strips (the Worlds dialog's), with ‹ › scrolling when they overflow   |
 | `src/find-widget.ts`      | The scrollback find box                                                   |
 | `src/live-replay.ts`      | Merging a window's scrollback replay with its live output, without repeats |
 | `src/security-status.ts`  | The status bar's security shield and its connection details popup         |
