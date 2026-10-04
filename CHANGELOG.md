@@ -10,7 +10,10 @@ renames that section to the new version and date.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- Keyboard shortcuts now use Cmd instead of Ctrl on macOS, matching that
+  platform's convention.
 
 ## [0.1.0] - 2026-10-04
 
