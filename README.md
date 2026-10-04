@@ -173,6 +173,27 @@ rpm and pacman targets need `rpmbuild` and `bsdtar` installed. Windows builds
 are unsigned, and so are macOS builds unless the signing secrets named in the
 workflow are set. `packaging/aur/PKGBUILD` is a draft for an AUR `moolin-bin` package.
 
+### Versioning
+
+Moolin follows [semantic versioning](https://semver.org/), with the usual
+convention before 1.0: the middle number goes up for a breaking change, and
+the last number for everything else. A change is breaking if it stops
+something existing users rely on from working, for example:
+
+- the worlds file or `preferences.json` changes so an older Moolin can't read
+  it, or a newer one stops reading older files
+- a command-line option, keyboard shortcut or menu command is removed or
+  changes meaning
+- a feature is removed, or a default changes in a way people would notice as
+  broken
+- the minimum supported OS or architecture rises, or a package format is
+  dropped
+
+New features and fixes that keep everything working only raise the last
+number (0.1.0, 0.1.1, ...). `package.json` holds the version of the next
+release; after a release it's bumped right away, and a release's tag
+(`v0.1.1`) must match it.
+
 ## Using Moolin
 
 Press **Ctrl+O** to open the Worlds dialog. Its tree has a **Global** root
