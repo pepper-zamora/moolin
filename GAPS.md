@@ -179,7 +179,10 @@ currently discards or never negotiates:
   channel) be split into its own pane. Moolin is strictly one scrollback per
   connection window.
 - **Status bars / gauges**: configurable HP/mana/custom gauges driven by
-  variables or GMCP, standard in Mudlet and MUSHclient.
+  variables or GMCP, standard in Mudlet and MUSHclient. Moolin has a status
+  bar, but it only shows the connection and its security (a shield with the
+  TLS and certificate details on hover); nothing a server or script sends
+  can appear there yet.
 - **Buttons / custom toolbars**: clickable buttons that send commands or run
   scripts (Mudlet, MUSHclient).
 - **Built-in script/trigger editor UI**: a dedicated dialog for managing

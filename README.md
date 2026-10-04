@@ -109,9 +109,14 @@ one of its characters selected, **New Character** adds a character to that
 world (as does right-clicking a world, or Shift+F10). Select a world or
 character and press **Connect** (or Enter, or double-click).
 
-While a window isn't connected, a status strip takes the place of the input
-area. Type commands in the input area at the bottom; the scrollback above is
-output only.
+A connection keeps the settings its world had when it connected: changes
+saved in the Worlds dialog, including **Echo typed commands into the
+scrollback** and the world's name, apply to windows already connected to that
+world only once they reconnect.
+
+Type commands in the input area at the bottom; the scrollback above is output
+only. The status bar below the input area shows what the window is connected
+to; the input area is disabled while it isn't connected.
 
 ### Auto-login templates
 
@@ -229,7 +234,7 @@ on the `PATH`.
 | `src/session-log.ts`      | Persistent per-world/character logs and their `.times` timestamp sidecar  |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
-| `src/renderer.ts`         | The terminal window's page: scrollback, timestamp gutter, input area, keys |
+| `src/renderer.ts`         | The terminal window's page: scrollback, gutter, input area, status bar, keys |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
 | `src/find-widget.ts`      | The scrollback find box                                                   |
 | `src/security-status.ts`  | The status bar's security shield and its connection details popup         |

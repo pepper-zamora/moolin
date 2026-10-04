@@ -63,17 +63,16 @@ worth adding.
 What *is* configurable, and isn't related to the ECHO option at all, is
 whether Moolin writes the command you typed into the scrollback after
 sending it. That's synthetic: a few lines in
-[main.ts](src/main.ts#L361-L366) that print the typed text back into the
+[main.ts](src/main.ts#L400-L407) that print the typed text back into the
 scrollback in cyan purely so a transcript/log shows what was typed, mirroring
 the command next to the server's response, since most MUDs don't echo
 commands back themselves on a full-duplex connection. It's gated on the same
 `echoed` flag as real ECHO negotiation (suppressed during password entry),
 but otherwise it's a display choice Moolin makes, not a protocol behavior.
-A per-world or global toggle for "write entered commands into the
-scrollback" is a reasonable feature ask, but it isn't clear yet exactly how
-it should interact with logging, with password suppression, or with
-multi-line input — so it's called out here as a known idea, not a change
-made in this pass.
+Each world turns it on or off with **Echo typed commands into the
+scrollback** (on by default; turn it off for a server that echoes input
+itself). The setting is read from the world as it was at connect time, so
+changing it takes effect in an already-connected window only on reconnect.
 
 Everything else — including the protocols below — currently gets the
 blanket refuse-and-ignore treatment, which is safe (no server-visible
