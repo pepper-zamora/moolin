@@ -15,6 +15,42 @@ continues, and an older, parallel project, which contributed its
 one-window-per-connection design, its worlds-and-characters model and dialog,
 and its input/focus behavior.
 
+## Installing
+
+Download a build from the
+[Releases](https://github.com/pepper-zamora/moolin/releases) page:
+
+| System  | File                                                                 |
+| ------- | -------------------------------------------------------------------- |
+| Linux   | `.AppImage` (any distribution), `.deb`, `.rpm` or `.pacman`          |
+| Windows | `-setup-x64.exe` (installer) or `-portable-x64.exe` (no install)     |
+| macOS   | `-mac-arm64.dmg` (Apple silicon) or `-mac-x64.dmg` (Intel)           |
+
+The Windows and macOS builds aren't signed, so each system warns about them
+the first time.
+
+**Windows:** SmartScreen says it "protected your PC". Click **More info**, then
+**Run anyway**.
+
+**macOS:** open the `.dmg` and drag Moolin to Applications. Gatekeeper blocks
+the first launch because the app isn't from an identified developer. To allow
+it, once:
+
+- **macOS 15 (Sequoia) and later:** open Moolin, and click **Done** when macOS
+  says it can't be opened. Then open **System Settings → Privacy & Security**,
+  scroll down to the message that Moolin was blocked, click **Open Anyway**,
+  and confirm with your password.
+- **macOS 14 and earlier:** in Applications, Control-click Moolin, choose
+  **Open**, then click **Open** in the dialog.
+
+After that it opens normally. If macOS instead says Moolin "is damaged and
+can't be opened", that's the quarantine flag macOS puts on downloads, not real
+damage; clear it in Terminal, then open Moolin again:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Moolin.app
+```
+
 ## Features
 
 - **One window per connection.** Connecting from a window that already has a
@@ -114,9 +150,9 @@ npm run dist:mac     # dmg and zip, x64 and arm64
 
 Each target has to be built on its own OS; `.github/workflows/release.yml`
 does that on every `v*` tag and attaches the results to a GitHub Release. The
-rpm and pacman targets need `rpmbuild` and `bsdtar` installed. macOS and
-Windows builds are unsigned unless the signing secrets named in the workflow
-are set. `packaging/aur/PKGBUILD` is a draft for an AUR `moolin-bin` package.
+rpm and pacman targets need `rpmbuild` and `bsdtar` installed. Windows builds
+are unsigned, and so are macOS builds unless the signing secrets named in the
+workflow are set. `packaging/aur/PKGBUILD` is a draft for an AUR `moolin-bin` package.
 
 ## Using Moolin
 
