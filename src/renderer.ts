@@ -388,22 +388,22 @@ function clearToOffscreen(): void {
 
 // Enter sends and Shift+Enter inserts a newline. Up/Down browse history when
 // the caret is on the first/last line (otherwise they move between lines of
-// a multi-line command); with Ctrl they always browse.
+// a multi-line command); with Ctrl (Cmd on macOS) they always browse.
 inputArea.addEventListener("keydown", (event) => {
   const plain = !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
-  const ctrlOnly = event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey;
+  const modOnly = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey;
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     sendInput();
   } else if (
     event.key === "ArrowUp" &&
-    (ctrlOnly || (plain && isOnFirstLine(inputArea.value, inputArea.selectionStart)))
+    (modOnly || (plain && isOnFirstLine(inputArea.value, inputArea.selectionStart)))
   ) {
     event.preventDefault();
     showHistoryEntry(history.previous(inputArea.value));
   } else if (
     event.key === "ArrowDown" &&
-    (ctrlOnly || (plain && isOnLastLine(inputArea.value, inputArea.selectionEnd)))
+    (modOnly || (plain && isOnLastLine(inputArea.value, inputArea.selectionEnd)))
   ) {
     event.preventDefault();
     showHistoryEntry(history.next());
@@ -563,7 +563,7 @@ document.addEventListener(
       (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === "y")
     ) {
       redoInput();
-    } else if (event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && key === "l") {
+    } else if (mod && !event.shiftKey && key === "l") {
       clearToOffscreen();
     } else if (event.key === "PageUp" || event.key === "PageDown") {
       // Home/End are left to the input area.

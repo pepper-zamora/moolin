@@ -89,7 +89,7 @@ from source never check at startup.
   exchange and the certificate chain's details.
 - **Scrollback that survives a reload.** 100,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
-  the window (Ctrl+R) or a renderer crash doesn't lose it.
+  the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
 - **Persistent logs.** Everything a window shows, colors included, is appended
   to `~/Documents/Moolin/<world>/<character>/moolin.log` (just `<world>/` when
   connecting without a character). Each folder's name starts with 8
@@ -115,7 +115,7 @@ from source never check at startup.
   and are kept in `moolin.log.times` so logged history keeps its times on
   reconnect. The last setting chosen is remembered for new windows (see
   [Preferences](#preferences)).
-- **Scrollback search.** Edit > Find (Ctrl+F) opens a find box at the top
+- **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
   right of the window, with match-case, whole-word and regular-expression
   toggles. Every match is highlighted, and marked beside the scrollbar, and
   the matches update as new output arrives.
@@ -125,7 +125,7 @@ from source never check at startup.
   own undo/redo (coalesced typing, and atomic steps for cut/paste).
 - **Cut, copy and paste** that work against either the scrollback selection or
   the input area, whichever was selected last.
-- **Recent connections** on the Worlds menu, Ctrl+1 to Ctrl+5.
+- **Recent connections** on the Worlds menu, Ctrl+1 to Ctrl+5 (Cmd on macOS).
 
 ## Getting started
 
@@ -199,7 +199,7 @@ each release, and what's changed since the last one.
 
 ## Using Moolin
 
-Press **Ctrl+O** to open the Worlds dialog. Its tree has a **Global** root
+Press **Ctrl+O** (**Cmd+O** on macOS) to open the Worlds dialog. Its tree has a **Global** root
 (for settings shared by every world; there are none yet), with each world
 (globe icon) under it and each world's characters (silhouette icon) under
 that. **New World** adds a world; fill in its host and port. With a world or
@@ -238,6 +238,8 @@ Nothing else is added, so end the template with `\r` (most servers) or
 
 ### Keyboard shortcuts
 
+On macOS, use Cmd in place of Ctrl in all the shortcuts below.
+
 | Keys                     | Action                                                  |
 | ------------------------ | ------------------------------------------------------- |
 | Ctrl+O                   | Open the Worlds dialog                                  |
@@ -254,7 +256,7 @@ Nothing else is added, so end the template with `\r` (most servers) or
 | F3 / Shift+F3            | Next / previous match                                   |
 | Ctrl+X / Ctrl+C / Ctrl+V | Cut / copy the selection / paste into the input area    |
 | Ctrl+Z                   | Undo in the input area                                  |
-| Ctrl+Shift+Z / Ctrl+Y    | Redo in the input area                                  |
+| Ctrl+Shift+Z / Ctrl+Y    | Redo in the input area (Ctrl+Y only on Windows/Linux)   |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default font size                    |
 | Ctrl+R                   | Reload the window (the connection and scrollback stay)  |
 
@@ -274,8 +276,8 @@ selected tab's fields, then Connect.
 | Delete                            | In the tree: delete the world or character (asks first)       |
 | Shift+F10                         | In the tree: open the context menu                            |
 | Left / Right, Home / End          | On the tabs: previous / next, first / last tab                |
-| Ctrl+Page Down / Ctrl+Page Up     | Next / previous tab, from anywhere in the dialog              |
-| Ctrl+Tab / Ctrl+Shift+Tab         | Next / previous tab, likewise                                 |
+| Ctrl+Page Down / Ctrl+Page Up     | Next / previous tab, from anywhere in the dialog (Cmd on macOS) |
+| Ctrl+Tab / Ctrl+Shift+Tab         | Next / previous tab, likewise (Cmd on macOS)                   |
 | F6 / Shift+F6                     | Jump between the tree, the tabs and the selected tab's fields |
 | Alt+N / Alt+H / Alt+C / Alt+S     | New World / New Character / Connect / the Settings tab        |
 | Escape                            | Close the dialog (as does a click outside it)                 |

@@ -226,7 +226,7 @@ function buildMenu(terminal: TerminalWindow): void {
   log("debug", "main", "rebuilding menu for window", terminal.window.id, "connected =", connected);
   const mruItems: Electron.MenuItemConstructorOptions[] = mruTargets().map((target, index) => ({
     label: targetLabel(target.world, target.character),
-    accelerator: `Ctrl+${index + 1}`,
+    accelerator: `CmdOrCtrl+${index + 1}`,
     click: () => connectOrNewWindow(terminal, target),
   }));
 
@@ -234,17 +234,17 @@ function buildMenu(terminal: TerminalWindow): void {
     {
       label: "&Worlds",
       submenu: [
-        { label: "&New World…", accelerator: "Ctrl+N", click: () => openWorldsDialog(terminal, true) },
-        { label: "&Open World…", accelerator: "Ctrl+O", click: () => openWorldsDialog(terminal, false) },
+        { label: "&New World…", accelerator: "CmdOrCtrl+N", click: () => openWorldsDialog(terminal, true) },
+        { label: "&Open World…", accelerator: "CmdOrCtrl+O", click: () => openWorldsDialog(terminal, false) },
         {
           label: "&Disconnect",
-          accelerator: "Ctrl+K",
+          accelerator: "CmdOrCtrl+K",
           enabled: connected,
           click: () => void confirmDisconnect(terminal),
         },
         {
           label: "Close &Window",
-          accelerator: "Ctrl+W",
+          accelerator: "CmdOrCtrl+W",
           click: () => terminal.window.close(),
         },
         ...(mruItems.length > 0 ? ([{ type: "separator" }, ...mruItems] as Electron.MenuItemConstructorOptions[]) : []),
@@ -360,7 +360,7 @@ function buildMenu(terminal: TerminalWindow): void {
           // Rebound from the terminal convention of Ctrl+Y, which is now
           // the input box's redo shortcut (see renderer.ts).
           label: "&Clear Screen",
-          accelerator: "Ctrl+L",
+          accelerator: "CmdOrCtrl+L",
           registerAccelerator: false,
           click: () => terminal.send(IpcChannels.terminalClearScreenRequested),
         },

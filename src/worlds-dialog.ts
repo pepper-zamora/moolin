@@ -541,10 +541,11 @@ window.moolin.worlds.onChanged(() => {
 // - in the tree: arrows, Home/End, Enter, Delete and the context menu keys
 //   (see the tree's keydown handler above);
 // - in the tab strip: Left/Right and Home/End move between tabs (tabs.ts);
-// - anywhere: Ctrl+Page Down / Ctrl+Page Up (or Ctrl+Tab / Ctrl+Shift+Tab)
-//   switch to the next/previous tab, F6 / Shift+F6 jump between the tree,
-//   the tab strip and the selected tab's first field, Alt+letter presses a
-//   button or selects a tab by its underlined letter, and Escape closes.
+// - anywhere: Ctrl+Page Down / Ctrl+Page Up (or Ctrl+Tab / Ctrl+Shift+Tab;
+//   Cmd on macOS) switch to the next/previous tab, F6 / Shift+F6 jump
+//   between the tree, the tab strip and the selected tab's first field,
+//   Alt+letter presses a button or selects a tab by its underlined letter,
+//   and Escape closes.
 
 // The dialog's areas for F6, in order.
 const areas = ["tree", "tabs", "panel"] as const;
@@ -580,15 +581,15 @@ function focusArea(area: Area): boolean {
 }
 
 dialog.addEventListener("keydown", (event) => {
-  const ctrlOnly = event.ctrlKey && !event.altKey && !event.metaKey;
+  const modOnly = (event.ctrlKey || event.metaKey) && !event.altKey;
   const plain = !event.ctrlKey && !event.altKey && !event.metaKey;
-  if (ctrlOnly && !event.shiftKey && (event.key === "PageDown" || event.key === "PageUp")) {
+  if (modOnly && !event.shiftKey && (event.key === "PageDown" || event.key === "PageUp")) {
     event.preventDefault();
     // Focus follows the switch from inside the tabs or their panel, where
     // the field that had it may have just been hidden; from the tree, the
     // tree keeps it.
     tabs.step(event.key === "PageDown" ? 1 : -1, { focus: areaOf(document.activeElement) !== "tree" });
-  } else if (ctrlOnly && event.key === "Tab") {
+  } else if (modOnly && event.key === "Tab") {
     event.preventDefault();
     tabs.step(event.shiftKey ? -1 : 1, { focus: areaOf(document.activeElement) !== "tree" });
   } else if (plain && event.key === "F6") {
