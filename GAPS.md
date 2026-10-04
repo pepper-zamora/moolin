@@ -162,6 +162,8 @@ currently discards or never negotiates:
   (player count, uptime, codebase) mainly for listing-site crawlers rather
   than interactive play. Blightmud supports it; low priority for Moolin
   since it has no server-browsing/listing feature for it to feed.
+  [SERVERS.md](SERVERS.md) lists the codebases a server might report in
+  its `CODEBASE` variable.
 
 ## 7. Mapping / navigation
 
