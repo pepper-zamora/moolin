@@ -19,6 +19,7 @@
     "build": "npm run typecheck && npm run build:main && npm run build:preload && npm run build:renderer",
     "build:test": "esbuild src/*.test.ts --bundle --platform=node --outdir=dist/test",
     "test": "npm run build:test && node --test \"dist/test/*.test.js\"",
+    "smoke": "npm run build && node scripts/smoke.mjs",
     "start": "npm run build && node scripts/start.js",
     "dev": "npm-run-all --parallel dev:main dev:preload dev:renderer",
     "dev:main": "esbuild src/main.ts --bundle --platform=node --external:electron --outfile=dist/main.js --watch",
