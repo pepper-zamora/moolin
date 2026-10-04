@@ -55,7 +55,12 @@ test("auto-login sends the expanded template after connecting as a character", {
     manager.connect({ world, character: cowpernica });
     assert.equal(manager.getState().status, "connecting");
     await connected;
-    assert.deepEqual(manager.getState(), { status: "connected", secure: false, label: "Cowpernica - Test" });
+    assert.deepEqual(manager.getState(), {
+      status: "connected",
+      label: "Cowpernica - Test",
+      address: `127.0.0.1:${port}`,
+      tls: null,
+    });
     await waitUntil(() => received().length > 0);
     assert.equal(received(), 'co "Cowpernica" hunter2\r');
   } finally {
@@ -102,7 +107,7 @@ test("disconnecting returns to the disconnected state", { timeout: TEST_TIMEOUT_
     await connected;
     manager.disconnect();
     await waitUntil(() => !manager.isActive());
-    assert.deepEqual(manager.getState(), { status: "disconnected", secure: false, label: null });
+    assert.deepEqual(manager.getState(), { status: "disconnected", label: null, address: null, tls: null });
     assert.equal(manager.getConnected(), null);
     assert.match(messages[messages.length - 1], /disconnected/);
   } finally {

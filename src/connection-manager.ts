@@ -10,9 +10,13 @@ export type ConnectionStatus = "disconnected" | "connecting" | "connected";
 // What the renderer is told about its window's connection.
 export interface ConnectionState {
   status: ConnectionStatus;
-  secure: boolean;
   // "Character - World" or "World"; null while disconnected.
   label: string | null;
+  // "host:port"; null while disconnected.
+  address: string | null;
+  // The TLS handshake's details once connected over TLS; null on a
+  // plaintext connection, and while connecting or disconnected.
+  tls: TlsInfo | null;
 }
 
 export interface ConnectionManagerHandlers {
@@ -20,7 +24,7 @@ export interface ConnectionManagerHandlers {
   // output — the point to switch whatever records the window's output over
   // to that target.
   onConnecting: (target: ConnectTarget) => void;
-  // Status or secure state changed (connecting, connected, or any
+  // Status or TLS state changed (connecting, connected, or any
   // disconnect) — refresh anything derived from it (menu, title, input box).
   onStateChange: () => void;
   // An ANSI-colored status line to append to the scrollback.
@@ -45,7 +49,7 @@ export class ConnectionManager {
   // Set from connect() until disconnect, including while connecting.
   private target: ConnectTarget | null = null;
   private connected = false;
-  private secure = false;
+  private tlsInfo: TlsInfo | null = null;
   // The window's current size, applied to each new session so NAWS reports
   // it from the start rather than the 80x24 default.
   private cols = 80;
@@ -64,8 +68,9 @@ export class ConnectionManager {
   getState(): ConnectionState {
     return {
       status: this.connected ? "connected" : this.session ? "connecting" : "disconnected",
-      secure: this.secure,
       label: this.target ? targetLabel(this.target.world, this.target.character) : null,
+      address: this.target ? `${this.target.world.host.trim()}:${this.target.world.port}` : null,
+      tls: this.connected ? this.tlsInfo : null,
     };
   }
 
@@ -92,7 +97,7 @@ export class ConnectionManager {
     }
     this.target = target;
     this.connected = false;
-    this.secure = false;
+    this.tlsInfo = null;
     const host = world.host.trim();
     const port = world.port;
     this.log("info", "connecting to", `${host}:${port}`, `(${label})`, world.tls ? "over TLS" : "");
@@ -107,7 +112,6 @@ export class ConnectionManager {
           if (this.session !== session) return;
           this.log("info", "connected to", label, secure ? "(TLS)" : "(plaintext)");
           this.connected = true;
-          this.secure = secure;
           this.handlers.onConnected(target);
           this.handlers.onStateChange();
           this.handlers.onMessage(green(`connected to ${label}${secure ? ", securely (TLS)" : ""}`));
@@ -126,7 +130,7 @@ export class ConnectionManager {
           this.session = null;
           this.target = null;
           this.connected = false;
-          this.secure = false;
+          this.tlsInfo = null;
           this.handlers.onStateChange();
           this.handlers.onMessage(reason ? red(`connection error: ${reason}`) : yellow("disconnected"));
           if (certificateRejected) {
@@ -137,6 +141,7 @@ export class ConnectionManager {
         },
         onTlsInfo: (info: TlsInfo) => {
           if (this.session !== session) return;
+          this.tlsInfo = info;
           this.handlers.onMessage(green(`TLS: ${info.protocol}, ${info.cipherName}`));
           this.handlers.onMessage(
             green(

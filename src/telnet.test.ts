@@ -137,6 +137,13 @@ test("connects to a self-signed TLS server when allowed, and reports cert/cipher
     assert.equal(tlsInfo?.certSubject, "test.moolin.local");
     assert.match(tlsInfo?.protocol ?? "", /^TLSv1\.[23]$/);
     assert.match(tlsInfo?.certValidationError ?? "", /SELF_SIGNED/);
+    // A self-signed certificate is its own whole chain.
+    assert.equal(tlsInfo?.certificates.length, 1);
+    const [cert] = tlsInfo?.certificates ?? [];
+    assert.deepEqual(cert?.subject, [["CN", "test.moolin.local"]]);
+    assert.deepEqual(cert?.issuer, [["CN", "test.moolin.local"]]);
+    assert.equal(cert?.publicKey, "RSA, 2048 bits");
+    assert.match(cert?.fingerprintSha256 ?? "", /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
   } finally {
     session.disconnect();
     cleanup();

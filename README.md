@@ -20,7 +20,11 @@ its worlds-and-characters model and dialog, and its input/focus behavior.
 - **TLS, explicitly.** Each world either uses TLS or doesn't; Moolin never
   guesses, so a connection can't be silently downgraded. Certificates are
   verified unless the world opts into accepting untrusted (e.g. self-signed)
-  ones. The input area is tinted green over TLS and red otherwise.
+  ones. A shield at the right of the status bar shows the connection's
+  security: green with a check for TLS with a trusted certificate, yellow
+  with a question mark for an untrusted certificate the world accepts, red
+  with a cross for plaintext. Hover over it for the protocol, cipher, key
+  exchange and the certificate chain's details.
 - **Scrollback that survives a reload.** 100,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R) or a renderer crash doesn't lose it.
@@ -228,6 +232,7 @@ on the `PATH`.
 | `src/renderer.ts`         | The terminal window's page: scrollback, timestamp gutter, input area, keys |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
 | `src/find-widget.ts`      | The scrollback find box                                                   |
+| `src/security-status.ts`  | The status bar's security shield and its connection details popup         |
 | `src/command-history.ts`  | Input history                                                             |
 | `src/input-undo.ts`       | Input area undo/redo                                                     |
 | `src/ipc-channels.ts`     | IPC channel names shared by main and preload                              |

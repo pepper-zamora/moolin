@@ -6,6 +6,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { worldsDialog } from "./worlds-dialog";
 import { FindWidget } from "./find-widget";
+import { SecurityStatus } from "./security-status";
 import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
 import { InputUndoStack, type InputSnapshot } from "./input-undo";
 import type { ConnectionState } from "./connection-manager";
@@ -78,7 +79,11 @@ const statusText = element<HTMLSpanElement>("status-text");
 term.open(terminalContainer);
 
 const findWidget = new FindWidget(term, () => {
-  if (!inputArea.hidden) inputArea.focus();
+  if (!inputArea.disabled) inputArea.focus();
+});
+
+const securityStatus = new SecurityStatus(() => {
+  if (!inputArea.disabled && !findWidget.isOpen() && !worldsDialog.isOpen()) inputArea.focus();
 });
 
 term.onResize(({ cols, rows }) => {
@@ -398,13 +403,14 @@ window.addEventListener("resize", () => resizeInput());
 
 // Keyboard focus belongs in the input area whenever the window has it,
 // unless the Worlds dialog is open, the find widget has it, or there's no
-// connection to type to.
+// connection to type to. The connection details popup is left alone while
+// the pointer is over it, so its text can be selected and copied.
 // Clicking the scrollback (e.g. to select text) would otherwise take it;
 // xterm's mouse selection doesn't need focus, so it still works.
 document.addEventListener("focusout", () => {
   setTimeout(() => {
-    if (worldsDialog.isOpen() || inputArea.hidden) return;
-    if (findWidget.root.contains(document.activeElement)) return;
+    if (worldsDialog.isOpen() || inputArea.disabled) return;
+    if (findWidget.root.contains(document.activeElement) || securityStatus.isHovered()) return;
     if (document.activeElement !== inputArea) inputArea.focus();
   });
 });
@@ -419,9 +425,11 @@ inputArea.addEventListener("select", () => term.clearSelection());
 // over one in the input area; selecting in the input clears the scrollback
 // selection (above), so whichever was made last is what gets copied.
 function copySelection(): void {
-  const text = term.hasSelection()
-    ? term.getSelection()
-    : inputArea.value.slice(inputArea.selectionStart, inputArea.selectionEnd);
+  const text =
+    securityStatus.selectedText() ||
+    (term.hasSelection()
+      ? term.getSelection()
+      : inputArea.value.slice(inputArea.selectionStart, inputArea.selectionEnd));
   if (text.length > 0) {
     window.moolin.clipboard.writeText(text);
   }
@@ -450,7 +458,7 @@ function cutSelection(): void {
 // area — at the current cursor/selection if it's focused, otherwise appended
 // at the end.
 async function pasteIntoInput(): Promise<void> {
-  if (inputArea.hidden) return;
+  if (inputArea.disabled) return;
   const text = await window.moolin.clipboard.readText();
   if (!text) return;
   const active = document.activeElement === inputArea;
@@ -586,20 +594,24 @@ void loadScrollback();
 
 window.moolin.worlds.onOpen((options) => void worldsDialog.open(options));
 worldsDialog.dialog.addEventListener("close", () => {
-  if (!inputArea.hidden) inputArea.focus();
+  if (!inputArea.disabled) inputArea.focus();
 });
 
-// The input area is only usable while connected; otherwise a status strip
-// takes its place. The input's background shows whether the connection is
-// over TLS.
+// The input area is only usable while connected. The status bar below it
+// says what the window is connected to, with the connection's security shown
+// at its far right.
 function applyConnectionState(state: ConnectionState): void {
   const connected = state.status === "connected";
   document.title = connected && state.label ? `${state.label} - ${APP_NAME}` : APP_NAME;
-  inputArea.hidden = !connected;
-  inputArea.classList.toggle("secure", state.secure);
-  statusBar.hidden = connected;
+  inputArea.disabled = !connected;
   statusBar.dataset.status = state.status;
-  statusText.textContent = state.status === "connecting" ? `Connecting to ${state.label}…` : "Not connected";
+  statusText.textContent =
+    state.status === "connected"
+      ? `Connected to ${state.label}`
+      : state.status === "connecting"
+        ? `Connecting to ${state.label}…`
+        : "Not connected";
+  securityStatus.update(state);
   resizeInput();
   if (connected && !worldsDialog.isOpen()) inputArea.focus();
 }

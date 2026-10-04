@@ -1,3 +1,4 @@
+import { X509Certificate } from "node:crypto";
 import * as net from "node:net";
 import * as tls from "node:tls";
 import { TelnetParser, encodeNegotiation, encodeSub, escapeIac, type NegotiationVerb } from "./telnet-protocol";
@@ -33,9 +34,35 @@ export interface ConnectOptions {
   tlsAllowUntrusted: boolean;
 }
 
+// One certificate from the server's chain, flattened to plain strings so it
+// can cross IPC to the connection details popup.
+export interface CertificateDetails {
+  // Distinguished-name attributes in certificate order, e.g. ["CN", "example.org"].
+  subject: Array<[string, string]>;
+  issuer: Array<[string, string]>;
+  // "DNS:example.org", "IP Address:10.0.0.1", ...
+  subjectAltNames: string[];
+  serialNumber: string;
+  validFrom: string;
+  validTo: string;
+  // "RSA, 2048 bits", "EC, P-256", "Ed25519", ...
+  publicKey: string;
+  signatureAlgorithm?: string;
+  // Extended key usage, as names where known (OIDs otherwise).
+  extendedKeyUsage: string[];
+  isCa: boolean;
+  // Authority information access: "OCSP - URI: http://...", ...
+  infoAccess: string[];
+  fingerprintSha256: string;
+  fingerprintSha1: string;
+}
+
 export interface TlsInfo {
   protocol: string;
   cipherName: string;
+  // The ephemeral key exchange, e.g. "X25519, 253 bits"; absent when
+  // the TLS library doesn't report it.
+  keyExchange?: string;
   certSubject: string;
   certIssuer: string;
   certValidFrom: string;
@@ -45,6 +72,9 @@ export interface TlsInfo {
   // (plenty of MUDs run self-signed certs); otherwise a failure disconnects.
   certValid: boolean;
   certValidationError?: string;
+  // The chain as the server presented it (completed from the local trust
+  // store where Node could), server certificate first.
+  certificates: CertificateDetails[];
 }
 
 export interface TelnetSessionHandlers {
@@ -67,18 +97,99 @@ function formatCertName(name: Record<string, string | string[] | undefined> | un
     .join(", ");
 }
 
+const EXTENDED_KEY_USAGES: Record<string, string> = {
+  "1.3.6.1.5.5.7.3.1": "TLS server authentication",
+  "1.3.6.1.5.5.7.3.2": "TLS client authentication",
+  "1.3.6.1.5.5.7.3.3": "Code signing",
+  "1.3.6.1.5.5.7.3.4": "Email protection",
+  "1.3.6.1.5.5.7.3.8": "Time stamping",
+  "1.3.6.1.5.5.7.3.9": "OCSP signing",
+};
+
+function nameEntries(name: Record<string, string | string[] | undefined> | undefined): Array<[string, string]> {
+  if (!name) return [];
+  return Object.entries(name).flatMap(([key, value]) =>
+    value === undefined ? [] : (Array.isArray(value) ? value : [value]).map((v): [string, string] => [key, v]),
+  );
+}
+
+function describePublicKey(cert: tls.PeerCertificate, x509: X509Certificate | null): string {
+  const key = x509?.publicKey;
+  const type = key?.asymmetricKeyType;
+  const bits = key?.asymmetricKeyDetails?.modulusLength ?? cert.bits;
+  const curve = cert.nistCurve ?? cert.asn1Curve ?? key?.asymmetricKeyDetails?.namedCurve;
+  if (type === "rsa" || type === "rsa-pss" || (!type && cert.modulus)) {
+    return `${type === "rsa-pss" ? "RSA-PSS" : "RSA"}${bits ? `, ${bits} bits` : ""}`;
+  }
+  if (type === "ec" || (!type && curve)) return `EC${curve ? `, ${curve}` : ""}`;
+  if (type === "ed25519") return "Ed25519";
+  if (type === "ed448") return "Ed448";
+  return type ?? "unknown";
+}
+
+function certificateDetails(cert: tls.PeerCertificate): CertificateDetails {
+  let x509: X509Certificate | null = null;
+  try {
+    x509 = new X509Certificate(cert.raw);
+  } catch {
+    // Fall back to what getPeerCertificate() reported on its own.
+  }
+  return {
+    subject: nameEntries(cert.subject),
+    issuer: nameEntries(cert.issuer),
+    subjectAltNames: cert.subjectaltname ? cert.subjectaltname.split(", ") : [],
+    serialNumber: cert.serialNumber ?? "unknown",
+    validFrom: cert.valid_from ?? "unknown",
+    validTo: cert.valid_to ?? "unknown",
+    publicKey: describePublicKey(cert, x509),
+    signatureAlgorithm: x509?.signatureAlgorithm,
+    extendedKeyUsage: (cert.ext_key_usage ?? []).map((oid) => EXTENDED_KEY_USAGES[oid] ?? oid),
+    isCa: cert.ca,
+    infoAccess: Object.entries(cert.infoAccess ?? {}).flatMap(([method, uris]) =>
+      (uris ?? []).map((uri) => `${method}: ${uri}`),
+    ),
+    fingerprintSha256: cert.fingerprint256 ?? "unknown",
+    fingerprintSha1: cert.fingerprint ?? "unknown",
+  };
+}
+
+// Walks issuerCertificate links from the server's certificate. A self-signed
+// root links to itself, so stop at the first repeat.
+function certificateChain(tlsSocket: tls.TLSSocket): CertificateDetails[] {
+  const chain: CertificateDetails[] = [];
+  const seen = new Set<string>();
+  let cert: tls.DetailedPeerCertificate | undefined = tlsSocket.getPeerCertificate(true);
+  while (cert?.raw && !seen.has(cert.fingerprint256) && chain.length < 10) {
+    seen.add(cert.fingerprint256);
+    chain.push(certificateDetails(cert));
+    cert = cert.issuerCertificate;
+  }
+  return chain;
+}
+
+function describeKeyExchange(tlsSocket: tls.TLSSocket): string | undefined {
+  const info = tlsSocket.getEphemeralKeyInfo();
+  if (!info || !("type" in info) || !info.type) return undefined;
+  // Name the group where there is one ("X25519", "X25519MLKEM768"); a plain
+  // DH exchange has only its type and size.
+  const name = "name" in info && info.name ? info.name : info.type;
+  return info.size ? `${name}, ${info.size} bits` : name;
+}
+
 function collectTlsInfo(tlsSocket: tls.TLSSocket): TlsInfo {
   const cipher = tlsSocket.getCipher();
   const cert = tlsSocket.getPeerCertificate();
   return {
     protocol: tlsSocket.getProtocol() ?? "unknown",
     cipherName: cipher?.standardName || cipher?.name || "unknown",
+    keyExchange: describeKeyExchange(tlsSocket),
     certSubject: formatCertName(cert?.subject),
     certIssuer: formatCertName(cert?.issuer),
     certValidFrom: cert?.valid_from ?? "unknown",
     certValidTo: cert?.valid_to ?? "unknown",
     certValid: tlsSocket.authorized,
     certValidationError: tlsSocket.authorized ? undefined : tlsSocket.authorizationError?.toString(),
+    certificates: certificateChain(tlsSocket),
   };
 }
 

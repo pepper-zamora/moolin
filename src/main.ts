@@ -429,7 +429,7 @@ ipcMain.handle(
 ipcMain.handle(
   IpcChannels.connectionGetState,
   (event): ConnectionState =>
-    terminalFor(event)?.connection.getState() ?? { status: "disconnected", secure: false, label: null },
+    terminalFor(event)?.connection.getState() ?? { status: "disconnected", label: null, address: null, tls: null },
 );
 
 // The clipboard module is unavailable to the sandboxed preload/renderer
