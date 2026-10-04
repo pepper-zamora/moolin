@@ -309,3 +309,67 @@ test("sendRaw writes text as-is in UTF-8, adding no line ending", { timeout: TES
     server.close();
   }
 });
+
+test("answers only negotiation that changes an option, and stops NAWS on DONT", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const IAC = 255,
+    SB = 250,
+    WILL = 251,
+    WONT = 252,
+    DO = 253,
+    DONT = 254;
+  const ECHO = 1,
+    NAWS = 31,
+    MARKER = 200; // unsupported, so always refused: a reply marks a point in the stream
+  let serverSocket: net.Socket | undefined;
+  let received: number[] = [];
+  const server = net.createServer((socket) => {
+    serverSocket = socket;
+    socket.on("data", (chunk) => received.push(...chunk));
+    socket.on("error", () => {});
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+
+  const { handlers } = recordingHandlers();
+  const session = new TelnetSession(handlers, noopLog);
+  // Sends `bytes` then a marker request, and returns everything the client
+  // sent in reply up to the marker's refusal.
+  const exchange = async (bytes: number[]): Promise<number[]> => {
+    received = [];
+    serverSocket?.write(Buffer.from([...bytes, IAC, DO, MARKER]));
+    const marker = [IAC, WONT, MARKER];
+    const end = (): number => received.findIndex((_, i) => marker.every((byte, j) => received[i + j] === byte));
+    while (end() === -1) await new Promise((resolve) => setTimeout(resolve, 10));
+    return received.slice(0, end());
+  };
+
+  try {
+    const connected = waitForHandler(handlers, "onConnect");
+    session.connect(options(freePort(server)));
+    await connected;
+    while (!serverSocket) await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // A repeated DO or WILL is acknowledged only the first time.
+    assert.deepEqual(await exchange([IAC, DO, NAWS, IAC, DO, NAWS]), [
+      ...[IAC, WILL, NAWS],
+      ...[IAC, SB, NAWS, 0, 80, 0, 24, IAC, 240],
+    ]);
+    assert.deepEqual(await exchange([IAC, WILL, ECHO, IAC, WILL, ECHO]), [IAC, DO, ECHO]);
+    assert.deepEqual(session.sendLine("x"), { echoed: false });
+    assert.deepEqual(await exchange([]), [...Buffer.from("x\r\n")]);
+
+    // DONT turns NAWS off: acknowledged once, and resizes are no longer sent.
+    assert.deepEqual(await exchange([IAC, DONT, NAWS, IAC, DONT, NAWS]), [IAC, WONT, NAWS]);
+    session.resize(100, 40);
+    assert.deepEqual(await exchange([]), []);
+
+    // WONT turns ECHO off (local echo returns), acknowledged once; a WONT or
+    // DONT for an option that's already off gets no reply.
+    assert.deepEqual(await exchange([IAC, WONT, ECHO, IAC, WONT, ECHO, IAC, DONT, 24]), [IAC, DONT, ECHO]);
+    assert.deepEqual(session.sendLine("y"), { echoed: true });
+  } finally {
+    session.disconnect();
+    server.close();
+  }
+});

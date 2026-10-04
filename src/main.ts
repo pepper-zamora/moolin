@@ -1,6 +1,13 @@
 import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, shell } from "electron";
 import * as path from "node:path";
-import { parseWorld, readWorldsFile, resolveWorldsPath, saveWorlds, updateMru as updateMruState } from "./worlds";
+import {
+  backupPathFor,
+  parseWorld,
+  readWorldsFile,
+  resolveWorldsPath,
+  saveWorlds,
+  updateMru as updateMruState,
+} from "./worlds";
 import { WindowManager } from "./window-manager";
 import type { TerminalWindow } from "./terminal-window";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
@@ -112,10 +119,13 @@ function connectOrNewWindow(terminal: TerminalWindow, target: ConnectTarget): vo
   }
 }
 
+// Asks before doing something; Cancel is the default, so a stray Enter
+// (or the Delete key hit by accident) doesn't confirm it.
 async function confirmAction(
   parentWindow: BrowserWindow | undefined,
   message: string,
   confirmLabel: string,
+  detail?: string,
 ): Promise<boolean> {
   const options: Electron.MessageBoxOptions = {
     type: "question",
@@ -123,6 +133,7 @@ async function confirmAction(
     defaultId: 0,
     cancelId: 0,
     message,
+    detail,
   };
   const result = parentWindow
     ? await dialog.showMessageBox(parentWindow, options)
@@ -332,10 +343,15 @@ function terminalFor(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent)
 }
 
 ipcMain.handle(IpcChannels.worldsLoad, (): WorldsLoadResult => {
-  const { state, error } = readWorldsFile(worldsPath);
+  const { state, error, recovered } = readWorldsFile(worldsPath);
   if (error) log("error", "worlds", error);
   else log("debug", "worlds", "loaded", state.worlds.length, "world(s) from", worldsPath);
-  return { worlds: state.worlds, error };
+  const warning = recovered
+    ? `${recovered.error}. Showing the worlds from its backup, ${path.basename(backupPathFor(worldsPath))}, ` +
+      `instead. The next change is saved as ${path.basename(worldsPath)}, and the unreadable file is kept ` +
+      `beside it, renamed to ${path.basename(worldsPath)}.unreadable-<date>.`
+    : undefined;
+  return { worlds: state.worlds, error, warning };
 });
 
 ipcMain.handle(IpcChannels.worldsSave, (event, rawWorlds: unknown[]): { error?: string } => {
@@ -355,9 +371,10 @@ ipcMain.handle(IpcChannels.worldsSave, (event, rawWorlds: unknown[]): { error?: 
   return {};
 });
 
-ipcMain.handle(IpcChannels.dialogConfirm, (event, message: string): Promise<boolean> => {
+// The Worlds dialog's delete confirmations.
+ipcMain.handle(IpcChannels.dialogConfirm, (event, message: string, detail?: string): Promise<boolean> => {
   const sourceWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-  return confirmAction(sourceWindow, message, "Delete");
+  return confirmAction(sourceWindow, message, "Delete", detail);
 });
 
 // Native popup menu for the Worlds dialog. Resolves with the chosen item's
@@ -417,8 +434,7 @@ ipcMain.on(IpcChannels.telnetResize, (event, { cols, rows }: { cols: number; row
 ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRedo: boolean) => {
   const terminal = terminalFor(event);
   if (!terminal) return;
-  terminal.setUndoState(canUndo, canRedo);
-  buildMenu(terminal);
+  if (terminal.setUndoState(canUndo, canRedo)) buildMenu(terminal);
 });
 
 ipcMain.handle(

@@ -67,3 +67,39 @@ test("reset applies provided line times, one per newline", () => {
   buffer.reset(["a\nb\nc\n"], [111, 222, 333]);
   assert.deepEqual(buffer.snapshotTimes(), [111, 222, 333]);
 });
+
+test("trims a large chunk line by line rather than dropping it whole", () => {
+  const buffer = new ScrollbackBuffer(12);
+  buffer.append("aaaa\nbbbb\ncccc\n", 1); // 15 bytes: "aaaa\n" has to go
+  assert.deepEqual(
+    buffer.snapshot().map((chunk) => Buffer.from(chunk).toString()),
+    ["bbbb\ncccc\n"],
+  );
+  assert.deepEqual(buffer.snapshotTimes(), [1, 1]);
+});
+
+test("history loaded on connect keeps all but its oldest lines as output arrives", () => {
+  // As on connect: the log's tail, nearly the whole limit, in one chunk.
+  const buffer = new ScrollbackBuffer(20);
+  buffer.reset(["old1\nold2\nold3\n"], [1, 2, 3]); // 15 bytes
+  buffer.append("new\n", 4); // 19 bytes: still fits
+  buffer.append("newer\n", 5); // 25 bytes: the oldest line makes room
+  assert.equal(
+    buffer
+      .snapshot()
+      .map((chunk) => Buffer.from(chunk).toString())
+      .join(""),
+    "old2\nold3\nnew\nnewer\n",
+  );
+  assert.deepEqual(buffer.snapshotTimes(), [2, 3, 4, 5]);
+});
+
+test("trimming a string chunk mid-way cuts in UTF-8 bytes, at a line feed", () => {
+  const buffer = new ScrollbackBuffer(8);
+  buffer.append("é\n€\nok\n", null); // 3 + 4 + 3 = 10 bytes
+  assert.deepEqual(
+    buffer.snapshot().map((chunk) => Buffer.from(chunk).toString()),
+    ["€\nok\n"],
+  );
+  assert.deepEqual(buffer.snapshotTimes(), [null, null]);
+});

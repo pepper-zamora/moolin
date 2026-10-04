@@ -57,6 +57,13 @@ const term = new Terminal({
   },
 });
 
+// The scrollback takes no keyboard input, so xterm is kept out of key
+// handling entirely. Otherwise, when it has focus (the input area is
+// disabled while not connected, leaving it the last thing clicked), it
+// turns Ctrl+letter into a control character and cancels the key event,
+// which stops Electron's menu shortcuts (Ctrl+O, Ctrl+N, ...) from firing.
+term.attachCustomKeyEventHandler(() => false);
+
 const fitAddon = new FitAddon();
 term.loadAddon(fitAddon);
 
@@ -303,8 +310,17 @@ function inputSnapshot(): InputSnapshot {
   };
 }
 
+// Tells main when Undo/Redo become available or unavailable, for the Edit
+// menu. Only changes are sent: each one rebuilds the window's menu, and this
+// runs on every keystroke.
+let reportedUndoState: string | null = null;
 function reportUndoState(): void {
-  window.moolin.reportUndoState(inputUndo.canUndo(), inputUndo.canRedo());
+  const canUndo = inputUndo.canUndo();
+  const canRedo = inputUndo.canRedo();
+  const state = `${canUndo}/${canRedo}`;
+  if (state === reportedUndoState) return;
+  reportedUndoState = state;
+  window.moolin.reportUndoState(canUndo, canRedo);
 }
 
 function applySnapshot(snapshot: InputSnapshot): void {
@@ -556,7 +572,10 @@ document.addEventListener("contextmenu", (event) => {
   // Leave the Worlds dialog's fields their native context menu.
   if (worldsDialog.isOpen()) return;
   event.preventDefault();
-  window.moolin.showContextMenu({ hasSelection: term.hasSelection() });
+  // Any selection Copy would act on (see copySelection).
+  const hasSelection =
+    securityStatus.selectedText() !== "" || term.hasSelection() || inputArea.selectionStart !== inputArea.selectionEnd;
+  window.moolin.showContextMenu({ hasSelection });
 });
 
 // Replays buffered history (the in-memory buffer on reload, or a world's log

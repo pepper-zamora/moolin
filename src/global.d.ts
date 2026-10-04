@@ -12,7 +12,7 @@ declare global {
         onOpen(callback: (options: { createNew: boolean }) => void): void;
         onChanged(callback: () => void): void;
       };
-      confirm(message: string): Promise<boolean>;
+      confirm(message: string, detail?: string): Promise<boolean>;
       connect(world: World, characterId: string | null): void;
       popupMenu(items: Array<{ id: string; label: string }>): Promise<string | null>;
       sendInput(text: string): void;

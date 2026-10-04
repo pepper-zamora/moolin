@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { parseWorld, readWorldsFile, resolveWorldsPath, saveWorlds, updateMru } from "./worlds";
+import { backupPathFor, parseWorld, readWorldsFile, resolveWorldsPath, saveWorlds, updateMru } from "./worlds";
 import { DEFAULT_LOGIN_TEMPLATE, newWorld } from "./world-utils";
 
 function withTempDir(fn: (dir: string) => void): void {
@@ -131,6 +131,75 @@ test("saveWorlds and updateMru each preserve the other's data", () => {
       ["a", "b"],
     );
     assert.deepEqual(state.mru, [{ worldId: "a" }]);
-    assert.deepEqual(fs.readdirSync(path.dirname(file)), ["worlds"], "no temp files left behind");
+    assert.deepEqual(fs.readdirSync(path.dirname(file)).sort(), ["worlds", "worlds.bak"], "no temp files left behind");
+  });
+});
+
+test("each write keeps the previous version as worlds.bak", () => {
+  withTempDir((dir) => {
+    const file = path.join(dir, "worlds");
+    saveWorlds(file, [newWorld("a")]);
+    assert.equal(fs.existsSync(backupPathFor(file)), false, "nothing to back up on the first write");
+    saveWorlds(file, [newWorld("a"), newWorld("b")]);
+    const backup = readWorldsFile(backupPathFor(file));
+    assert.deepEqual(
+      backup.state.worlds.map((w) => w.id),
+      ["a"],
+    );
+  });
+});
+
+test("an unreadable file falls back to the backup, and the next save sets it aside", () => {
+  withTempDir((dir) => {
+    const file = path.join(dir, "worlds");
+    saveWorlds(file, [newWorld("a")]);
+    saveWorlds(file, [newWorld("a"), newWorld("b")]); // backup now holds ["a"]
+    fs.writeFileSync(file, "{ typo");
+
+    const read = readWorldsFile(file);
+    assert.equal(read.error, undefined);
+    assert.match(read.recovered?.error ?? "", /Could not parse/);
+    assert.deepEqual(
+      read.state.worlds.map((w) => w.id),
+      ["a"],
+    );
+
+    saveWorlds(file, [newWorld("a"), newWorld("c")]);
+    assert.deepEqual(
+      readWorldsFile(file).state.worlds.map((w) => w.id),
+      ["a", "c"],
+    );
+    const aside = fs.readdirSync(dir).filter((name) => name.startsWith("worlds.unreadable-"));
+    assert.equal(aside.length, 1);
+    assert.equal(fs.readFileSync(path.join(dir, aside[0]), "utf-8"), "{ typo", "the hand-edit is kept");
+    assert.deepEqual(
+      readWorldsFile(backupPathFor(file)).state.worlds.map((w) => w.id),
+      ["a"],
+      "the backup isn't overwritten by the unreadable file",
+    );
+  });
+});
+
+test("a missing file doesn't fall back to the backup", () => {
+  withTempDir((dir) => {
+    const file = path.join(dir, "worlds");
+    saveWorlds(file, [newWorld("a")]);
+    saveWorlds(file, [newWorld("b")]);
+    fs.rmSync(file);
+    assert.deepEqual(readWorldsFile(file), { state: { worlds: [], mru: [] } });
+  });
+});
+
+test("updateMru reports a failed write instead of throwing", () => {
+  withTempDir((dir) => {
+    const file = path.join(dir, "worlds");
+    saveWorlds(file, [newWorld("a")]);
+    // A directory where the temp file goes makes the write fail.
+    fs.mkdirSync(path.join(dir, `.worlds.tmp-${process.pid}`));
+    assert.equal(
+      updateMru(file, () => [{ worldId: "a" }]),
+      null,
+    );
+    assert.deepEqual(readWorldsFile(file).state.mru, []);
   });
 });

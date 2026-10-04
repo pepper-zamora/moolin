@@ -41,6 +41,10 @@ export interface ConnectionManagerHandlers {
   onData: (data: Uint8Array) => void;
   // A successful connection, for MRU persistence.
   onConnected: (target: ConnectTarget) => void;
+  // The connection (or attempt) has ended, after its last status line was
+  // written through onMessage — the point to stop recording the window's
+  // output for that target.
+  onDisconnected: () => void;
 }
 
 const yellow = (text: string): string => `\x1b[33m[${text}]\x1b[0m\r\n`;
@@ -146,6 +150,7 @@ export class ConnectionManager {
               yellow(`to connect anyway, turn on "Accept untrusted certificates" for ${worldLabel(world)}`),
             );
           }
+          this.handlers.onDisconnected();
         },
         onTlsInfo: (info: TlsInfo) => {
           if (this.session !== session) return;

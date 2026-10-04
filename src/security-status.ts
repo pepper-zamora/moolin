@@ -1,7 +1,7 @@
 import type { ConnectionState } from "./connection-manager";
 import type { CertificateDetails, TlsInfo } from "./telnet";
 
-type Security = "trusted" | "untrusted" | "plaintext";
+export type Security = "trusted" | "untrusted" | "plaintext";
 
 // How long the popup lingers after the pointer leaves the shield or popup,
 // so it can be crossed from one to the other.
@@ -49,7 +49,7 @@ function make<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
-function securityOf(state: ConnectionState): Security | null {
+export function securityOf(state: ConnectionState): Security | null {
   if (state.status !== "connected") return null;
   if (!state.tls) return "plaintext";
   return state.tls.certValid ? "trusted" : "untrusted";
@@ -60,7 +60,7 @@ function formatName(entries: Array<[string, string]>): string {
 }
 
 // "Server certificate", then "Intermediate" up to a final self-issued "Root".
-function certificateRole(cert: CertificateDetails, index: number, count: number): string {
+export function certificateRole(cert: CertificateDetails, index: number, count: number): string {
   if (index === 0) return "Server certificate";
   const selfIssued = formatName(cert.subject) === formatName(cert.issuer);
   return index === count - 1 && selfIssued ? "Root certificate" : "Intermediate certificate";
@@ -106,7 +106,7 @@ function certificateSection(cert: CertificateDetails, index: number, count: numb
   ];
 }
 
-function validationProblem(tls: TlsInfo): string {
+export function validationProblem(tls: TlsInfo): string {
   const code = tls.certValidationError ?? "";
   const known = Object.entries(VALIDATION_ERRORS).find(([key]) => code.includes(key));
   return known ? `${known[1]} (${code})` : `Verification failed: ${code || "unknown error"}.`;

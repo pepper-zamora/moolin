@@ -1,6 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { expandLoginTemplate, isConnectable, newWorld, targetLabel, DEFAULT_LOGIN_TEMPLATE } from "./world-utils";
+import {
+  expandLoginTemplate,
+  isConnectable,
+  newWorld,
+  targetLabel,
+  DEFAULT_LOGIN_TEMPLATE,
+  deleteCharacterPrompt,
+  deleteWorldPrompt,
+} from "./world-utils";
 
 test("expandLoginTemplate substitutes the character and password", () => {
   assert.equal(expandLoginTemplate(DEFAULT_LOGIN_TEMPLATE, "Cowpernica", "hunter2"), 'co "Cowpernica" hunter2\r');
@@ -37,5 +45,35 @@ test("targetLabel names the character and world, with fallbacks for blank names"
   assert.equal(
     targetLabel({ ...world, name: "" }, { ...character, name: " " }),
     "Unnamed character - lambda.moo.mud.org",
+  );
+});
+
+test("deleteWorldPrompt says which characters go with the world", () => {
+  const character = (id: string, name: string) => ({ id, name, password: "" });
+  const world = { ...newWorld("w"), name: "Moo" };
+  assert.deepEqual(deleteWorldPrompt(world), {
+    message: 'Delete the world "Moo"?',
+    detail: "It has no characters. Session logs already written are kept. This can't be undone.",
+  });
+  assert.match(
+    deleteWorldPrompt({ ...world, characters: [character("a", "Cowpernica")] }).detail,
+    /^Its character, "Cowpernica", will be deleted too\./,
+  );
+  assert.match(
+    deleteWorldPrompt({ ...world, characters: [character("a", "Cowpernica"), character("b", "")] }).detail,
+    /^All 2 of its characters, "Cowpernica" and "Unnamed character", will be deleted too\./,
+  );
+  const many = Array.from({ length: 7 }, (_, i) => character(String(i), `C${i}`));
+  assert.match(
+    deleteWorldPrompt({ ...world, characters: many }).detail,
+    /^All 7 of its characters, "C0", "C1", "C2", "C3", "C4" and 2 more, will be deleted too\./,
+  );
+});
+
+test("deleteCharacterPrompt names the character and its world", () => {
+  const world = { ...newWorld("w"), name: "Moo" };
+  assert.equal(
+    deleteCharacterPrompt(world, { id: "c", name: "Cowpernica", password: "" }).message,
+    'Delete the character "Cowpernica" from "Moo"?',
   );
 });

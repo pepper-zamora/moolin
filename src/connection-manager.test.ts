@@ -25,18 +25,32 @@ async function recordingServer(): Promise<{ server: net.Server; port: number; re
   };
 }
 
-function managerWithLog(): { manager: ConnectionManager; messages: string[]; connected: Promise<ConnectTarget> } {
+// `events` records every handler call in order, for tests of the sequence.
+function managerWithLog(): {
+  manager: ConnectionManager;
+  messages: string[];
+  events: string[];
+  connected: Promise<ConnectTarget>;
+} {
   const messages: string[] = [];
+  const events: string[] = [];
   let resolveConnected: (target: ConnectTarget) => void = () => {};
   const connected = new Promise<ConnectTarget>((resolve) => (resolveConnected = resolve));
   const handlers: ConnectionManagerHandlers = {
-    onConnecting: () => {},
-    onStateChange: () => {},
-    onMessage: (text) => messages.push(text),
-    onData: () => {},
-    onConnected: (target) => resolveConnected(target),
+    onConnecting: (target) => events.push(`connecting:${target.world.id}`),
+    onStateChange: () => events.push("state"),
+    onMessage: (text) => {
+      messages.push(text);
+      events.push(`message:${text.replace(/\x1b\[\d+m|\r\n/g, "")}`);
+    },
+    onData: (data) => events.push(`data:${Buffer.from(data).toString().trim()}`),
+    onConnected: (target) => {
+      events.push("connected");
+      resolveConnected(target);
+    },
+    onDisconnected: () => events.push("disconnected"),
   };
-  return { manager: new ConnectionManager(handlers, noopLog), messages, connected };
+  return { manager: new ConnectionManager(handlers, noopLog), messages, events, connected };
 }
 
 async function waitUntil(condition: () => boolean): Promise<void> {
@@ -111,6 +125,60 @@ test("disconnecting returns to the disconnected state", { timeout: TEST_TIMEOUT_
     assert.equal(manager.getConnected(), null);
     assert.match(messages[messages.length - 1], /disconnected/);
   } finally {
+    server.close();
+  }
+});
+
+test("a connection's events come in order: connecting before output, disconnected after the last line", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port } = await recordingServer();
+  const { manager, events, connected } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("w"), name: "Moo", host: "127.0.0.1", port }, character: null });
+    await connected;
+    await waitUntil(() => events.includes("data:Welcome!"));
+    manager.disconnect();
+    // disconnect() reports the disconnect before returning.
+    assert.equal(manager.isActive(), false);
+    assert.deepEqual(events, [
+      "connecting:w",
+      `message:[connecting to Moo (127.0.0.1:${port})...]`,
+      "state",
+      "connected",
+      "state",
+      "message:[connected to Moo]",
+      "data:Welcome!",
+      "state",
+      "message:[disconnected]",
+      "disconnected",
+    ]);
+  } finally {
+    server.close();
+  }
+});
+
+test("connecting again ends the first connection, and ignores its late events", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port } = await recordingServer();
+  const { manager, events, connected } = managerWithLog();
+  try {
+    const world = { ...newWorld("w"), name: "Moo", host: "127.0.0.1", port };
+    manager.connect({ world, character: null });
+    await connected;
+    events.length = 0;
+    manager.connect({ world: { ...world, id: "w2", name: "Moo2" }, character: null });
+    // The first connection is over, its log released, before the second begins.
+    assert.deepEqual(events.slice(0, 4), ["state", "message:[disconnected]", "disconnected", "connecting:w2"]);
+    await waitUntil(() => manager.getConnected()?.world.id === "w2");
+    // Let the first socket's own close event arrive: it must change nothing.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(events.filter((event) => event === "disconnected").length, 1);
+    assert.equal(manager.getState().status, "connected");
+    assert.equal(manager.getState().label, "Moo2");
+  } finally {
+    manager.disconnect();
     server.close();
   }
 });

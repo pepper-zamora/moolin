@@ -30,13 +30,23 @@ its worlds-and-characters model and dialog, and its input/focus behavior.
   the window (Ctrl+R) or a renderer crash doesn't lose it.
 - **Persistent logs.** Everything a window shows, colors included, is appended
   to `~/Documents/Moolin/<world>/<character>/moolin.log` (just `<world>/` when
-  connecting without a character). Connecting pre-populates the scrollback with
-  the last 2 MiB of that log. If several windows are connected to the same
-  world and character, only the first reads and writes the log. The status
-  bar shows which: a scroll beside the security shield when the window is
-  logging, a red "no" sign when another window has the log. The log grows
-  without bound for now, as does the `moolin.log.times` file beside it (see
-  timestamps, below); delete or prune the two together.
+  connecting without a character). Each folder's name starts with 8
+  characters of the world's or character's id, as in
+  `3f2a9c1e.LambdaMOO/7b0d44aa.Cowpernica/`, so worlds with the same name (or
+  names differing only in case) get folders of their own, and renaming a
+  world or character renames its folder to match. Folders from before the
+  ids were added are renamed the first time their world or character
+  connects. Connecting pre-populates the scrollback with the last 2 MiB of
+  the log. A log belongs to one window at a time: the first window to
+  connect to a world and character reads and writes it until it
+  disconnects (its last line is the "disconnected" one), and other windows
+  connected meanwhile don't log. The status bar shows which: a scroll beside
+  the security shield when the window is logging, a red "no" sign when
+  another window has the log. The log grows without bound for now, as does
+  the `moolin.log.times` file beside it (see timestamps, below); delete or
+  prune the two together. While a window has the log open there's also a
+  small `moolin.log.open` file beside it, which lets Moolin repair the
+  timestamps if it crashes.
 - **Line timestamps.** View > Show Timestamps adds a gutter showing when each
   line from the server arrived, with the date wherever the day changes. The
   times are display-only: they never appear in copied text or in the log,
@@ -175,7 +185,7 @@ selected tab's fields, then Connect.
 | Up / Down, Home / End             | Move through the tree                                         |
 | Right / Left                      | In the tree: expand / collapse (Left on a collapsed item goes to its parent) |
 | Enter                             | In the tree: connect                                          |
-| Delete                            | In the tree: delete the world or character                    |
+| Delete                            | In the tree: delete the world or character (asks first)       |
 | Shift+F10                         | In the tree: open the context menu                            |
 | Left / Right, Home / End          | On the tabs: previous / next, first / last tab                |
 | Ctrl+Page Down / Ctrl+Page Up     | Next / previous tab, from anywhere in the dialog              |
@@ -202,10 +212,14 @@ the running instance's worlds file, whatever path is passed.
 
 Character passwords are stored in this file **in plain text**.
 
-Writes are atomic (write to a temporary file, then rename). If the file
-exists but can't be read or parsed, the Worlds dialog says so and Moolin
-refuses to save over it, so a typo from hand-editing doesn't cost you your
-worlds. Malformed individual entries are skipped with a warning.
+Writes are atomic (write to a temporary file, then rename), and each one
+first copies the previous version to `worlds.bak` beside it. If the file
+exists but can't be read or parsed, Moolin falls back to `worlds.bak`: the
+Worlds dialog says so, and the next change is saved as a new `worlds`, with
+the unreadable file kept beside it as `worlds.unreadable-<date>`, so a typo
+from hand-editing never costs you anything. If the backup can't be read
+either, the dialog says so and Moolin refuses to save at all. Malformed
+individual entries are skipped with a warning.
 
 ## Preferences
 
@@ -256,7 +270,7 @@ on the `PATH`.
 | `src/preferences.ts`      | Reading and writing app-wide preferences                                  |
 | `src/world-utils.ts`      | World helpers shared by main and renderer (defaults, labels, login templates) |
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
-| `src/session-log.ts`      | Persistent per-world/character logs and their `.times` timestamp sidecar  |
+| `src/session-log.ts`      | Persistent per-world/character logs, their `.times` sidecar, and which window owns each |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
 | `src/renderer.ts`         | The terminal window's page: scrollback, gutter, input area, status bar, keys |

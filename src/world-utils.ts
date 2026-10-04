@@ -54,3 +54,33 @@ export function expandLoginTemplate(template: string, character: string, passwor
     return key === "character" ? character : password;
   });
 }
+
+// A confirmation question, with its consequences spelled out beneath it.
+export interface Prompt {
+  message: string;
+  detail: string;
+}
+
+// How many characters a world's delete prompt names before summarizing.
+const PROMPT_MAX_NAMES = 5;
+
+const LOGS_KEPT = "Session logs already written are kept. This can't be undone.";
+
+// Asked before deleting a world, making plain that its characters go with it.
+export function deleteWorldPrompt(world: World): Prompt {
+  const count = world.characters.length;
+  const message = `Delete the world "${worldLabel(world)}"?`;
+  if (count === 0) return { message, detail: `It has no characters. ${LOGS_KEPT}` };
+  const names = world.characters.slice(0, PROMPT_MAX_NAMES).map((c) => `"${characterLabel(c)}"`);
+  if (count > PROMPT_MAX_NAMES) names.push(`${count - PROMPT_MAX_NAMES} more`);
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  const its = count === 1 ? "Its character" : `All ${count} of its characters`;
+  return { message, detail: `${its}, ${list}, will be deleted too. ${LOGS_KEPT}` };
+}
+
+export function deleteCharacterPrompt(world: World, character: Character): Prompt {
+  return {
+    message: `Delete the character "${characterLabel(character)}" from "${worldLabel(world)}"?`,
+    detail: LOGS_KEPT,
+  };
+}

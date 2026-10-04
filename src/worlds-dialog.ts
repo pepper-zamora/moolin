@@ -2,7 +2,15 @@
 // loaded copy of the worlds list, edits it in place and saves the whole list
 // (via the main process) on each committed change.
 import type { Character, World } from "./worlds-types";
-import { characterLabel, isConnectable, newCharacter, newWorld, worldLabel } from "./world-utils";
+import {
+  characterLabel,
+  deleteCharacterPrompt,
+  deleteWorldPrompt,
+  isConnectable,
+  newCharacter,
+  newWorld,
+  worldLabel,
+} from "./world-utils";
 import { TabStrip } from "./tabs";
 
 // "global" is the root node, whose settings apply to every world and
@@ -69,7 +77,7 @@ async function load(): Promise<void> {
   const result = await window.moolin.worlds.load();
   loadError = result.error ?? null;
   worlds = result.worlds;
-  showError(loadError ? `${loadError}. Changes will not be saved.` : null);
+  showError(loadError ? `${loadError}. Changes will not be saved.` : (result.warning ?? null));
   newWorldBtn.disabled = !!loadError;
   // Drop a selection that no longer exists.
   const { world, character } = selected();
@@ -77,12 +85,19 @@ async function load(): Promise<void> {
   render();
 }
 
-// Saves are chained so writes reach the file in order.
+// Saves are chained so writes reach the file in order. A save that fails
+// outright (the IPC call itself rejecting) is reported and the chain carries
+// on, so one failure can't silently swallow every later save.
 let saving: Promise<void> = Promise.resolve();
 function save(): void {
   if (loadError) return;
   const snapshot = structuredClone(worlds);
-  saving = saving.then(() => window.moolin.worlds.save(snapshot)).then((result) => showError(result.error ?? null));
+  saving = saving
+    .then(() => window.moolin.worlds.save(snapshot))
+    .then(
+      (result) => showError(result.error ?? null),
+      (err: unknown) => showError(`Could not save: ${err instanceof Error ? err.message : String(err)}`),
+    );
 }
 
 // --- Tree ---
@@ -343,14 +358,16 @@ function addCharacter(): void {
   focusName(characterPane);
 }
 
+// Deletes always ask first (Delete is easy to hit by accident), and are
+// refused while the worlds file couldn't be loaded, since nothing can be
+// saved then.
 async function deleteWorld(): Promise<void> {
   const { world } = selected();
-  if (!world) return;
-  const count = world.characters.length;
-  const extra = count ? ` and its ${count} character${count === 1 ? "" : "s"}` : "";
+  if (!world || loadError) return;
+  const prompt = deleteWorldPrompt(world);
   // The native confirm dialog takes focus; give it back to the tree after,
   // so Up/Down keeps working for deleting several entries in a row.
-  const confirmed = await window.moolin.confirm(`Delete the world "${worldLabel(world)}"${extra}?`);
+  const confirmed = await window.moolin.confirm(prompt.message, prompt.detail);
   tree.focus();
   if (!confirmed) return;
   const index = worlds.indexOf(world);
@@ -363,8 +380,9 @@ async function deleteWorld(): Promise<void> {
 
 async function deleteCharacter(): Promise<void> {
   const { world, character } = selected();
-  if (!world || !character) return;
-  const confirmed = await window.moolin.confirm(`Delete the character "${characterLabel(character)}"?`);
+  if (!world || !character || loadError) return;
+  const prompt = deleteCharacterPrompt(world, character);
+  const confirmed = await window.moolin.confirm(prompt.message, prompt.detail);
   tree.focus();
   if (!confirmed) return;
   const index = world.characters.indexOf(character);

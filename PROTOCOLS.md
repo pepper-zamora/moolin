@@ -22,14 +22,26 @@ Moolin's split mirrors this: [telnet-protocol.ts](src/telnet-protocol.ts) is
 a pure byte-stream parser/encoder with no knowledge of what any option
 *means* — it just turns bytes into `negotiation`/`sub`/`data`/`command`
 events and back. [telnet.ts](src/telnet.ts)'s `buildOptionHandlers()` is a
-small registry, one entry per option number, each with up to four callbacks
-(`onDo`/`onWill`/`onWont`/`onSub`). Anything without a matching callback
-falls back to the default in `dispatchNegotiation()`: refuse a `DO` with
-`WONT`, refuse a `WILL` with `DONT`. This default is deliberately
-conservative — Moolin never agrees to an option it doesn't understand,
-and never proposes one unprompted either, so there's no handler for the
-"we ask, server answers" direction at all right now; every option Moolin
-supports today is one the *server* proposes and Moolin accepts.
+small registry, one entry per option number. An entry's `local` side makes
+it an option Moolin will perform when the server asks (`DO`/`DONT`), its
+`remote` side one Moolin will let the server perform when it offers
+(`WILL`/`WONT`), each with optional `onEnable`/`onDisable` callbacks, plus
+an `onSub` for its subnegotiations. `dispatchNegotiation()` refuses a `DO`
+with `WONT`, or a `WILL` with `DONT`, for an option without that side. This
+default is deliberately conservative — Moolin never agrees to an option it
+doesn't understand, and never proposes one unprompted either, so there's
+no handler for the "we ask, server answers" direction at all right now;
+every option Moolin supports today is one the *server* proposes and Moolin
+accepts.
+
+`TelnetSession` tracks which options are on at each end, and only answers a
+request that changes one: a repeated `DO` or `WILL`, or a `DONT` or `WONT`
+for an option that's already off, gets no reply. That's
+[RFC 1143](https://www.rfc-editor.org/rfc/rfc1143)'s rule against
+negotiation loops, where two peers that each acknowledge every request
+would otherwise answer each other forever. A server can also turn an option
+back off: `DONT NAWS` stops the window-size reports, and `WONT ECHO` brings
+local echo back, each acknowledged once.
 
 ### Supported today
 

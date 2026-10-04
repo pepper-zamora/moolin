@@ -253,15 +253,23 @@ currently discards or never negotiates:
     exactly however the bytes were chunked. Wrapped rows don't fire it, and
     a stamp lands on its logical line's first row.
   - **History.** The replay buffer (`src/scrollback-buffer.ts`) keeps the
-    times alongside its chunks, so a renderer reload restores them. The
+    times alongside its chunks, so a renderer reload restores them; it
+    trims whole lines, so its times stay aligned however the output was
+    chunked. The
     session log stays a plain byte stream; its times go in a sidecar,
     `moolin.log.times`, holding one little-endian float64 (epoch ms; NaN
     for no time) per line feed. On connect, the log tail's times are read
     back from the sidecar's end (`readTimesTail` in `src/session-log.ts`).
     Lines logged before the sidecar existed come back unstamped. Both files
-    are written synchronously so they're always on disk together, and a
-    record torn by a crash is read as one unknown time and repaired before
-    the next append, so it can't shift the rest.
+    are written synchronously so they're always on disk together. A crash
+    can still leave them disagreeing about the output written just before
+    it, so while the log is open a `moolin.log.open` marker records both
+    files' sizes when it was opened. One found on the next open means the
+    app died; the sidecar is then padded (with unknown times) or trimmed to
+    one record per line feed the log gained since, so the damage stays at
+    the end and can't shift older lines' times. Without a marker, a torn
+    final record is read as one unknown time and repaired before the next
+    append.
   - **Not done.** There's no hover tooltip with the exact time, and no
     seconds or configurable format. Neither the sidecar nor the log is
     pruned.

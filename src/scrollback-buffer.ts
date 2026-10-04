@@ -31,8 +31,9 @@ function normalizeTimes(times: Array<number | null> | null, total: number): Arra
 }
 
 // In-memory replay buffer so a window's scrollback survives a renderer
-// reload/crash. Keeps the most recent chunks up to `maxBytes`, dropping whole
-// chunks from the front. Not persisted itself; the persistent record is the
+// reload/crash. Keeps the most recent `maxBytes`, dropping whole lines from
+// the front, so a line is kept or dropped the same way whether it arrived
+// live or came from the log in one large chunk. Not persisted itself; the persistent record is the
 // session log (see session-log.ts), whose tail is loaded in here on connect.
 export class ScrollbackBuffer {
   private chunks: TerminalChunk[] = [];
@@ -77,13 +78,28 @@ export class ScrollbackBuffer {
     return this.lineTimes.slice();
   }
 
-  // Drops whole chunks from the front, with their line times, until the
-  // buffer is back within maxBytes.
+  // Drops lines from the front, with their times, until the buffer is back
+  // within maxBytes. A front chunk that only partly needs to go is cut just
+  // after a line feed (LF is never part of a UTF-8 sequence or an escape
+  // sequence's parameters, so the rest replays cleanly); one with no line
+  // feed late enough to cut at goes whole.
   private trim(): void {
     while (this.bytes > this.maxBytes && this.chunks.length > 0) {
-      const dropped = this.chunks.shift() as TerminalChunk;
-      this.bytes -= byteLength(dropped);
-      this.lineTimes.splice(0, countLineFeeds(dropped));
+      const front = this.chunks[0];
+      const size = byteLength(front);
+      const excess = this.bytes - this.maxBytes;
+      const bytes = typeof front === "string" ? Buffer.from(front, "utf8") : front;
+      // The first LF that, cut after, drops at least `excess` bytes.
+      const cut = size > excess ? bytes.indexOf(0x0a, excess - 1) + 1 : 0;
+      if (cut === 0 || cut === size) {
+        this.chunks.shift();
+        this.bytes -= size;
+        this.lineTimes.splice(0, countLineFeeds(front));
+      } else {
+        this.chunks[0] = bytes.slice(cut); // a copy, so the dropped part can be freed
+        this.bytes -= cut;
+        this.lineTimes.splice(0, countLineFeeds(bytes.subarray(0, cut)));
+      }
     }
   }
 }

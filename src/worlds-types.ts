@@ -35,9 +35,11 @@ export interface ConnectTarget {
 }
 
 // What the worlds-load IPC returns. `error` is set when the worlds file
-// exists but couldn't be read or parsed; saving is then refused so the
-// user's file isn't overwritten.
+// exists but couldn't be read or parsed (nor its backup); saving is then
+// refused so the user's file isn't overwritten. `warning` is set when the
+// worlds came from the backup instead (see readWorldsFile).
 export interface WorldsLoadResult {
   worlds: World[];
   error?: string;
+  warning?: string;
 }

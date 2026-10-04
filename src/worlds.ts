@@ -12,12 +12,23 @@ export interface WorldsState {
   mru: MruEntry[];
 }
 
-// `error` is set when the file exists but couldn't be read or parsed. The
-// state is then empty, and writes are refused so the user's file (which may
-// just have a typo from hand-editing) isn't overwritten.
+// `error` is set when the file exists but couldn't be read or parsed, and
+// neither could its backup. The state is then empty, and writes are refused
+// so the user's file (which may just have a typo from hand-editing) isn't
+// overwritten.
+//
+// If the backup could be read instead, `state` is the backup's and
+// `recovered` names the unreadable file. Writes are then allowed: the first
+// one moves the unreadable file aside rather than overwriting it.
 export interface WorldsReadResult {
   state: WorldsState;
   error?: string;
+  recovered?: { file: string; error: string };
+}
+
+// The previous version of the worlds file, kept beside it by every write.
+export function backupPathFor(filePath: string): string {
+  return `${filePath}.bak`;
 }
 
 export function resolveWorldsPath(cliArg: string | undefined): string {
@@ -102,13 +113,25 @@ function parseMruEntry(value: unknown): MruEntry | null {
     : { worldId: value.worldId, characterId: value.characterId };
 }
 
+// Reads the worlds file, falling back to its backup if the file exists but
+// is unreadable (see WorldsReadResult). A missing file means no worlds; the
+// backup isn't consulted then, so deleting the file starts afresh.
 export function readWorldsFile(filePath: string): WorldsReadResult {
+  const result = readStateFile(filePath);
+  if (!result.error) return { state: result.state };
+  const backup = readStateFile(backupPathFor(filePath));
+  if (backup.error || backup.missing) return { state: result.state, error: result.error };
+  log("warn", "worlds", result.error, "- using the backup");
+  return { state: backup.state, recovered: { file: filePath, error: result.error } };
+}
+
+function readStateFile(filePath: string): WorldsReadResult & { missing?: boolean } {
   const empty = (): WorldsState => ({ worlds: [], mru: [] });
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, "utf-8").trim();
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { state: empty() };
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { state: empty(), missing: true };
     return { state: empty(), error: `Could not read ${filePath}: ${(err as Error).message}` };
   }
   if (raw.length === 0) return { state: empty() };
@@ -134,13 +157,37 @@ export function readWorldsFile(filePath: string): WorldsReadResult {
   return { state: { worlds, mru } };
 }
 
+// "worlds.unreadable-20261004-153000", for setting an unreadable file aside.
+function unreadablePathFor(filePath: string, now: Date): string {
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  const stamp =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-` +
+    `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `${filePath}.unreadable-${stamp}`;
+}
+
 // Write-temp-then-rename so a process killed mid-write can never leave a
-// truncated/corrupt file behind for the next reader.
-function writeState(filePath: string, state: WorldsState): void {
+// truncated/corrupt file behind for the next reader. The file being replaced
+// is first copied to the backup (a copy, so there's never a moment with no
+// worlds file), or, if it was unreadable (`read.recovered`), moved aside
+// under a dated name so the backup it was recovered from stays intact.
+function writeState(filePath: string, state: WorldsState, read: WorldsReadResult): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = path.join(dir, `.${path.basename(filePath)}.tmp-${process.pid}`);
   fs.writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+  if (read.recovered) {
+    const aside = unreadablePathFor(filePath, new Date());
+    fs.renameSync(filePath, aside);
+    log("warn", "worlds", "moved unreadable", filePath, "to", aside);
+  } else if (fs.existsSync(filePath)) {
+    try {
+      fs.copyFileSync(filePath, backupPathFor(filePath));
+    } catch (err) {
+      // A backup is a nicety; not having one mustn't stop the save.
+      log("warn", "worlds", "could not back up", filePath, ":", (err as Error).message);
+    }
+  }
   fs.renameSync(tmpPath, filePath);
 }
 
@@ -150,20 +197,26 @@ function writeState(filePath: string, state: WorldsState): void {
 
 // Throws if the existing file couldn't be read, rather than replace it.
 export function saveWorlds(filePath: string, worlds: World[]): void {
-  const { state, error } = readWorldsFile(filePath);
-  if (error) throw new Error(error);
-  writeState(filePath, { ...state, worlds });
+  const read = readWorldsFile(filePath);
+  if (read.error) throw new Error(read.error);
+  writeState(filePath, { ...read.state, worlds }, read);
 }
 
 // Returns the new MRU list, or null if the file couldn't be read (in which
-// case it is left alone).
+// case it is left alone) or written. Never throws: it runs as a connection
+// is made, where a failure to record it mustn't stop the connection.
 export function updateMru(filePath: string, updater: (mru: MruEntry[]) => MruEntry[]): MruEntry[] | null {
-  const { state, error } = readWorldsFile(filePath);
-  if (error) {
-    log("warn", "worlds", "not updating MRU:", error);
+  const read = readWorldsFile(filePath);
+  if (read.error) {
+    log("warn", "worlds", "not updating MRU:", read.error);
     return null;
   }
-  const mru = updater(state.mru);
-  writeState(filePath, { ...state, mru });
+  const mru = updater(read.state.mru);
+  try {
+    writeState(filePath, { ...read.state, mru }, read);
+  } catch (err) {
+    log("error", "worlds", "could not update MRU in", filePath, ":", (err as Error).message);
+    return null;
+  }
   return mru;
 }

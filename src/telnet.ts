@@ -14,13 +14,20 @@ const TELOPT_NAWS = 31;
 // error, but some just sit waiting for a login line.
 const TLS_HANDSHAKE_TIMEOUT_MS = 15000;
 
+// What to do as an option is switched on or off at one end.
+interface OptionSide {
+  onEnable?: () => void;
+  onDisable?: () => void;
+}
+
 // Per-telnet-option behavior, keyed by option number in buildOptionHandlers.
-// Any callback left unset falls back to the default do/will/wont/sub
-// behavior (refuse/ignore) rather than needing an explicit no-op.
+// `local` makes it an option Moolin agrees to perform (the server asks with
+// DO/DONT, Moolin answers WILL/WONT); `remote` one Moolin agrees to let the
+// server perform (WILL/WONT, answered with DO/DONT). An option without the
+// side being asked about is refused.
 interface TelnetOptionHandler {
-  onDo?: () => void;
-  onWill?: () => void;
-  onWont?: () => void;
+  local?: OptionSide;
+  remote?: OptionSide;
   onSub?: (buffer: Buffer) => void;
 }
 
@@ -187,7 +194,11 @@ export class TelnetSession {
   // `teardown` still work while the TCP connect or TLS handshake is in flight.
   private pendingSocket: Socket | null = null;
   private localEchoSuppressed = false;
-  private nawsEnabled = false;
+  // The options currently on: those Moolin performs, and those the server
+  // does. Only a request that would change one of these is answered (see
+  // dispatchNegotiation).
+  private readonly localEnabled = new Set<number>();
+  private readonly remoteEnabled = new Set<number>();
   private cols = 80;
   private rows = 24;
 
@@ -300,6 +311,11 @@ export class TelnetSession {
     });
   }
 
+  // Follows RFC 1143's rule against negotiation loops: a request that
+  // matches an option's current state (a repeated DO, a DONT for an option
+  // that's off, ...) is not answered, since answering it again is what lets
+  // two peers that each acknowledge every request ping-pong forever. A
+  // request for an unsupported option is always refused.
   private dispatchNegotiation(
     optionHandlers: Partial<Record<number, TelnetOptionHandler>>,
     verb: NegotiationVerb,
@@ -308,19 +324,32 @@ export class TelnetSession {
     const handler = optionHandlers[option];
     switch (verb) {
       case "do":
-        if (handler?.onDo) handler.onDo();
-        else this.writeNegotiation("wont", option);
-        break;
-      case "will":
-        if (handler?.onWill) handler.onWill();
-        else this.writeNegotiation("dont", option);
-        break;
-      case "wont":
-        handler?.onWont?.();
+        if (!handler?.local) this.writeNegotiation("wont", option);
+        else if (!this.localEnabled.has(option)) {
+          this.localEnabled.add(option);
+          this.writeNegotiation("will", option);
+          handler.local.onEnable?.();
+        }
         break;
       case "dont":
-        // We never enable an option the server hasn't asked for, so there's
-        // nothing to turn off; not replying also avoids negotiation loops.
+        if (this.localEnabled.delete(option)) {
+          this.writeNegotiation("wont", option);
+          handler?.local?.onDisable?.();
+        }
+        break;
+      case "will":
+        if (!handler?.remote) this.writeNegotiation("dont", option);
+        else if (!this.remoteEnabled.has(option)) {
+          this.remoteEnabled.add(option);
+          this.writeNegotiation("do", option);
+          handler.remote.onEnable?.();
+        }
+        break;
+      case "wont":
+        if (this.remoteEnabled.delete(option)) {
+          this.writeNegotiation("dont", option);
+          handler?.remote?.onDisable?.();
+        }
         break;
     }
   }
@@ -332,35 +361,30 @@ export class TelnetSession {
   private buildOptionHandlers(): Partial<Record<number, TelnetOptionHandler>> {
     return {
       [TELOPT_NAWS]: {
-        // Remote is asking us (DO) to send window-size updates.
-        onDo: () => {
-          this.nawsEnabled = true;
-          this.writeNegotiation("will", TELOPT_NAWS);
-          this.sendNaws();
-        },
+        // The server asks (DO) for window-size updates: send the current
+        // size now, and again on every resize until it says DONT.
+        local: { onEnable: () => this.sendNaws() },
       },
       [TELOPT_TTYPE]: {
-        onDo: () => this.writeNegotiation("will", TELOPT_TTYPE),
+        local: {},
         onSub: (buffer) => {
-          if (buffer[0] === 1 /* SEND */) {
+          if (this.localEnabled.has(TELOPT_TTYPE) && buffer[0] === 1 /* SEND */) {
             this.socket?.write(
               encodeSub(TELOPT_TTYPE, Buffer.concat([Buffer.from([0 /* IS */]), Buffer.from("XTERM", "ascii")])),
             );
           }
         },
       },
-      [TELOPT_SGA]: {
-        onDo: () => this.writeNegotiation("will", TELOPT_SGA),
-        onWill: () => this.writeNegotiation("do", TELOPT_SGA),
-      },
+      [TELOPT_SGA]: { local: {}, remote: {} },
       [TELOPT_ECHO]: {
         // Server takes over echoing — typically for password prompts.
-        onWill: () => {
-          this.localEchoSuppressed = true;
-          this.writeNegotiation("do", TELOPT_ECHO);
-        },
-        onWont: () => {
-          this.localEchoSuppressed = false;
+        remote: {
+          onEnable: () => {
+            this.localEchoSuppressed = true;
+          },
+          onDisable: () => {
+            this.localEchoSuppressed = false;
+          },
         },
       },
     };
@@ -400,7 +424,7 @@ export class TelnetSession {
   }
 
   private sendNaws(): void {
-    if (!this.socket || !this.nawsEnabled) return;
+    if (!this.socket || !this.localEnabled.has(TELOPT_NAWS)) return;
     this.log("debug", "sending NAWS", `${this.cols}x${this.rows}`);
     const buffer = Buffer.alloc(4);
     buffer.writeUInt16BE(this.cols, 0);
@@ -408,9 +432,12 @@ export class TelnetSession {
     this.socket.write(encodeSub(TELOPT_NAWS, buffer));
   }
 
+  // Closes the connection and reports it (onDisconnect) before returning, so
+  // a caller can rely on the disconnect having been handled, e.g. a window
+  // that's closing logs it before giving up its log. The socket's own close
+  // event then finds nothing left to tear down.
   disconnect(): void {
-    // Don't clear the socket fields here — let the resulting `close` event
-    // drive `teardown()`, which is what actually fires `onDisconnect`.
     (this.socket ?? this.pendingSocket)?.destroy();
+    this.teardown();
   }
 }

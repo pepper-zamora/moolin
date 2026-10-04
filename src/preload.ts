@@ -21,7 +21,9 @@ contextBridge.exposeInMainWorld("moolin", {
       ipcRenderer.on(IpcChannels.worldsChanged, () => callback());
     },
   },
-  confirm: (message: string): Promise<boolean> => ipcRenderer.invoke(IpcChannels.dialogConfirm, message),
+  // Asks to confirm a delete; resolves true if confirmed.
+  confirm: (message: string, detail?: string): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannels.dialogConfirm, message, detail),
   connect: (world: World, characterId: string | null): void =>
     ipcRenderer.send(IpcChannels.connectRequest, { world, characterId }),
   // Shows a native popup menu; resolves with the chosen item's id, or null.
