@@ -25,6 +25,7 @@ export const MONOSPACE_FONTS: MonospaceFont[] = [
   { id: "courier-new", label: "Courier New", cssFamily: `"Courier New", monospace` },
   { id: "jetbrains-mono", label: "JetBrains Mono", cssFamily: `"JetBrains Mono", monospace` },
   { id: "fira-code", label: "Fira Code", cssFamily: `"Fira Code", monospace` },
+  { id: "iosevka", label: "Iosevka", cssFamily: `Iosevka, monospace` },
   { id: "source-code-pro", label: "Source Code Pro", cssFamily: `"Source Code Pro", monospace` },
   { id: "ibm-plex-mono", label: "IBM Plex Mono", cssFamily: `"IBM Plex Mono", monospace` },
   { id: "hack", label: "Hack", cssFamily: `Hack, monospace` },
