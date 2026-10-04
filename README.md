@@ -168,7 +168,9 @@ npm run dist:mac     # dmg and zip, x64 and arm64
 ```
 
 Each target has to be built on its own OS; `.github/workflows/release.yml`
-does that on every `v*` tag and attaches the results to a GitHub Release. The
+does that on every `v*` tag and attaches the results to a GitHub Release. It
+also builds and tests every pull request into `main` on all three OSes, without
+releasing anything; the installers are kept as the run's artifacts. The
 rpm and pacman targets need `rpmbuild` and `bsdtar` installed. Windows builds
 are unsigned, and so are macOS builds unless the signing secrets named in the
 workflow are set. `packaging/aur/PKGBUILD` is a draft for an AUR `moolin-bin` package.

@@ -1,11 +1,20 @@
 name: Release
 
 # Builds installers on each OS and attaches them to a GitHub Release when a
-# version tag (v0.1.0, ...) is pushed. Run manually to just get the artifacts.
+# version tag (v0.1.0, ...) is pushed. On a pull request into main, or when
+# run manually, it only builds and tests, leaving the installers as the run's
+# artifacts.
 on:
   push:
     tags: ["v*"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
+
+# A new push to a pull request replaces its run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
