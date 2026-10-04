@@ -50,6 +50,9 @@ const term = new Terminal({
     scrollbarSliderBackground: "#5a5a5a",
     scrollbarSliderHoverBackground: "#7a7a7a",
     scrollbarSliderActiveBackground: "#9a9a9a",
+    // The search-match strip's left edge. xterm draws it in white unless this
+    // is set (its docs say black), so match the background to hide it.
+    overviewRulerBorder: "#000000",
   },
 });
 
