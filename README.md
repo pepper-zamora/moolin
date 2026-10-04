@@ -192,7 +192,8 @@ something existing users rely on from working, for example:
 New features and fixes that keep everything working only raise the last
 number (0.1.0, 0.1.1, ...). `package.json` holds the version of the next
 release; after a release it's bumped right away, and a release's tag
-(`v0.1.1`) must match it.
+(`v0.1.1`) must match it. [CHANGELOG.md](CHANGELOG.md) lists what changed in
+each release, and what's changed since the last one.
 
 ## Using Moolin
 
