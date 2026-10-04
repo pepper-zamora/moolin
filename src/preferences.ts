@@ -10,9 +10,11 @@ import { log } from "./logger";
 export interface Preferences {
   // Whether new windows open with the line-timestamp gutter shown.
   showTimestamps: boolean;
+  // Whether to ask GitHub for a newer release at startup (see update-check.ts).
+  checkForUpdates: boolean;
 }
 
-const DEFAULTS: Preferences = { showTimestamps: false };
+const DEFAULTS: Preferences = { showTimestamps: false, checkForUpdates: true };
 
 export function preferencesPath(configDir: string): string {
   return path.join(configDir, "preferences.json");
@@ -33,6 +35,7 @@ export function readPreferences(filePath: string): Preferences {
   const record = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   return {
     showTimestamps: typeof record.showTimestamps === "boolean" ? record.showTimestamps : DEFAULTS.showTimestamps,
+    checkForUpdates: typeof record.checkForUpdates === "boolean" ? record.checkForUpdates : DEFAULTS.checkForUpdates,
   };
 }
 

@@ -51,6 +51,25 @@ damage; clear it in Terminal, then open Moolin again:
 xattr -dr com.apple.quarantine /Applications/Moolin.app
 ```
 
+### The update check
+
+Moolin doesn't update itself. Instead, every time it starts it asks GitHub
+whether a newer release has been published, and if one has, it says so and
+offers to open the release's page. That's all the check is for: to make sure
+you hear about new releases, including one that replaces a release withdrawn
+for a serious bug.
+
+The check contacts only GitHub (`api.github.com`), and it isn't used for
+tracking in any way. The request carries nothing about you, your worlds or
+your settings, not even which version of Moolin you have; the comparison
+happens on your computer. GitHub, like any website, sees the IP address the
+request comes from, under [GitHub's privacy
+statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
+
+To turn the check off, uncheck **Help → Check for Updates at Startup**. You can
+still check by hand any time with **Help → Check for Updates…**. Builds run
+from source never check at startup.
+
 ## Features
 
 - **One window per connection.** Connecting from a window that already has a
@@ -266,8 +285,9 @@ individual entries are skipped with a warning.
 
 ## Preferences
 
-App-wide settings (for now, just whether new windows show timestamps) are
-kept in `preferences.json` in the usual per-app config folder:
+App-wide settings (whether new windows show timestamps, and whether to check
+for updates at startup) are kept in `preferences.json` in the usual per-app
+config folder:
 
 | OS      | Location                                          |
 | ------- | ------------------------------------------------- |

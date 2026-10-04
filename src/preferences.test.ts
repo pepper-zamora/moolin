@@ -16,15 +16,15 @@ function withTempDir(fn: (dir: string) => void): void {
 
 test("readPreferences returns the defaults when there is no file", () => {
   withTempDir((dir) => {
-    assert.deepEqual(readPreferences(preferencesPath(dir)), { showTimestamps: false });
+    assert.deepEqual(readPreferences(preferencesPath(dir)), { showTimestamps: false, checkForUpdates: true });
   });
 });
 
 test("writePreferences round-trips, creating the directory if needed", () => {
   withTempDir((dir) => {
     const file = preferencesPath(path.join(dir, "nested"));
-    writePreferences(file, { showTimestamps: true });
-    assert.deepEqual(readPreferences(file), { showTimestamps: true });
+    writePreferences(file, { showTimestamps: true, checkForUpdates: false });
+    assert.deepEqual(readPreferences(file), { showTimestamps: true, checkForUpdates: false });
     assert.deepEqual(fs.readdirSync(path.dirname(file)), ["preferences.json"]);
   });
 });
@@ -33,10 +33,10 @@ test("readPreferences falls back to defaults for bad JSON or mistyped fields", (
   withTempDir((dir) => {
     const file = preferencesPath(dir);
     fs.writeFileSync(file, "{not json");
-    assert.deepEqual(readPreferences(file), { showTimestamps: false });
-    fs.writeFileSync(file, JSON.stringify({ showTimestamps: "yes" }));
-    assert.deepEqual(readPreferences(file), { showTimestamps: false });
+    assert.deepEqual(readPreferences(file), { showTimestamps: false, checkForUpdates: true });
+    fs.writeFileSync(file, JSON.stringify({ showTimestamps: "yes", checkForUpdates: "no" }));
+    assert.deepEqual(readPreferences(file), { showTimestamps: false, checkForUpdates: true });
     fs.writeFileSync(file, "null");
-    assert.deepEqual(readPreferences(file), { showTimestamps: false });
+    assert.deepEqual(readPreferences(file), { showTimestamps: false, checkForUpdates: true });
   });
 });

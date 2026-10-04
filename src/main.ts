@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, shell } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, shell } from "electron";
 import * as path from "node:path";
 import {
   backupPathFor,
@@ -17,6 +17,7 @@ import { preferencesPath, readPreferences, writePreferences } from "./preference
 import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-types";
 import { targetLabel } from "./world-utils";
 import type { WindowState } from "./connection-manager";
+import { checkForUpdate } from "./update-check";
 
 function cliArgs(): string[] {
   return app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
@@ -166,6 +167,44 @@ function openPreferences(terminal: TerminalWindow): void {
     message: "Preferences",
     detail: "Not yet implemented.",
   });
+}
+
+// How long after startup the automatic update check runs, so it doesn't
+// compete with opening the first window.
+const UPDATE_CHECK_DELAY_MS = 5000;
+
+// Asks GitHub whether a newer release exists, and if so offers its page.
+// The automatic check at startup stays quiet unless there's an update;
+// Help > Check for Updates also reports "up to date" and failures.
+async function checkForUpdates(parentWindow: BrowserWindow | undefined, manual: boolean): Promise<void> {
+  const current = app.getVersion();
+  const result = await checkForUpdate(current, net.fetch as unknown as typeof fetch);
+  log("info", "main", "update check:", JSON.stringify(result));
+  const parent = parentWindow && !parentWindow.isDestroyed() ? parentWindow : undefined;
+  const show = (options: Electron.MessageBoxOptions) =>
+    parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options);
+
+  if (result.status === "update-available") {
+    const { response } = await show({
+      type: "info",
+      buttons: ["Later", "Download"],
+      defaultId: 1,
+      cancelId: 0,
+      message: "A new release of Moolin is available",
+      detail: `Moolin ${result.release.version} is available; you have ${current}. Download opens the release's page on GitHub.`,
+    });
+    if (response === 1) void shell.openExternal(result.release.url);
+  } else if (manual && result.status === "up-to-date") {
+    void show({
+      type: "info",
+      message: "Moolin is up to date",
+      detail: result.latest
+        ? `You have ${current}, the latest release.`
+        : `You have ${current}; no release is published yet.`,
+    });
+  } else if (manual && result.status === "failed") {
+    void show({ type: "warning", message: "Couldn't check for updates", detail: result.error });
+  }
 }
 
 // Each window has its own menu, since Disconnect and the MRU entries act on
@@ -331,6 +370,22 @@ function buildMenu(terminal: TerminalWindow): void {
         { role: "togglefullscreen", label: "Toggle &Full Screen" },
       ],
     },
+    {
+      label: "&Help",
+      submenu: [
+        { label: "Check for &Updates…", click: () => void checkForUpdates(terminal.window, true) },
+        {
+          label: "Check for Updates at &Startup",
+          type: "checkbox",
+          checked: prefs.checkForUpdates,
+          click: () => {
+            prefs.checkForUpdates = !prefs.checkForUpdates;
+            writePreferences(prefsPath, prefs);
+            rebuildAllMenus(); // every window's checkbox shows the one setting
+          },
+        },
+      ],
+    },
   ];
   terminal.setMenu(Menu.buildFromTemplate(template));
 }
@@ -487,6 +542,15 @@ if (isPrimaryInstance) {
   app.whenReady().then(() => {
     log("debug", "main", "app ready");
     newTerminalWindow();
+
+    // Only in packaged builds: running from source shouldn't prompt about
+    // releases. Help > Check for Updates works in both.
+    if (app.isPackaged && prefs.checkForUpdates) {
+      setTimeout(
+        () => void checkForUpdates(BrowserWindow.getFocusedWindow() ?? undefined, false),
+        UPDATE_CHECK_DELAY_MS,
+      );
+    }
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) newTerminalWindow();
