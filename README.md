@@ -168,8 +168,10 @@ npm run dist:mac     # dmg and zip, x64 and arm64
 ```
 
 Each target has to be built on its own OS; `.github/workflows/release.yml`
-does that on every `v*` tag and attaches the results to a GitHub Release. The
-rpm and pacman targets need `rpmbuild` and `bsdtar` installed. Windows builds
+does that on every `v*` tag and attaches the results to a GitHub Release. It
+also builds and tests every push to `dev` and every pull request into `dev` or
+`main` on all three OSes, without releasing anything; the installers are kept
+as the run's artifacts. The rpm and pacman targets need `rpmbuild` and `bsdtar` installed. Windows builds
 are unsigned, and so are macOS builds unless the signing secrets named in the
 workflow are set. `packaging/aur/PKGBUILD` is a draft for an AUR `moolin-bin` package.
 
@@ -326,6 +328,19 @@ A missing or unreadable file just means the defaults.
 | `--log-level=LEVEL` | Log to the terminal: `none` (default), `error`, `warn`, `info` or `debug` |
 
 ## Development
+
+### Branches
+
+- `main` matches the latest release.
+- `dev` collects finished work that isn't released yet; it's the branch to
+  build and try for the current state of things. CI builds every push to it.
+- Each feature or fix gets a branch of its own from `dev` (`feature/...`,
+  `fix/...`), holding just that one change, and goes back into `dev` through
+  a pull request, which CI builds and tests on Linux, Windows and macOS.
+- A release is a pull request from `dev` into `main`, followed by a version
+  tag on `main` (see [Versioning](#versioning)).
+
+### Commands
 
 | Command             | Does                                                    |
 | ------------------- | ------------------------------------------------------- |
