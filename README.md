@@ -336,10 +336,12 @@ A missing or unreadable file just means the defaults.
 - `dev` collects finished work that isn't released yet; it's the branch to
   build and try for the current state of things. CI builds every push to it.
 - Each feature or fix gets a branch of its own from `dev` (`feature/...`,
-  `fix/...`), holding just that one change, and goes back into `dev` through
-  a pull request, which CI builds and tests on Linux, Windows and macOS.
-- A release is a pull request from `dev` into `main`, followed by a version
-  tag on `main` (see [Versioning](#versioning)).
+  `fix/...`), holding just that one change. When it's done it's merged
+  straight into `dev`, and pushing `dev` has CI build and test it on Linux,
+  Windows and macOS.
+- A release is a pull request from `dev` into `main`, so it gets a full CI
+  run and a record of its own before merging, followed by a version tag on
+  `main` (see [Versioning](#versioning)).
 
 ### Commands
 
