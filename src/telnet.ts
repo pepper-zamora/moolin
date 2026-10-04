@@ -63,10 +63,6 @@ export interface TlsInfo {
   // The ephemeral key exchange, e.g. "X25519, 253 bits"; absent when
   // the TLS library doesn't report it.
   keyExchange?: string;
-  certSubject: string;
-  certIssuer: string;
-  certValidFrom: string;
-  certValidTo: string;
   // Whether the cert passed Node's normal chain/hostname verification. Only
   // false on a connection the world allows untrusted certificates for
   // (plenty of MUDs run self-signed certs); otherwise a failure disconnects.
@@ -86,15 +82,6 @@ export interface TelnetSessionHandlers {
   onDisconnect: (reason?: string, certificateRejected?: boolean) => void;
   // Fired after a successful TLS handshake, just before onConnect.
   onTlsInfo: (info: TlsInfo) => void;
-}
-
-function formatCertName(name: Record<string, string | string[] | undefined> | undefined): string {
-  if (!name) return "unknown";
-  if (name.CN) return Array.isArray(name.CN) ? name.CN.join(", ") : name.CN;
-  return Object.entries(name)
-    .filter(([, value]) => value !== undefined)
-    .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : value}`)
-    .join(", ");
 }
 
 const EXTENDED_KEY_USAGES: Record<string, string> = {
@@ -178,15 +165,10 @@ function describeKeyExchange(tlsSocket: tls.TLSSocket): string | undefined {
 
 function collectTlsInfo(tlsSocket: tls.TLSSocket): TlsInfo {
   const cipher = tlsSocket.getCipher();
-  const cert = tlsSocket.getPeerCertificate();
   return {
     protocol: tlsSocket.getProtocol() ?? "unknown",
     cipherName: cipher?.standardName || cipher?.name || "unknown",
     keyExchange: describeKeyExchange(tlsSocket),
-    certSubject: formatCertName(cert?.subject),
-    certIssuer: formatCertName(cert?.issuer),
-    certValidFrom: cert?.valid_from ?? "unknown",
-    certValidTo: cert?.valid_to ?? "unknown",
     certValid: tlsSocket.authorized,
     certValidationError: tlsSocket.authorized ? undefined : tlsSocket.authorizationError?.toString(),
     certificates: certificateChain(tlsSocket),

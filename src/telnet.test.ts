@@ -134,7 +134,6 @@ test("connects to a self-signed TLS server when allowed, and reports cert/cipher
     await connected;
 
     assert.deepEqual(events, ["tlsInfo:false", "connect:true"]);
-    assert.equal(tlsInfo?.certSubject, "test.moolin.local");
     assert.match(tlsInfo?.protocol ?? "", /^TLSv1\.[23]$/);
     assert.match(tlsInfo?.certValidationError ?? "", /SELF_SIGNED/);
     // A self-signed certificate is its own whole chain.

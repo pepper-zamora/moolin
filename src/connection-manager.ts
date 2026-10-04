@@ -142,12 +142,8 @@ export class ConnectionManager {
         onTlsInfo: (info: TlsInfo) => {
           if (this.session !== session) return;
           this.tlsInfo = info;
-          this.handlers.onMessage(green(`TLS: ${info.protocol}, ${info.cipherName}`));
-          this.handlers.onMessage(
-            green(
-              `cert: ${info.certSubject} issued by ${info.certIssuer}, valid ${info.certValidFrom} to ${info.certValidTo}`,
-            ),
-          );
+          // The details are in the status bar's security popup; only an
+          // untrusted certificate is called out here, as a warning.
           if (!info.certValid) {
             this.handlers.onMessage(
               red(
