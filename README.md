@@ -35,7 +35,8 @@ its worlds-and-characters model and dialog, and its input/focus behavior.
   line from the server arrived, with the date wherever the day changes. The
   times are display-only: they never appear in copied text or in the log,
   and are kept in `moolin.log.times` so logged history keeps its times on
-  reconnect.
+  reconnect. The last setting chosen is remembered for new windows (see
+  [Preferences](#preferences)).
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
@@ -158,6 +159,19 @@ exists but can't be read or parsed, the Worlds dialog says so and Moolin
 refuses to save over it, so a typo from hand-editing doesn't cost you your
 worlds. Malformed individual entries are skipped with a warning.
 
+## Preferences
+
+App-wide settings (for now, just whether new windows show timestamps) are
+kept in `preferences.json` in the usual per-app config folder:
+
+| OS      | Location                                          |
+| ------- | ------------------------------------------------- |
+| Linux   | `~/.config/Moolin/preferences.json`               |
+| macOS   | `~/Library/Application Support/Moolin/preferences.json` |
+| Windows | `%APPDATA%\Moolin\preferences.json`              |
+
+A missing or unreadable file just means the defaults.
+
 ## Command-line options
 
 | Option              | Effect                                                   |
@@ -190,6 +204,7 @@ on the `PATH`.
 | `src/telnet.ts`           | A telnet session over TCP or TLS, with per-option negotiation handlers    |
 | `src/telnet-protocol.ts`  | Telnet byte-stream parser and command encoding (no I/O)                   |
 | `src/worlds.ts`           | Reading, validating and writing the worlds file                           |
+| `src/preferences.ts`      | Reading and writing app-wide preferences                                  |
 | `src/world-utils.ts`      | World helpers shared by main and renderer (defaults, labels, login templates) |
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
 | `src/session-log.ts`      | Persistent per-world/character logs and their `.times` timestamp sidecar  |

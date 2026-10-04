@@ -6,6 +6,7 @@ import type { TerminalWindow } from "./terminal-window";
 import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
 import { SessionLogRegistry } from "./session-log";
 import { IpcChannels } from "./ipc-channels";
+import { preferencesPath, readPreferences, writePreferences } from "./preferences";
 import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-types";
 import { targetLabel } from "./world-utils";
 import type { ConnectionState } from "./connection-manager";
@@ -39,6 +40,9 @@ if (!isPrimaryInstance) {
 
 const MAX_MRU = 5;
 
+const prefsPath = preferencesPath(app.getPath("userData"));
+const prefs = readPreferences(prefsPath);
+
 const APP_ICON = path.join(__dirname, "..", "icons", "icon-512.png");
 const INDEX_HTML = path.join(__dirname, "..", "src", "index.html");
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
@@ -60,6 +64,8 @@ const windowManager = new WindowManager(
 
 function newTerminalWindow(near?: TerminalWindow): TerminalWindow {
   const terminal = windowManager.createTerminalWindow(near);
+  // Pushed to the renderer once its page loads (see TerminalWindow).
+  terminal.showTimestamps = prefs.showTimestamps;
   buildMenu(terminal);
   return terminal;
 }
@@ -284,6 +290,10 @@ function buildMenu(terminal: TerminalWindow): void {
           click: () => {
             terminal.showTimestamps = !terminal.showTimestamps;
             terminal.send(IpcChannels.terminalToggleTimestamps, terminal.showTimestamps);
+            // The latest choice becomes the default for windows opened later,
+            // in this session or the next.
+            prefs.showTimestamps = terminal.showTimestamps;
+            writePreferences(prefsPath, prefs);
             buildMenu(terminal); // keep the checkbox in sync with the stored state
           },
         },

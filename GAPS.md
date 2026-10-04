@@ -226,7 +226,8 @@ currently discards or never negotiates:
   scrollback search would otherwise have to skip. How it fits together:
   - **Display.** **View > Show Timestamps** toggles a gutter to the left of
     the scrollback (`#gutter` in `src/index.html`, drawn by `renderGutter`
-    in `src/renderer.ts`). It is a separate element kept aligned to the
+    in `src/renderer.ts`); the last choice is saved in `preferences.json`
+    (`src/preferences.ts`) as the default for new windows. It is a separate element kept aligned to the
     viewport rather than an xterm decoration, since decorations are drawn
     inside the terminal's columns. Each stamped line is anchored by an
     xterm marker, which follows the line as the buffer scrolls and goes
