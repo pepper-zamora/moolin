@@ -27,6 +27,18 @@ function getCliWorldsArg(): string | undefined {
   return cliArgs().find((arg) => !arg.startsWith("-"));
 }
 
+// A throwaway test run (scripts/smoke.mjs) that needs its config and log
+// directories isolated from the real ones sets these explicitly, since
+// Electron only honors XDG_CONFIG_HOME/user-dirs.dirs on Linux — on macOS
+// and Windows app.getPath("userData"/"documents") ignores them. Must happen
+// before anything below reads either path.
+if (process.env.MOOLIN_CONFIG_DIR) {
+  app.setPath("userData", process.env.MOOLIN_CONFIG_DIR);
+}
+if (process.env.MOOLIN_DOCUMENTS_DIR) {
+  app.setPath("documents", process.env.MOOLIN_DOCUMENTS_DIR);
+}
+
 const logLevel = getCliLogLevel(process.argv);
 configureLogger(logLevel);
 // Renderer/preload processes are separate OS processes with their own argv

@@ -350,7 +350,7 @@ A missing or unreadable file just means the defaults.
 | `npm run build`     | Typecheck, then bundle main, preload and renderer into `dist/` |
 | `npm run dev`       | Rebuild on change (reload the window to pick it up)      |
 | `npm test`          | Run the unit tests (`src/*.test.ts`, Node's test runner) |
-| `npm run smoke`     | Build, then drive the real app through focus and typing checks (Linux; see below) |
+| `npm run smoke`     | Build, then drive the real app through focus and typing checks (see below) |
 | `npm run typecheck` | Typecheck only                                          |
 | `npm run lint`      | Lint `src/` with [Biome](https://biomejs.dev/) (`npm run lint:fix` to apply safe fixes) |
 | `npm run format`    | Format `src/` with Biome (`npm run format:check` to check without writing) |
@@ -365,11 +365,13 @@ leaves a Moolin you have running and your logs alone), connects it to a
 local test server, and drives it over the Chrome DevTools Protocol:
 clicking, selecting and typing, and checking where keyboard focus goes and
 that typed commands reach the server. Its windows appear on screen while it
-runs (a few seconds). Linux only for now, and it needs a display (use
-`xvfb-run` without one). To check a packaged build instead, point
+runs (a few seconds), so it needs a real display; on headless Linux use
+`xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
+work but hasn't been tried. To check a packaged build instead, point
 `MOOLIN_SMOKE_APP` at its executable, e.g.
 `MOOLIN_SMOKE_APP=release/linux-unpacked/moolin node scripts/smoke.mjs`
-(the AppImage works too).
+(the AppImage works too; on macOS, the binary inside the `.app`'s
+`Contents/MacOS/`).
 
 ### Layout
 

@@ -6,11 +6,18 @@
 // Everything runs in a throwaway sandbox: its own config folder (so its own
 // preferences and single-instance lock, apart from a Moolin you have
 // running), worlds file and Documents folder (for session logs), and a local
-// server to connect to. Windows open on screen while it runs. Linux only,
-// since it sandboxes via XDG_CONFIG_HOME and user-dirs.dirs.
+// server to connect to. Windows open on screen while it runs (so it needs a
+// real display; on headless Linux use xvfb-run).
+//
+// On Linux, the sandbox works by setting XDG_CONFIG_HOME and faking
+// user-dirs.dirs, which Electron's app.getPath("userData"/"documents")
+// honors there. Elsewhere (macOS, Windows) Electron ignores both, so main.ts
+// instead reads MOOLIN_CONFIG_DIR/MOOLIN_DOCUMENTS_DIR directly when set and
+// redirects app.setPath() itself before anything reads those paths.
 //
 // To check a packaged build instead, set MOOLIN_SMOKE_APP to its executable
-// (release/linux-unpacked/moolin, or the AppImage).
+// (release/linux-unpacked/moolin, the AppImage, or the macOS .app's binary
+// inside Contents/MacOS/).
 //
 // Exits non-zero if any check fails.
 import { spawn } from "node:child_process";
@@ -25,10 +32,6 @@ const packagedApp = process.env.MOOLIN_SMOKE_APP && path.resolve(process.env.MOO
 const electron = createRequire(import.meta.url)("electron");
 const TIMEOUT_MS = 10000;
 
-if (process.platform !== "linux") {
-  console.error("smoke: Linux only for now (it sandboxes the app via XDG_CONFIG_HOME)");
-  process.exit(2);
-}
 if (packagedApp && !fs.existsSync(packagedApp)) {
   console.error(`smoke: no app at ${packagedApp}`);
   process.exit(2);
@@ -59,9 +62,26 @@ const documentsDir = path.join(sandbox, "Documents");
 const worldsFile = path.join(sandbox, "worlds");
 fs.mkdirSync(configDir);
 fs.mkdirSync(documentsDir);
-fs.writeFileSync(path.join(configDir, "user-dirs.dirs"), `XDG_DOCUMENTS_DIR="${documentsDir}"\n`);
-const env = { ...process.env, XDG_CONFIG_HOME: configDir };
+
+const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
+// Where Electron actually resolves app.getPath("userData") to, given how
+// each platform's branch below redirects it; used to find DevToolsActivePort.
+let userDataDir;
+if (process.platform === "linux") {
+  // Electron's default userData is $XDG_CONFIG_HOME/<app name>.
+  fs.writeFileSync(path.join(configDir, "user-dirs.dirs"), `XDG_DOCUMENTS_DIR="${documentsDir}"\n`);
+  env.XDG_CONFIG_HOME = configDir;
+  userDataDir = path.join(configDir, "Moolin");
+} else {
+  // macOS/Windows: Electron doesn't consult XDG_CONFIG_HOME or
+  // user-dirs.dirs, so redirect the paths directly (main.ts honors these,
+  // via app.setPath, which takes configDir as the literal userData path —
+  // no app-name subdirectory appended).
+  env.MOOLIN_CONFIG_DIR = configDir;
+  env.MOOLIN_DOCUMENTS_DIR = documentsDir;
+  userDataDir = configDir;
+}
 
 // A server that greets each connection and records what it's sent.
 let received = "";
@@ -226,7 +246,7 @@ const pages = [];
 try {
   launch("--remote-debugging-port=0");
   // Chromium writes the port it picked into the profile folder.
-  const portFile = path.join(configDir, "Moolin", "DevToolsActivePort");
+  const portFile = path.join(userDataDir, "DevToolsActivePort");
   devtoolsPort = await waitFor("the app to start", () =>
     fs.existsSync(portFile) ? Number(fs.readFileSync(portFile, "utf8").split("\n")[0]) : 0,
   );
