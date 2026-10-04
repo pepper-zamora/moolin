@@ -415,8 +415,13 @@ inputArea.addEventListener("input", () => resizeInput());
 // Captured before the value mutates (unlike "input", which fires after), so
 // the pre-edit state can be pushed as an undo step. Consecutive keystrokes
 // coalesce into one step via InputUndoStack's own debounce.
-inputArea.addEventListener("beforeinput", () => {
-  inputUndo.pushTyping(inputSnapshot(), Date.now());
+inputArea.addEventListener("beforeinput", (event) => {
+  // A spelling correction from the context menu is its own undo step.
+  if (event.inputType === "insertReplacementText") {
+    inputUndo.pushDiscrete(inputSnapshot());
+  } else {
+    inputUndo.pushTyping(inputSnapshot(), Date.now());
+  }
   reportUndoState();
 });
 
@@ -582,10 +587,16 @@ document.addEventListener(
 document.addEventListener("contextmenu", (event) => {
   // Leave the Worlds dialog's fields their native context menu.
   if (worldsDialog.isOpen()) return;
-  event.preventDefault();
   // Any selection Copy would act on (see copySelection).
   const hasSelection =
     securityStatus.selectedText() !== "" || term.hasSelection() || inputArea.selectionStart !== inputArea.selectionEnd;
+  // In the input area, Chromium has to see the right-click to find a
+  // misspelled word under the pointer; main shows the menu from there.
+  if (event.target === inputArea) {
+    window.moolin.noteInputContextMenu({ hasSelection });
+    return;
+  }
+  event.preventDefault();
   window.moolin.showContextMenu({ hasSelection });
 });
 

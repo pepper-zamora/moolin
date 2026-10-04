@@ -10,7 +10,13 @@ renames that section to the new version and date.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- Spell checking in the input area, in the system's languages: misspelled
+  words are underlined, and right-clicking one offers suggestions and Add to
+  Dictionary. English dictionaries come with Moolin; on Linux and Windows,
+  other languages' dictionaries are downloaded from Google's servers on
+  first use (see the README's "Not telemetry" section).
 
 ## [0.1.0] - 2026-10-04
 

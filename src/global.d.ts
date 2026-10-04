@@ -29,6 +29,8 @@ declare global {
       };
       openExternal(url: string): void;
       showContextMenu(options: { hasSelection: boolean }): void;
+      // Before a right-click in the input area reaches Chromium (see main.ts).
+      noteInputContextMenu(options: { hasSelection: boolean }): void;
       onCopyRequested(callback: () => void): void;
       onCutRequested(callback: () => void): void;
       onPasteRequested(callback: () => void): void;

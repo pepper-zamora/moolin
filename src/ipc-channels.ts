@@ -20,6 +20,9 @@ export const IpcChannels = {
   terminalReset: "terminal:reset",
   terminalZoom: "terminal:zoom",
   terminalContextMenu: "terminal:contextMenu",
+  // renderer -> main: a right-click in the input area, whose menu main shows
+  // from the webContents' context-menu event (which carries spelling info).
+  terminalInputContextMenu: "terminal:inputContextMenu",
   terminalCopyRequested: "terminal:copyRequested",
   terminalCutRequested: "terminal:cutRequested",
   terminalPasteRequested: "terminal:pasteRequested",

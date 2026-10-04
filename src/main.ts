@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, shell } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, session, shell } from "electron";
 import * as path from "node:path";
 import {
   backupPathFor,
@@ -18,6 +18,7 @@ import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-
 import { targetLabel } from "./world-utils";
 import type { WindowState } from "./connection-manager";
 import { checkForUpdate } from "./update-check";
+import { installBundledDictionaries, pickSpellCheckerLanguages, spellingMenuItems } from "./spellcheck";
 
 function cliArgs(): string[] {
   return app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
@@ -54,6 +55,19 @@ const prefs = readPreferences(prefsPath);
 const APP_ICON = path.join(__dirname, "..", "icons", "icon-512.png");
 const INDEX_HTML = path.join(__dirname, "..", "src", "index.html");
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
+const DICTIONARIES_DIR = path.join(__dirname, "..", "dictionaries");
+
+// Chromium only looks for spelling dictionaries when its session starts, at
+// app ready, so the bundled ones are put in place now (see spellcheck.ts).
+// macOS uses the system's spell checker instead.
+if (isPrimaryInstance && process.platform !== "darwin") {
+  const copied = installBundledDictionaries(
+    DICTIONARIES_DIR,
+    path.join(app.getPath("userData"), "Dictionaries"),
+    (file, error) => log("warn", "spellcheck", "could not install bundled dictionary", file, ":", error.message),
+  );
+  if (copied.length > 0) log("info", "spellcheck", "installed bundled dictionaries:", copied.join(", "));
+}
 
 const windowManager = new WindowManager(
   {
@@ -74,6 +88,7 @@ function newTerminalWindow(near?: TerminalWindow): TerminalWindow {
   const terminal = windowManager.createTerminalWindow(near);
   // Pushed to the renderer once its page loads (see TerminalWindow).
   terminal.showTimestamps = prefs.showTimestamps;
+  terminal.window.webContents.on("context-menu", (_event, params) => showInputContextMenu(terminal, params));
   buildMenu(terminal);
   return terminal;
 }
@@ -514,17 +529,84 @@ ipcMain.on(IpcChannels.shellOpenExternal, (_event, url: string) => {
   if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
 });
 
+// The context menu's editing items. They act through the renderer (like the
+// Edit menu's) rather than as native roles, so cut and paste stay undoable
+// and Copy can take a scrollback selection.
+function editingMenuItems(sender: Electron.WebContents, hasSelection: boolean): Electron.MenuItemConstructorOptions[] {
+  return [
+    { label: "Cut", enabled: hasSelection, click: () => sender.send(IpcChannels.terminalCutRequested) },
+    { label: "Copy", enabled: hasSelection, click: () => sender.send(IpcChannels.terminalCopyRequested) },
+    { label: "Paste", click: () => sender.send(IpcChannels.terminalPasteRequested) },
+    { type: "separator" },
+    { label: "Select All", click: () => sender.send(IpcChannels.terminalSelectAllRequested) },
+  ];
+}
+
 ipcMain.on(IpcChannels.terminalContextMenu, (event, options: { hasSelection: boolean }) => {
   const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-  const template: Electron.MenuItemConstructorOptions[] = [
-    { label: "Cut", enabled: options.hasSelection, click: () => event.sender.send(IpcChannels.terminalCutRequested) },
-    { label: "Copy", enabled: options.hasSelection, click: () => event.sender.send(IpcChannels.terminalCopyRequested) },
-    { label: "Paste", click: () => event.sender.send(IpcChannels.terminalPasteRequested) },
-    { type: "separator" },
-    { label: "Select All", click: () => event.sender.send(IpcChannels.terminalSelectAllRequested) },
-  ];
-  Menu.buildFromTemplate(template).popup({ window });
+  Menu.buildFromTemplate(editingMenuItems(event.sender, options.hasSelection)).popup({ window });
 });
+
+// A right-click in the input area is left to Chromium, which finds the
+// misspelled word under the pointer, if any, and reports it in the
+// webContents' context-menu event. The renderer sends what Copy would act on
+// just before; it's kept here until that event arrives.
+const inputMenuHasSelection = new Map<number, boolean>();
+
+ipcMain.on(IpcChannels.terminalInputContextMenu, (event, options: { hasSelection: boolean }) => {
+  inputMenuHasSelection.set(event.sender.id, options.hasSelection);
+});
+
+function showInputContextMenu(terminal: TerminalWindow, params: Electron.ContextMenuParams): void {
+  // Only the input area: it's the page's one textarea. Other right-clicks
+  // the renderer lets through (the Worlds dialog's fields) get no menu, as
+  // before.
+  if (params.formControlType !== "text-area") return;
+  const contents = terminal.window.webContents;
+  const hasSelection = inputMenuHasSelection.get(contents.id) ?? params.selectionText !== "";
+  inputMenuHasSelection.delete(contents.id);
+  log(
+    "debug",
+    "spellcheck",
+    "input menu: misspelled =",
+    JSON.stringify(params.misspelledWord),
+    "suggestions =",
+    params.dictionarySuggestions,
+  );
+  const spelling: Electron.MenuItemConstructorOptions[] = spellingMenuItems(
+    params.misspelledWord,
+    params.dictionarySuggestions,
+  ).map((item) => {
+    if (item.kind === "replace") return { label: item.word, click: () => contents.replaceMisspelling(item.word) };
+    if (item.kind === "add") {
+      return { label: "Add to Dictionary", click: () => contents.session.addWordToSpellCheckerDictionary(item.word) };
+    }
+    return { label: "No Spelling Suggestions", enabled: false };
+  });
+  const template: Electron.MenuItemConstructorOptions[] =
+    spelling.length > 0 ? [...spelling, { type: "separator" }] : [];
+  template.push(...editingMenuItems(contents, hasSelection));
+  Menu.buildFromTemplate(template).popup({ window: terminal.window });
+}
+
+// Spell check in the system's preferred languages. macOS's own spell checker
+// picks languages by itself.
+function configureSpellChecker(): void {
+  if (process.platform === "darwin") return;
+  const spellSession = session.defaultSession;
+  const languages = pickSpellCheckerLanguages(
+    app.getPreferredSystemLanguages(),
+    spellSession.availableSpellCheckerLanguages,
+  );
+  log("info", "spellcheck", "system languages", app.getPreferredSystemLanguages(), "-> dictionaries", languages);
+  if (languages.length > 0) spellSession.setSpellCheckerLanguages(languages);
+  spellSession.on("spellcheck-dictionary-download-begin", (_event, language) =>
+    log("info", "spellcheck", "downloading dictionary", language),
+  );
+  spellSession.on("spellcheck-dictionary-download-failure", (_event, language) =>
+    log("warn", "spellcheck", "dictionary download failed", language),
+  );
+}
 
 ipcMain.on(IpcChannels.logEmit, (_event, level: Exclude<LogLevel, "none">, scope: string, args: unknown[]) => {
   log(level, scope, ...args);
@@ -541,6 +623,7 @@ if (isPrimaryInstance) {
 
   app.whenReady().then(() => {
     log("debug", "main", "app ready");
+    configureSpellChecker();
     newTerminalWindow();
 
     // Only in packaged builds: running from source shouldn't prompt about

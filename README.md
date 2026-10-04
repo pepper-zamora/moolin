@@ -51,6 +51,12 @@ damage; clear it in Terminal, then open Moolin again:
 xattr -dr com.apple.quarantine /Applications/Moolin.app
 ```
 
+## Not telemetry
+
+Moolin collects nothing about you and reports nothing anywhere. It does make
+a couple of network requests of its own, besides your connections to worlds;
+they're all listed here, with what they send and how to avoid them.
+
 ### The update check
 
 Moolin doesn't update itself. Instead, every time it starts it asks GitHub
@@ -69,6 +75,20 @@ statement](https://docs.github.com/en/site-policy/privacy-policies/github-genera
 To turn the check off, uncheck **Help → Check for Updates at Startup**. You can
 still check by hand any time with **Help → Check for Updates…**. Builds run
 from source never check at startup.
+
+### Spelling dictionaries
+
+On macOS, spell checking uses the system's own spell checker, and nothing is
+downloaded. On Linux and Windows, Moolin uses Chromium's spell checker, which
+needs a dictionary for each language you write in. English dictionaries (US,
+UK, Canadian and Australian) come with Moolin. For any other language your
+system is set to, the dictionary is downloaded the first time, once, from
+Google's servers (Chromium's usual source for them), and kept for later.
+
+That download asks only for the dictionary file, which says which language
+it is; like any website, Google also sees the IP address the request comes
+from, under [Google's privacy policy](https://policies.google.com/privacy).
+To avoid it, set your system's language to English, or use Moolin on macOS.
 
 ## Features
 
@@ -123,6 +143,10 @@ from source never check at startup.
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
   own undo/redo (coalesced typing, and atomic steps for cut/paste).
+- **Spell checking** in the input area, in your system's languages (up to
+  three). Right-click a word underlined in red for suggestions, or to add it
+  to the dictionary. See [Spelling dictionaries](#spelling-dictionaries) for
+  where the dictionaries come from.
 - **Cut, copy and paste** that work against either the scrollback selection or
   the input area, whichever was selected last.
 - **Recent connections** on the Worlds menu, Ctrl+1 to Ctrl+5.

@@ -4,13 +4,15 @@ copyright: Copyright © Moolin contributors
 directories:
   output: release
 # esbuild bundles everything (xterm included) into dist/, so no node_modules
-# ship; the renderer loads src/index.html and the window icon at runtime.
+# ship; the renderer loads src/index.html and the window icon at runtime, and
+# main copies the bundled spelling dictionaries out at startup.
 files:
   - package.json
   - dist/**
   - "!dist/test/**"
   - src/index.html
   - icons/**
+  - dictionaries/*.bdic
 asar: true
 artifactName: moolin-${version}-${os}-${arch}.${ext}
 

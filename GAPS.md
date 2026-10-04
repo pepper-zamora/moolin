@@ -312,8 +312,9 @@ currently discards or never negotiates:
    is available for free in any text input) rather than new design surface.
    Low-hanging fruit, worth doing first regardless of where the rest of
    this list goes. (**Scrollback search** is done, via `addon-search`.
-   **Line timestamps**, once in this tier, are done too; see §8. Their
-   gutter is where later tag marks (§1) could go.)
+   **Spell checking** is done too, in the input area. **Line timestamps**,
+   once in this tier, are done as well; see §8. Their gutter is where later
+   tag marks (§1) could go.)
 2. **Triggers** (match + highlight/gag/send/script actions) and **aliases**
    — the two most-depended-on features; almost nothing else in this list is
    useful without them.

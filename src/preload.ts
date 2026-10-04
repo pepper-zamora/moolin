@@ -57,6 +57,9 @@ contextBridge.exposeInMainWorld("moolin", {
   showContextMenu: (options: { hasSelection: boolean }): void => {
     ipcRenderer.send(IpcChannels.terminalContextMenu, options);
   },
+  noteInputContextMenu: (options: { hasSelection: boolean }): void => {
+    ipcRenderer.send(IpcChannels.terminalInputContextMenu, options);
+  },
   onCopyRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalCopyRequested, () => callback());
   },
