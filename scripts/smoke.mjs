@@ -9,6 +9,9 @@
 // server to connect to. Windows open on screen while it runs. Linux only,
 // since it sandboxes via XDG_CONFIG_HOME and user-dirs.dirs.
 //
+// To check a packaged build instead, set MOOLIN_SMOKE_APP to its executable
+// (release/linux-unpacked/moolin, or the AppImage).
+//
 // Exits non-zero if any check fails.
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
@@ -18,6 +21,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 const ROOT = path.join(import.meta.dirname, "..");
+const packagedApp = process.env.MOOLIN_SMOKE_APP && path.resolve(process.env.MOOLIN_SMOKE_APP);
 const electron = createRequire(import.meta.url)("electron");
 const TIMEOUT_MS = 10000;
 
@@ -25,7 +29,11 @@ if (process.platform !== "linux") {
   console.error("smoke: Linux only for now (it sandboxes the app via XDG_CONFIG_HOME)");
   process.exit(2);
 }
-if (!fs.existsSync(path.join(ROOT, "dist", "main.js"))) {
+if (packagedApp && !fs.existsSync(packagedApp)) {
+  console.error(`smoke: no app at ${packagedApp}`);
+  process.exit(2);
+}
+if (!packagedApp && !fs.existsSync(path.join(ROOT, "dist", "main.js"))) {
   console.error("smoke: no build in dist/; run `npm run smoke`, which builds first");
   process.exit(2);
 }
@@ -69,7 +77,8 @@ const serverPort = server.address().port;
 
 const launched = [];
 function launch(...extraArgs) {
-  const child = spawn(electron, [ROOT, worldsFile, ...extraArgs], { env, stdio: "ignore", detached: true });
+  const [command, ...appArgs] = packagedApp ? [packagedApp] : [electron, ROOT];
+  const child = spawn(command, [...appArgs, worldsFile, ...extraArgs], { env, stdio: "ignore", detached: true });
   launched.push(child);
   return child;
 }

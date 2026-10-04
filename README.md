@@ -264,7 +264,10 @@ local test server, and drives it over the Chrome DevTools Protocol:
 clicking, selecting and typing, and checking where keyboard focus goes and
 that typed commands reach the server. Its windows appear on screen while it
 runs (a few seconds). Linux only for now, and it needs a display (use
-`xvfb-run` without one).
+`xvfb-run` without one). To check a packaged build instead, point
+`MOOLIN_SMOKE_APP` at its executable, e.g.
+`MOOLIN_SMOKE_APP=release/linux-unpacked/moolin node scripts/smoke.mjs`
+(the AppImage works too).
 
 ### Layout
 
