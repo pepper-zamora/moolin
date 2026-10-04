@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, shell } from "electron";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   backupPathFor,
@@ -6,6 +7,7 @@ import {
   readWorldsFile,
   resolveWorldsPath,
   saveWorlds,
+  seedDefaultWorlds,
   updateMru as updateMruState,
 } from "./worlds";
 import { WindowManager } from "./window-manager";
@@ -67,6 +69,19 @@ if (!isPrimaryInstance) {
   app.quit();
 } else {
   log("info", "main", "starting, worldsPath =", worldsPath);
+  // A first-ever launch gets LambdaMOO and its Guest character already set
+  // up, rather than an empty Worlds dialog with nothing to click. Written
+  // once, immediately, rather than left to a read-time fallback, so the ids
+  // it hands out are stable from the very first read (the Worlds dialog's
+  // load, an early connect's MRU update, ...).
+  if (!fs.existsSync(worldsPath)) {
+    try {
+      saveWorlds(worldsPath, seedDefaultWorlds());
+      log("info", "main", "seeded the default world (LambdaMOO) at", worldsPath);
+    } catch (err) {
+      log("warn", "main", "could not seed the default world:", (err as Error).message);
+    }
+  }
 }
 
 const MAX_MRU = 5;

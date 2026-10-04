@@ -203,6 +203,11 @@ each release, and what's changed since the last one.
 
 ## Using Moolin
 
+The first time Moolin runs (no worlds file yet — see below), it starts with
+one world already set up: LambdaMOO, with a Guest character, ready to
+connect to. Deleting it is permanent, the same as deleting anything else you
+add.
+
 Press **Ctrl+O** (**Cmd+O** on macOS) to open the Worlds dialog. Its tree has a **Global** root
 (for settings shared by every world; there are none yet), with each world
 (globe icon) under it and each world's characters (silhouette icon) under
@@ -301,6 +306,9 @@ npm start -- ~/my-worlds.json
 Moolin runs as a single process, so this only takes effect for the first
 launch: launching again while Moolin is running opens a new window that uses
 the running instance's worlds file, whatever path is passed.
+
+If the file doesn't exist yet, Moolin creates it with one world already in
+it — LambdaMOO, with a Guest character — rather than starting empty.
 
 Character passwords are stored in this file **in plain text**.
 

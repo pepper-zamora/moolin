@@ -17,6 +17,8 @@ renames that section to the new version and date.
   font and size, with a live sample of each curated font.
 - A freshly opened window now sizes itself to show 80x25 characters at its
   starting font, centered on screen, instead of a fixed size.
+- A first-ever launch (no worlds file yet) now starts with LambdaMOO and a
+  Guest character already set up, instead of an empty Worlds dialog.
 
 ### Fixed
 
