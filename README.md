@@ -5,8 +5,9 @@ scrollback. Built on Electron and xterm.js (WebGL-rendered), for Linux,
 Windows and macOS.
 
 Moolin merges two earlier clients: moolin v1, which this repository's history
-continues, and Moolin, which contributed its one-window-per-connection design,
-its worlds-and-characters model and dialog, and its input/focus behavior.
+continues, and an older, parallel project, which contributed its
+one-window-per-connection design, its worlds-and-characters model and dialog,
+and its input/focus behavior.
 
 ## Features
 
