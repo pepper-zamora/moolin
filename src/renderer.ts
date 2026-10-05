@@ -15,6 +15,7 @@ import { countLineFeeds } from "./line-feeds";
 import { LiveReplay } from "./live-replay";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import { fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
+import { WordWrapper } from "./word-wrap";
 
 window.addEventListener("error", (event) => {
   window.moolin.log("error", "renderer", "uncaught error:", event.error ?? event.message);
@@ -122,17 +123,132 @@ const securityStatus = new SecurityStatus(() => {
   if (!inputArea.disabled && !findWidget.isOpen() && !modalOpen()) inputArea.focus();
 });
 
+// How long to wait after the last resize event before re-wrapping, so
+// dragging a window's edge doesn't trigger a full-scrollback redraw dozens
+// of times per second — only once, after the size actually settles.
+const RESIZE_REFLOW_DEBOUNCE_MS = 300;
+let resizeReflowTimer: ReturnType<typeof setTimeout> | null = null;
+
 term.onResize(({ cols, rows }) => {
   window.moolin.log("debug", "renderer", "terminal resized to", `${cols}x${rows}`);
   window.moolin.sendResize(cols, rows);
   screenSize.textContent = `${cols}x${rows}`;
+
+  // Word-wrap's resize story, in full, because it's easy to get wrong:
+  //
+  // xterm's own reflow (its internal handling of a resize for ordinary,
+  // non-word-wrapped text) already re-chunks hard-wrapped rows correctly by
+  // column count — that's its normal job, and nothing here needs to touch
+  // it. The problem is specific to OUR padding spaces (see word-wrap.ts):
+  // xterm's reflow treats them as perfectly ordinary content and re-splits
+  // them at the new column width with no idea they were ever meaningful,
+  // landing them at whatever new position the raw cell count works out to
+  // — almost never still a word boundary. Letting xterm reflow our own
+  // padded output, in other words, is exactly how you'd get it wrong.
+  //
+  // The fix: when word-wrap is on, don't let xterm reflow our padded
+  // content at all. Instead, re-derive the *entire* display from scratch,
+  // from the untransformed source (the main process's ScrollbackBuffer,
+  // which only ever stores the original, pre-wrap bytes — see
+  // terminal-window.ts), re-run through a fresh-width WordWrapper. This
+  // reuses applyReset() exactly as a reconnect does: clear the buffer,
+  // replay from raw history. The only thing specific to a resize (as
+  // opposed to a reconnect) is that we ask for a fresh getScrollback()
+  // first, and we try to put the scrollbar back roughly where it was.
+  if (!wordWrapEnabled) return; // xterm's own reflow already handles this case
+  wordWrapper.setCols(cols); // takes effect on the next write regardless of the reflow below
+  if (resizeReflowTimer !== null) clearTimeout(resizeReflowTimer);
+  resizeReflowTimer = setTimeout(() => {
+    resizeReflowTimer = null;
+    void reflowForResize();
+  }, RESIZE_REFLOW_DEBOUNCE_MS);
 });
 screenSize.textContent = `${term.cols}x${term.rows}`;
+
+// Re-renders the whole scrollback at the terminal's current width, for a
+// resize while word-wrap is on (see the long comment in term.onResize
+// above for why this exists at all, instead of just letting xterm reflow).
+//
+// Cost and correctness, read before changing this:
+//  - This re-fetches and re-writes the ENTIRE scrollback (up to 100,000
+//    lines — see ScrollbackBuffer), not just what's on screen. That's a
+//    deliberate v1 simplification, not an oversight: a lazy/virtualized
+//    version would need to track, per region of the buffer, whether it's
+//    already been re-wrapped for the current width, and recompute only
+//    what actually scrolls into view. Doing the whole thing is simpler and
+//    correct, at the cost of a visible pause on resize that scales with
+//    scrollback size. Revisit only if that pause proves genuinely
+//    bothersome in practice.
+//  - Scroll position is restored *approximately*, as a proportion of the
+//    buffer (how far down you were, 0 to 1, before vs. after), not
+//    anchored to the exact logical line that was on screen. An exact
+//    anchor would need per-logical-line marker tracking carried through
+//    the clear-and-replay, since reflowing at a new width changes how many
+//    visual rows each logical line occupies, so a plain row-index anchor
+//    would drift. See TODO.md — this is flagged there as needing a harder
+//    look before it's accepted as the long-term answer, not a settled
+//    design decision.
+//  - This only ever reads from the main process's scrollback/log; it never
+//    writes back to them. The session log on disk and any other window
+//    showing the same connection are completely untouched — this is a
+//    per-window, renderer-side *display* operation, nothing more.
+async function reflowForResize(): Promise<void> {
+  const buffer = term.buffer.active;
+  const scrollFraction = buffer.length > 0 ? buffer.viewportY / buffer.length : 0;
+  const replay = await window.moolin.getScrollback();
+  applyReset(replay);
+  const newLength = term.buffer.active.length;
+  term.scrollToLine(Math.round(scrollFraction * newLength));
+}
 
 try {
   term.loadAddon(new WebglAddon());
 } catch {
   // Falls back to the default DOM renderer if WebGL is unavailable.
+}
+
+// --- Word wrap ---------------------------------------------------------------
+// Wraps long server lines at word boundaries for display, resolved per
+// connection from Global/World/Character (see connection-manager.ts and
+// word-wrap.ts's own module comment for the actual wrapping mechanism and
+// why it's copy-safe). This section only owns *when* WordWrapper runs and
+// on what — the wrapping logic itself lives entirely in word-wrap.ts.
+//
+// IMPORTANT: this is the most complex piece of logic in the renderer, and
+// the one most likely to come back from review with a correctness question.
+// Read word-wrap.ts's module comment first; the notes below are about the
+// three integration points specific to *this* file, not the algorithm.
+let wordWrapEnabled = false;
+const wordWrapper = new WordWrapper(term.cols);
+
+// A word still being accumulated when a chunk ends (e.g. the server hasn't
+// sent the space or newline that would end it yet) is held inside
+// `wordWrapper`, not emitted — see WordWrapper.flushPending's own comment
+// for why. If the server then goes quiet (most commonly: a prompt with no
+// trailing newline, like "Password:"), nothing will arrive to end that
+// word, so it would otherwise never reach the screen at all. This timer is
+// the renderer's side of that contract: cleared and re-armed on every
+// chunk, so it only fires once output has actually gone quiet, at which
+// point whatever's held is flushed as-is. Zero-delay rather than some
+// fixed "typing pause" guess, since the actual requirement is just "after
+// this task's other synchronous work, if nothing else arrived in the
+// meantime" — a real continuation arriving later cancels and re-arms it
+// before it ever fires.
+let wordWrapFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+// The single place word-wrap actually runs. A pass-through when the
+// resolved setting is off, so the two code paths (wrap / no-wrap) only ever
+// diverge here, not in every caller.
+function transformForWrite(data: string | Uint8Array): string | Uint8Array {
+  if (!wordWrapEnabled) return data;
+  if (wordWrapFlushTimer !== null) clearTimeout(wordWrapFlushTimer);
+  const out = wordWrapper.transform(data);
+  wordWrapFlushTimer = setTimeout(() => {
+    wordWrapFlushTimer = null;
+    const held = wordWrapper.flushPending();
+    if (held) term.write(held);
+  }, 0);
+  return out;
 }
 
 // --- Line timestamps -------------------------------------------------------
@@ -160,10 +276,14 @@ let timestampsShown = false;
 const stampQueue: Array<number | null> = [];
 
 // Writes a chunk and queues `time` (or null) for each line it contains, so the
-// onLineFeed handler stamps them in step.
+// onLineFeed handler stamps them in step. Line-feed counting always runs on
+// the original, untransformed `data` — word-wrap only ever inserts spaces
+// (never a line feed) and holds back an incomplete trailing word instead of
+// emitting it early (see WordWrapper), so the two can never disagree about
+// how many real lines a chunk contains.
 function writeStamped(data: string | Uint8Array, time: number | null): void {
   for (let i = 0, n = countLineFeeds(data); i < n; i++) stampQueue.push(time);
-  term.write(data);
+  term.write(transformForWrite(data));
 }
 
 // 12-hour, minute resolution, with a single-letter am/pm suffix: "9:05a",
@@ -626,9 +746,23 @@ document.addEventListener("contextmenu", (event) => {
 // on connect), queuing the recorded arrival time for each of its lines so the
 // onLineFeed handler restamps them. Lines with no recorded time (null — old
 // history, or Moolin's own lines) get no stamp (see GAPS.md §8).
+//
+// Every call to writeReplay represents a genuinely fresh start of the
+// content stream (the initial page-load catch-up, a reconnect's
+// applyReset, or a resize's reflowForResize), never a mid-stream
+// continuation — so resetting the word-wrap state here, unconditionally,
+// is always correct: there is no "old" in-progress word that still belongs
+// to whatever comes next.
 function writeReplay(replay: ScrollbackReplay): void {
+  wordWrapEnabled = replay.wordWrap;
+  if (wordWrapFlushTimer !== null) {
+    clearTimeout(wordWrapFlushTimer);
+    wordWrapFlushTimer = null;
+  }
+  wordWrapper.reset();
+  wordWrapper.setCols(term.cols);
   for (const time of replay.times) stampQueue.push(time);
-  for (const chunk of replay.chunks) term.write(chunk);
+  for (const chunk of replay.chunks) term.write(transformForWrite(chunk));
 }
 
 // Starts over from a replay: the connect-time switch to a world's logged
@@ -686,6 +820,12 @@ function applyConnectionState(state: WindowState): void {
   const connected = state.status === "connected";
   document.title = connected && state.label ? `${state.label} - ${APP_NAME}` : APP_NAME;
   inputArea.disabled = !connected;
+  // Also set by writeReplay from the same underlying value (see
+  // ScrollbackReplay.wordWrap's own comment for why it's duplicated there):
+  // this is the two independent startup IPC calls' *other* half, needed so
+  // that live writes arriving after the initial replay keep using the right
+  // value even if this one resolves second.
+  wordWrapEnabled = state.wordWrap;
   statusBar.dataset.status = state.status;
   statusText.textContent =
     state.status === "connected"

@@ -7,6 +7,15 @@ type LogFn = (level: Exclude<LogLevel, "none">, ...args: unknown[]) => void;
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected";
 
+// The cascading settings (see world-utils.ts's resolveTriState) resolved for
+// one connection, snapshotted at connect time — same timing as everything
+// else a World/Character setting controls (see README's "a connection keeps
+// the settings its world had when it connected").
+export interface ResolvedSettings {
+  wordWrap: boolean;
+  echoCommands: boolean;
+}
+
 // What the renderer is told about its window's connection.
 export interface ConnectionState {
   status: ConnectionStatus;
@@ -17,6 +26,9 @@ export interface ConnectionState {
   // The TLS handshake's details once connected over TLS; null on a
   // plaintext connection, and while connecting or disconnected.
   tls: TlsInfo | null;
+  // Resolved from Global/World/Character at connect time; false while
+  // disconnected.
+  wordWrap: boolean;
 }
 
 // What the renderer is told about its window: the connection, plus whether
@@ -62,6 +74,7 @@ export class ConnectionManager {
   private target: ConnectTarget | null = null;
   private connected = false;
   private tlsInfo: TlsInfo | null = null;
+  private resolved: ResolvedSettings | null = null;
   // The window's current size, applied to each new session so NAWS reports
   // it from the start rather than the 80x24 default.
   private cols = 80;
@@ -83,7 +96,15 @@ export class ConnectionManager {
       label: this.target ? targetLabel(this.target.world, this.target.character) : null,
       address: this.target ? `${this.target.world.host.trim()}:${this.target.world.port}` : null,
       tls: this.connected ? this.tlsInfo : null,
+      wordWrap: this.resolved?.wordWrap ?? false,
     };
+  }
+
+  // Whether this connection should echo typed commands (see the telnetInput
+  // IPC handler in main.ts); resolved from Global/World/Character at connect
+  // time, same as wordWrap in getState().
+  echoCommandsEnabled(): boolean {
+    return this.resolved?.echoCommands ?? true;
   }
 
   // Whether the telnet session is fully established (not just "a connect
@@ -99,7 +120,7 @@ export class ConnectionManager {
     return this.session !== null;
   }
 
-  connect(target: ConnectTarget): void {
+  connect(target: ConnectTarget, resolved: ResolvedSettings = { wordWrap: false, echoCommands: true }): void {
     const { world, character } = target;
     this.session?.disconnect();
     const label = targetLabel(world, character);
@@ -110,6 +131,7 @@ export class ConnectionManager {
     this.target = target;
     this.connected = false;
     this.tlsInfo = null;
+    this.resolved = resolved;
     const host = world.host.trim();
     const port = world.port;
     this.log("info", "connecting to", `${host}:${port}`, `(${label})`, world.tls ? "over TLS" : "");
@@ -143,6 +165,7 @@ export class ConnectionManager {
           this.target = null;
           this.connected = false;
           this.tlsInfo = null;
+          this.resolved = null;
           this.handlers.onStateChange();
           this.handlers.onMessage(reason ? red(`connection error: ${reason}`) : yellow("disconnected"));
           if (certificateRejected) {

@@ -1,9 +1,23 @@
 // World/character helpers shared by the main process and the renderer, so
 // they must stay free of Node and Electron imports.
-import type { Character, World } from "./worlds-types";
+import type { Character, GlobalSettings, TriState, World } from "./worlds-types";
 
 export const DEFAULT_LOGIN_TEMPLATE = 'co "{{character}}" {{password}}\\r';
 export const DEFAULT_PORT = 7777;
+
+// Word wrap starts off (today's plain column-wrap behavior is unchanged
+// until someone opts in); echo keeps its long-standing default-on behavior.
+export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = { wordWrap: false, echoCommands: true };
+
+// Character → World → Global: the first override that isn't "inherit" wins,
+// else Global's plain boolean. Callers pass overrides most-specific first.
+export function resolveTriState(global: boolean, ...overrides: TriState[]): boolean {
+  for (const override of overrides) {
+    if (override === "on") return true;
+    if (override === "off") return false;
+  }
+  return global;
+}
 
 export function newWorld(id: string): World {
   return {
@@ -15,13 +29,14 @@ export function newWorld(id: string): World {
     tlsAllowUntrusted: false,
     autoLogin: true,
     loginTemplate: DEFAULT_LOGIN_TEMPLATE,
-    echoCommands: true,
+    echoCommands: "inherit",
+    wordWrap: "inherit",
     characters: [],
   };
 }
 
 export function newCharacter(id: string): Character {
-  return { id, name: "New Character", password: "" };
+  return { id, name: "New Character", password: "", echoCommands: "inherit", wordWrap: "inherit" };
 }
 
 export function isValidPort(port: unknown): port is number {

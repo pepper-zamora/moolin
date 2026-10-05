@@ -1,7 +1,26 @@
+// A cascading setting's override at the World or Character level: defer to
+// whatever the level above it resolves to, or force it on/off regardless.
+// Global itself has nothing above it, so it's just a plain boolean.
+export type TriState = "inherit" | "on" | "off";
+
+// App-wide defaults for settings that World and Character can each override
+// (see TriState and resolveTriState in world-utils.ts). Lives in the worlds
+// file (WorldsState) rather than preferences.json, since it's edited in the
+// Worlds dialog's Global pane, alongside the World/Character overrides it's
+// the fallback for.
+export interface GlobalSettings {
+  // Wrap long server lines at word boundaries for display (see word-wrap.ts).
+  wordWrap: boolean;
+  // Echo typed commands back into the scrollback (in cyan).
+  echoCommands: boolean;
+}
+
 export interface Character {
   id: string;
   name: string;
   password: string;
+  echoCommands: TriState;
+  wordWrap: TriState;
 }
 
 export interface World {
@@ -19,7 +38,8 @@ export interface World {
   loginTemplate: string;
   // Echo typed commands back into the scrollback (in cyan). Turn off for
   // servers that echo your input themselves, to avoid seeing it twice.
-  echoCommands: boolean;
+  echoCommands: TriState;
+  wordWrap: TriState;
   characters: Character[];
 }
 
@@ -40,6 +60,7 @@ export interface ConnectTarget {
 // worlds came from the backup instead (see readWorldsFile).
 export interface WorldsLoadResult {
   worlds: World[];
+  globalSettings: GlobalSettings;
   error?: string;
   warning?: string;
 }

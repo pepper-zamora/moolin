@@ -1,4 +1,4 @@
-import type { World, WorldsLoadResult } from "./worlds-types";
+import type { GlobalSettings, World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { LogLevel } from "./logger";
@@ -9,7 +9,7 @@ declare global {
     moolin: {
       worlds: {
         load(): Promise<WorldsLoadResult>;
-        save(worlds: World[]): Promise<{ error?: string }>;
+        save(worlds: World[], globalSettings: GlobalSettings): Promise<{ error?: string }>;
         onOpen(callback: (options: { createNew: boolean }) => void): void;
         onChanged(callback: () => void): void;
       };

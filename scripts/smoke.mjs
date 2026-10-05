@@ -83,9 +83,13 @@ if (process.platform === "linux") {
   userDataDir = configDir;
 }
 
-// A server that greets each connection and records what it's sent.
+// A server that greets each connection and records what it's sent. Also
+// keeps the latest socket around so a check can push arbitrary data to the
+// client on demand (see the word-wrap check below).
 let received = "";
+let latestSocket = null;
 const server = net.createServer((socket) => {
+  latestSocket = socket;
   socket.on("data", (data) => {
     received += data.toString();
   });
@@ -194,6 +198,33 @@ class Page {
     await sleep(150);
   }
 
+  // Drags from just inside the scrollback's top-left corner to just inside
+  // its bottom-right, selecting every row currently visible — used instead
+  // of Select All (Ctrl+A), which only ever reaches the renderer through a
+  // real Electron menu click, not reproducible over CDP alone. Many small
+  // mousemove steps, not a single jump to the end point: xterm's selection
+  // tracking extends row by row as the mouse crosses each one, so a coarse
+  // drag (too few intermediate points) can under-select past wherever the
+  // last step happened to land.
+  async selectAllVisible() {
+    const rect = await this.evaluate(
+      `(() => { const r = document.querySelector("#terminal .xterm-screen").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`,
+    );
+    const from = { x: rect.x + 2, y: rect.y + 2 };
+    const to = { x: rect.x + rect.width - 2, y: rect.y + rect.height - 2 };
+    const steps = 30;
+    await this.mouse("mousePressed", from);
+    for (let i = 1; i <= steps; i++) {
+      await this.mouse("mouseMoved", {
+        x: from.x + ((to.x - from.x) * i) / steps,
+        y: from.y + ((to.y - from.y) * i) / steps,
+      });
+      await sleep(10); // a real frame between steps, not just rapid-fire events
+    }
+    await this.mouse("mouseReleased", to);
+    await sleep(150);
+  }
+
   async key(key, code, keyCode, modifiers = 0) {
     for (const type of ["rawKeyDown", "keyUp"]) {
       await this.call("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: keyCode, modifiers });
@@ -260,6 +291,11 @@ try {
   console.log("smoke: connected window");
   await check("connects to a world", async () => {
     await main.evaluate(
+      // wordWrap is forced on here (rather than just for its own check,
+      // below) so that check can reuse this same connection instead of
+      // opening a second window mid-run — word wrap only affects how
+      // server output is displayed, so it doesn't interfere with any of
+      // the other checks that share this connection.
       `window.moolin.connect(${JSON.stringify({
         id: "smoke",
         name: "Smoke Test",
@@ -269,7 +305,8 @@ try {
         tlsAllowUntrusted: false,
         autoLogin: false,
         loginTemplate: "",
-        echoCommands: true,
+        echoCommands: "on",
+        wordWrap: "on",
         characters: [],
       })}, null)`,
     );
@@ -297,6 +334,52 @@ try {
     await main.doubleClickScrollback();
     expectEqual(await main.activeElement(), "input-area", "focus after the double-click");
     await typingReachesServer(main, "after double-click");
+  });
+
+  // The concrete regression test for word wrap's one hard requirement: a
+  // line from the server must always copy/paste back out as one line, never
+  // split by an inserted line break. Word wrap works by padding a row with
+  // spaces until xterm's own column-overflow wrap lands on a word boundary
+  // (see word-wrap.ts) — this only matters at all if that line actually
+  // gets wrapped onto multiple visual rows, so the line below is built long
+  // enough (several "words" with no real line anywhere near this wide) to
+  // wrap at least once on any reasonable window width.
+  //
+  // The drag-to-select-everything step (selectAllVisible) is simulated mouse
+  // input over CDP, which — independent of anything word wrap does — has
+  // proven flaky in practice: the simulated drag itself occasionally selects
+  // short. Retried a few times rather than chasing the exact CDP timing
+  // quirk, the same way waitFor() already tolerates other asynchronous
+  // flakiness in this file.
+  //
+  // The comparison normalizes runs of spaces to a single space before
+  // comparing. Word wrap's padding (see word-wrap.ts) lands extra spaces at
+  // the exact point where xterm wraps the row, so the copied text legitimately
+  // has more whitespace there than the original line did — that's an accepted
+  // cosmetic side effect of reusing xterm's own wrap-triggered copy join. What
+  // actually matters, the hard requirement this check exists to enforce, is
+  // that no newline got inserted into the line: normalizing whitespace before
+  // comparing still catches that (a real line split adds a "\n", which this
+  // normalization never touches), while not failing on the padding itself.
+  await check("a word-wrapped long line still copies back as exactly one line", async () => {
+    const longLine = Array.from({ length: 15 }, (_, i) => `wordNumber${i}IsDeliberatelyLong`).join(" ");
+    const normalize = (text) => text.replace(/ +/g, " ");
+    if (!latestSocket) throw new Error("no server socket to write the long line to");
+    latestSocket.write(`${longLine}\r\n`);
+    await sleep(300); // let it render (and, if wrapped, actually wrap)
+
+    let clipboard = "";
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await main.selectAllVisible();
+      await main.key("c", "KeyC", 67, 2 /* Ctrl */);
+      await sleep(150);
+      clipboard = await main.evaluate("window.moolin.clipboard.readText()");
+      if (normalize(clipboard).includes(normalize(longLine))) return;
+      await sleep(200);
+    }
+    throw new Error(
+      `expected the clipboard to contain the line unbroken after 3 attempts; got ${JSON.stringify(clipboard.slice(0, 500))}`,
+    );
   });
 
   // Launching again opens a second window in the running instance; it starts

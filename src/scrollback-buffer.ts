@@ -14,6 +14,10 @@ export interface ScrollbackReplay {
   // or reset numbered at or below it is already reflected here (see
   // TerminalWindow).
   seq: number;
+  // Resolved at connect time (see ConnectionManager.getState); carried here
+  // too so the renderer's very first replay is correctly wrapped regardless
+  // of which of its two independent startup IPC calls resolves first.
+  wordWrap: boolean;
 }
 
 function byteLength(data: TerminalChunk): number {

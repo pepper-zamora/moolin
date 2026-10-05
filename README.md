@@ -81,6 +81,10 @@ from source never check at startup.
   75% of it instead.
 - **Worlds and characters.** Save worlds (host, port, TLS) and the characters
   you play on each, then connect to a world, or to a world as a character.
+- **Word wrap.** Off by default; turn it on in the Worlds dialog's Global
+  Settings tab (with a World or Character able to override it) to wrap long
+  server lines at word boundaries instead of xterm's default mid-word
+  column wrap. See [Word wrap](#word-wrap) below.
 - **Auto-login.** Connecting as a character can send a login command built
   from a per-world template, e.g. `co "{{character}}" {{password}}\r`.
 - **TLS, explicitly.** Each world either uses TLS or doesn't; Moolin never
@@ -208,21 +212,28 @@ one world already set up: LambdaMOO, with a Guest character, ready to
 connect to. Deleting it is permanent, the same as deleting anything else you
 add.
 
-Press **Ctrl+O** (**Cmd+O** on macOS) to open the Worlds dialog. Its tree has a **Global** root
-(for settings shared by every world; there are none yet), with each world
-(globe icon) under it and each world's characters (silhouette icon) under
-that. **New World** adds a world; fill in its host and port. With a world or
-one of its characters selected, **New Character** adds a character to that
-world (as does right-clicking a world, or Shift+F10). Select a world or
-character and press **Connect** (or Enter, or double-click).
+Press **Ctrl+O** (**Cmd+O** on macOS) to open the Worlds dialog. Its tree has a **Global** root,
+with each world (globe icon) under it and each world's characters (silhouette
+icon) under that. **New World** adds a world; fill in its host and port. With
+a world or one of its characters selected, **New Character** adds a character
+to that world (as does right-clicking a world, or Shift+F10). Select a world
+or character and press **Connect** (or Enter, or double-click).
 
 The selected item's details are in tabs to the right of the tree; for now
 there is just **Settings**, with more (such as triggers) to come. When the
 tabs don't fit on one row, ‹ › buttons at the right end scroll through them.
 
-A connection keeps the settings its world had when it connected: changes
-saved in the Worlds dialog, including **Echo typed commands into the
-scrollback** and the world's name, apply to windows already connected to that
+Global's Settings tab holds two app-wide defaults — **Wrap long lines at
+word boundaries** and **Echo typed commands into the scrollback** — that a
+World or a Character can each override: their own Settings tab offers
+**Inherit** (use whatever the level above resolves to), **On** or **Off** for
+both. Character wins over World wins over Global. Word-wrap wraps long
+server lines at word boundaries instead of mid-word, without ever changing
+what a line copies as — see [Word wrap](#word-wrap) below.
+
+A connection keeps the settings its world and character had when it
+connected: changes saved in the Worlds dialog, including these two cascading
+settings and the world's name, apply to windows already connected to that
 world only once they reconnect.
 
 Type commands in the input area at the bottom; the scrollback above is output
@@ -245,6 +256,24 @@ sends the world's login command once connected. In the template:
 
 Nothing else is added, so end the template with `\r` (most servers) or
 `\r\n`. The default is `co "{{character}}" {{password}}\r`.
+
+### Word wrap
+
+xterm (like most terminals) wraps a line that's too long for the window at
+the column edge, mid-word if that's where it lands. Turning word wrap on
+(Global, World or Character — see [Using Moolin](#using-moolin) above)
+wraps at the last word boundary that fits instead, without changing what the
+line copies as: selecting and copying a wrapped line still gives you back
+exactly the one line the server sent, never split by an inserted line break.
+That's done by padding the row with spaces until xterm's own column wrap
+lands exactly on the word boundary, rather than by Moolin inserting a break
+of its own — xterm ends up doing the actual wrapping either way, just where
+word wrap asks it to.
+
+Resizing the window re-wraps already-displayed text to the new width if word
+wrap is on; this redraws the whole scrollback (debounced until the resize
+settles), so a very long scrollback may pause briefly while it does, and the
+scroll position afterward is only approximately preserved.
 
 ### Keyboard shortcuts
 

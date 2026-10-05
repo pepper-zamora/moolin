@@ -24,6 +24,20 @@ renames that section to the new version and date.
   build:font` rebuilds it from `font/private-build-plans.toml`).
 - The status bar shows the terminal's current size in characters (e.g.
   `80x25`), next to the logging indicator.
+- Word wrap: an opt-in Global/World/Character setting (Inherit/On/Off,
+  Character overrides World overrides Global) that wraps long server lines
+  at word boundaries for display, without changing what a line copies as.
+  Off by default. The Worlds dialog's Global Settings tab also gained its
+  first real setting, **Echo typed commands into the scrollback**, promoted
+  from a World-only checkbox to the same Global/World/Character cascade.
+
+### Changed
+
+- **Breaking:** `World.echoCommands` in the worlds file is now a tri-state
+  string (`"inherit"`/`"on"`/`"off"`) instead of a plain boolean, to support
+  the cascading setting above. An older Moolin can't read a worlds file
+  saved by this version; existing files are migrated automatically on read
+  (`true` → `"on"`, `false` → `"off"`).
 
 ### Fixed
 

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { World, WorldsLoadResult } from "./worlds-types";
+import type { GlobalSettings, World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
 import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
 import type { ScrollbackReplay } from "./scrollback-buffer";
@@ -15,7 +15,8 @@ const currentLogLevel = getCliLogLevel(process.argv);
 contextBridge.exposeInMainWorld("moolin", {
   worlds: {
     load: (): Promise<WorldsLoadResult> => ipcRenderer.invoke(IpcChannels.worldsLoad),
-    save: (worlds: World[]): Promise<{ error?: string }> => ipcRenderer.invoke(IpcChannels.worldsSave, worlds),
+    save: (worlds: World[], globalSettings: GlobalSettings): Promise<{ error?: string }> =>
+      ipcRenderer.invoke(IpcChannels.worldsSave, worlds, globalSettings),
     onOpen: (callback: (options: { createNew: boolean }) => void): void => {
       ipcRenderer.on(IpcChannels.worldsOpen, (_event, options: { createNew: boolean }) => callback(options));
     },

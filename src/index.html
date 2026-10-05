@@ -102,12 +102,13 @@
               </p>
             </div>
 
-            <div id="global-pane" class="pane" hidden>
-              <p class="placeholder">
+            <form id="global-pane" class="pane" hidden>
+              <p class="hint">
                 Settings here apply to every world and character unless the world or character sets its own.
-                There are no global settings yet.
               </p>
-            </div>
+              <label class="check"><input name="wordWrap" type="checkbox" /> Wrap long lines at word boundaries</label>
+              <label class="check"><input name="echoCommands" type="checkbox" /> Echo typed commands into the scrollback</label>
+            </form>
 
             <form id="world-pane" class="pane" hidden>
               <label>Name <input name="name" type="text" spellcheck="false" /></label>
@@ -123,7 +124,20 @@
                 {{character}} and {{password}} are replaced with the character's name and password. \r sends a
                 carriage return, \n a line feed, \\ a backslash.
               </p>
-              <label class="check"><input name="echoCommands" type="checkbox" /> Echo typed commands into the scrollback</label>
+              <label>Echo typed commands into the scrollback
+                <select name="echoCommands">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label>Wrap long lines at word boundaries
+                <select name="wordWrap">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
             </form>
 
             <form id="character-pane" class="pane" hidden>
@@ -134,6 +148,20 @@
                   <input name="password" type="password" spellcheck="false" />
                   <button id="show-password-btn" type="button">Show</button>
                 </span>
+              </label>
+              <label>Echo typed commands into the scrollback
+                <select name="echoCommands">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label>Wrap long lines at word boundaries
+                <select name="wordWrap">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
               </label>
             </form>
 

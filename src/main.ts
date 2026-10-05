@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   backupPathFor,
+  parseGlobalSettings,
   parseWorld,
   readWorldsFile,
   resolveWorldsPath,
@@ -23,8 +24,8 @@ import {
   type Preferences,
 } from "./preferences";
 import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-types";
-import { targetLabel } from "./world-utils";
-import type { WindowState } from "./connection-manager";
+import { resolveTriState, targetLabel } from "./world-utils";
+import type { ResolvedSettings, WindowState } from "./connection-manager";
 import { checkForUpdate } from "./update-check";
 import { fontFamilyFor } from "./fonts";
 
@@ -148,13 +149,32 @@ function mruTargets(): ConnectTarget[] {
   return targets.slice(0, MAX_MRU);
 }
 
+// Resolves Global/World/Character into what this connection actually uses,
+// snapshotted once at connect time (see ConnectionManager.connect).
+function resolveConnectionSettings(target: ConnectTarget): ResolvedSettings {
+  const { state } = readWorldsFile(worldsPath);
+  return {
+    wordWrap: resolveTriState(
+      state.globalSettings.wordWrap,
+      target.character?.wordWrap ?? "inherit",
+      target.world.wordWrap,
+    ),
+    echoCommands: resolveTriState(
+      state.globalSettings.echoCommands,
+      target.character?.echoCommands ?? "inherit",
+      target.world.echoCommands,
+    ),
+  };
+}
+
 // A window holds at most one connection. Connecting from a window that
 // already has one opens the new connection in a window of its own.
 function connectOrNewWindow(terminal: TerminalWindow, target: ConnectTarget): void {
+  const resolved = resolveConnectionSettings(target);
   if (terminal.connection.isActive()) {
-    newTerminalWindow(terminal).connection.connect(target);
+    newTerminalWindow(terminal).connection.connect(target, resolved);
   } else {
-    terminal.connection.connect(target);
+    terminal.connection.connect(target, resolved);
   }
 }
 
@@ -444,25 +464,29 @@ ipcMain.handle(IpcChannels.worldsLoad, (): WorldsLoadResult => {
       `instead. The next change is saved as ${path.basename(worldsPath)}, and the unreadable file is kept ` +
       `beside it, renamed to ${path.basename(worldsPath)}.unreadable-<date>.`
     : undefined;
-  return { worlds: state.worlds, error, warning };
+  return { worlds: state.worlds, globalSettings: state.globalSettings, error, warning };
 });
 
-ipcMain.handle(IpcChannels.worldsSave, (event, rawWorlds: unknown[]): { error?: string } => {
-  const worlds = rawWorlds.map(parseWorld).filter((w): w is World => w !== null);
-  try {
-    saveWorlds(worldsPath, worlds);
-  } catch (err) {
-    const error = `Could not save ${worldsPath}: ${(err as Error).message}`;
-    log("error", "worlds", error);
-    return { error };
-  }
-  log("debug", "worlds", "saved", worlds.length, "world(s) to", worldsPath);
-  for (const terminal of windowManager.all()) {
-    if (terminal.window.webContents.id !== event.sender.id) terminal.send(IpcChannels.worldsChanged);
-  }
-  rebuildAllMenus(); // names may have changed, which affects MRU labels
-  return {};
-});
+ipcMain.handle(
+  IpcChannels.worldsSave,
+  (event, rawWorlds: unknown[], rawGlobalSettings: unknown): { error?: string } => {
+    const worlds = rawWorlds.map(parseWorld).filter((w): w is World => w !== null);
+    const globalSettings = parseGlobalSettings(rawGlobalSettings);
+    try {
+      saveWorlds(worldsPath, worlds, globalSettings);
+    } catch (err) {
+      const error = `Could not save ${worldsPath}: ${(err as Error).message}`;
+      log("error", "worlds", error);
+      return { error };
+    }
+    log("debug", "worlds", "saved", worlds.length, "world(s) to", worldsPath);
+    for (const terminal of windowManager.all()) {
+      if (terminal.window.webContents.id !== event.sender.id) terminal.send(IpcChannels.worldsChanged);
+    }
+    rebuildAllMenus(); // names may have changed, which affects MRU labels
+    return {};
+  },
+);
 
 // The Worlds dialog's delete confirmations.
 ipcMain.handle(IpcChannels.dialogConfirm, (event, message: string, detail?: string): Promise<boolean> => {
@@ -511,8 +535,7 @@ ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
   // not at all while the server has taken over echoing (password prompts), nor
   // for a world set to not echo commands (one that echoes input itself).
   const { echoed } = terminal.connection.sendLine(text);
-  const echoCommands = terminal.connection.getConnected()?.world.echoCommands ?? true;
-  if (echoed && echoCommands) {
+  if (echoed && terminal.connection.echoCommandsEnabled()) {
     terminal.writeStatus(`\x1b[36m${text.replace(/\n/g, "\r\n")}\x1b[0m\r\n`);
   }
 });
@@ -532,7 +555,7 @@ ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRe
 
 ipcMain.handle(
   IpcChannels.terminalGetScrollback,
-  (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0 },
+  (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0, wordWrap: false },
 );
 
 // A freshly opened (non-cascaded) window's one-shot report of how big its
@@ -568,7 +591,14 @@ ipcMain.handle(IpcChannels.preferencesSave, (event, partial: Partial<Preferences
 ipcMain.handle(
   IpcChannels.connectionGetState,
   (event): WindowState =>
-    terminalFor(event)?.getState() ?? { status: "disconnected", label: null, address: null, tls: null, logging: false },
+    terminalFor(event)?.getState() ?? {
+      status: "disconnected",
+      label: null,
+      address: null,
+      tls: null,
+      wordWrap: false,
+      logging: false,
+    },
 );
 
 // The clipboard module is unavailable to the sandboxed preload/renderer

@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import {
   backupPathFor,
+  parseGlobalSettings,
   parseWorld,
   readWorldsFile,
   resolveWorldsPath,
@@ -12,7 +13,7 @@ import {
   seedDefaultWorlds,
   updateMru,
 } from "./worlds";
-import { DEFAULT_LOGIN_TEMPLATE, isConnectable, newWorld } from "./world-utils";
+import { DEFAULT_GLOBAL_SETTINGS, DEFAULT_LOGIN_TEMPLATE, isConnectable, newWorld } from "./world-utils";
 
 function withTempDir(fn: (dir: string) => void): void {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-worlds-test-"));
@@ -39,7 +40,8 @@ test("parseWorld fills in defaults for fields missing from an older record", () 
     tlsAllowUntrusted: false,
     autoLogin: false,
     loginTemplate: DEFAULT_LOGIN_TEMPLATE,
-    echoCommands: true,
+    echoCommands: "inherit",
+    wordWrap: "inherit",
     characters: [],
   });
 });
@@ -53,10 +55,16 @@ test("parseWorld reads a fully-populated record, including characters", () => {
     tls: false,
     autoLogin: true,
     loginTemplate: "co {{character}} {{password}}\\r",
-    echoCommands: false,
-    characters: [{ id: "c", name: "Cowpernica", password: "pw" }],
+    echoCommands: "off",
+    wordWrap: "on",
+    characters: [{ id: "c", name: "Cowpernica", password: "pw", echoCommands: "inherit", wordWrap: "on" }],
   };
   assert.deepEqual(parseWorld(record), { ...record, tlsAllowUntrusted: false });
+});
+
+test("parseWorld migrates an old plain-boolean echoCommands to the matching tri-state", () => {
+  assert.equal(parseWorld({ id: "a", echoCommands: true })?.echoCommands, "on");
+  assert.equal(parseWorld({ id: "a", echoCommands: false })?.echoCommands, "off");
 });
 
 test("parseWorld clears an invalid port rather than rejecting the world", () => {
@@ -71,16 +79,34 @@ test("parseWorld rejects malformed records and drops malformed characters", () =
   assert.equal(parseWorld({ id: "" }), null);
   assert.equal(parseWorld({ id: "a", host: 42 }), null);
   assert.equal(parseWorld({ id: "a", tls: "yes" }), null);
+  assert.equal(parseWorld({ id: "a", echoCommands: 42 }), null);
+  assert.equal(parseWorld({ id: "a", wordWrap: "sideways" }), null);
   assert.equal(parseWorld({ id: "a", characters: "none" }), null);
   const world = parseWorld({ id: "a", characters: [{ id: "c", name: "ok" }, { name: "no id" }, "junk"] });
-  assert.deepEqual(world?.characters, [{ id: "c", name: "ok", password: "" }]);
+  assert.deepEqual(world?.characters, [
+    { id: "c", name: "ok", password: "", echoCommands: "inherit", wordWrap: "inherit" },
+  ]);
+});
+
+test("parseGlobalSettings defaults each field independently rather than rejecting the whole object", () => {
+  assert.deepEqual(parseGlobalSettings(undefined), DEFAULT_GLOBAL_SETTINGS);
+  assert.deepEqual(parseGlobalSettings(null), DEFAULT_GLOBAL_SETTINGS);
+  assert.deepEqual(parseGlobalSettings("not an object"), DEFAULT_GLOBAL_SETTINGS);
+  assert.deepEqual(parseGlobalSettings({ wordWrap: true, echoCommands: "nope" }), {
+    wordWrap: true,
+    echoCommands: DEFAULT_GLOBAL_SETTINGS.echoCommands,
+  });
 });
 
 test("a missing or empty file reads as no worlds, without an error", () => {
   withTempDir((dir) => {
-    assert.deepEqual(readWorldsFile(path.join(dir, "missing")), { state: { worlds: [], mru: [] } });
+    assert.deepEqual(readWorldsFile(path.join(dir, "missing")), {
+      state: { worlds: [], mru: [], globalSettings: DEFAULT_GLOBAL_SETTINGS },
+    });
     fs.writeFileSync(path.join(dir, "empty"), "\n");
-    assert.deepEqual(readWorldsFile(path.join(dir, "empty")), { state: { worlds: [], mru: [] } });
+    assert.deepEqual(readWorldsFile(path.join(dir, "empty")), {
+      state: { worlds: [], mru: [], globalSettings: DEFAULT_GLOBAL_SETTINGS },
+    });
   });
 });
 
@@ -107,7 +133,7 @@ test("an unparseable file is reported, and saving over it is refused", () => {
       const file = path.join(dir, "worlds");
       fs.writeFileSync(file, contents);
       const result = readWorldsFile(file);
-      assert.deepEqual(result.state, { worlds: [], mru: [] });
+      assert.deepEqual(result.state, { worlds: [], mru: [], globalSettings: DEFAULT_GLOBAL_SETTINGS });
       assert.match(result.error ?? "", /Could not parse/);
       assert.throws(() => saveWorlds(file, [newWorld("a")]), /Could not parse/);
       assert.equal(
@@ -211,7 +237,7 @@ test("a missing file doesn't fall back to the backup", () => {
     saveWorlds(file, [newWorld("a")]);
     saveWorlds(file, [newWorld("b")]);
     fs.rmSync(file);
-    assert.deepEqual(readWorldsFile(file), { state: { worlds: [], mru: [] } });
+    assert.deepEqual(readWorldsFile(file), { state: { worlds: [], mru: [], globalSettings: DEFAULT_GLOBAL_SETTINGS } });
   });
 });
 

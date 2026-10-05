@@ -29,7 +29,13 @@ test("sanitizePathSegment neutralises separators, dots and empties", () => {
 test("logPathFor nests character under world, or omits it, each prefixed by its id", () => {
   const world = { ...newWorld("3f2a9c1e-77d0-4b6e-9a51-0c8e2d4f6a1b"), name: "LambdaMOO" };
   assert.equal(
-    logPathFor("/r", world, { id: "c", name: "Cowpernica", password: "" }),
+    logPathFor("/r", world, {
+      id: "c",
+      name: "Cowpernica",
+      password: "",
+      echoCommands: "inherit",
+      wordWrap: "inherit",
+    }),
     path.join("/r", "3f2a9c1e.LambdaMOO", "c.Cowpernica", "moolin.log"),
   );
   assert.equal(logPathFor("/r", world, null), path.join("/r", "3f2a9c1e.LambdaMOO", "moolin.log"));
@@ -194,7 +200,13 @@ test("a log reclaimed straight after close reads back everything, times aligned"
   second.close();
 });
 
-const cowpernica = { id: "7b0d44aa-0000", name: "Cowpernica", password: "" };
+const cowpernica = {
+  id: "7b0d44aa-0000",
+  name: "Cowpernica",
+  password: "",
+  echoCommands: "inherit" as const,
+  wordWrap: "inherit" as const,
+};
 
 test("locateLogFile creates nothing, and names new folders by id and label", () => {
   const root = tempDir();

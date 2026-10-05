@@ -1,8 +1,8 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Character, MruEntry, World } from "./worlds-types";
-import { DEFAULT_LOGIN_TEMPLATE, isValidPort } from "./world-utils";
+import type { Character, GlobalSettings, MruEntry, TriState, World } from "./worlds-types";
+import { DEFAULT_GLOBAL_SETTINGS, DEFAULT_LOGIN_TEMPLATE, isValidPort } from "./world-utils";
 import { log } from "./logger";
 
 const DEFAULT_WORLDS_PATH = path.join("~", "Documents", "Moolin", "worlds");
@@ -10,6 +10,7 @@ const DEFAULT_WORLDS_PATH = path.join("~", "Documents", "Moolin", "worlds");
 export interface WorldsState {
   worlds: World[];
   mru: MruEntry[];
+  globalSettings: GlobalSettings;
 }
 
 // `error` is set when the file exists but couldn't be read or parsed, and
@@ -47,13 +48,26 @@ function optional<T>(value: unknown, isType: (v: unknown) => v is T, fallback: T
 const isString = (v: unknown): v is string => typeof v === "string";
 const isBoolean = (v: unknown): v is boolean => typeof v === "boolean";
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+const isTriState = (v: unknown): v is TriState => v === "inherit" || v === "on" || v === "off";
 
 function parseCharacter(value: unknown): Character | null {
   if (!isObject(value) || !isString(value.id) || value.id.length === 0) return null;
   const name = optional(value.name, isString, "");
   const password = optional(value.password, isString, "");
-  if (name === undefined || password === undefined) return null;
-  return { id: value.id, name, password };
+  const echoCommands = optional(value.echoCommands, isTriState, "inherit");
+  const wordWrap = optional(value.wordWrap, isTriState, "inherit");
+  if (name === undefined || password === undefined || echoCommands === undefined || wordWrap === undefined) {
+    return null;
+  }
+  return { id: value.id, name, password, echoCommands, wordWrap };
+}
+
+// Pre-tri-state worlds stored echoCommands as a plain boolean; map it
+// directly onto the matching tri-state value so an old file keeps behaving
+// the same way until someone deliberately changes it in the dialog.
+function migrateEchoCommands(value: unknown): TriState | undefined {
+  if (typeof value === "boolean") return value ? "on" : "off";
+  return optional(value, isTriState, "inherit");
 }
 
 // Validates one world record from disk (or from a renderer) and fills in
@@ -70,7 +84,8 @@ export function parseWorld(value: unknown): World | null {
   const tlsAllowUntrusted = optional(value.tlsAllowUntrusted, isBoolean, false);
   const autoLogin = optional(value.autoLogin, isBoolean, false);
   const loginTemplate = optional(value.loginTemplate, isString, DEFAULT_LOGIN_TEMPLATE);
-  const echoCommands = optional(value.echoCommands, isBoolean, true);
+  const echoCommands = migrateEchoCommands(value.echoCommands);
+  const wordWrap = optional(value.wordWrap, isTriState, "inherit");
   const rawCharacters = value.characters === undefined ? [] : value.characters;
   if (
     name === undefined ||
@@ -80,6 +95,7 @@ export function parseWorld(value: unknown): World | null {
     autoLogin === undefined ||
     loginTemplate === undefined ||
     echoCommands === undefined ||
+    wordWrap === undefined ||
     !Array.isArray(rawCharacters)
   ) {
     return null;
@@ -101,7 +117,21 @@ export function parseWorld(value: unknown): World | null {
     autoLogin,
     loginTemplate,
     echoCommands,
+    wordWrap,
     characters,
+  };
+}
+
+// Global has nothing above it to fall the *whole* record back to (unlike a
+// World/Character, which can simply be dropped if malformed), so a corrupted
+// field reverts to its own default individually instead of rejecting the rest.
+export function parseGlobalSettings(value: unknown): GlobalSettings {
+  const obj = isObject(value) ? value : {};
+  return {
+    wordWrap: optional(obj.wordWrap, isBoolean, DEFAULT_GLOBAL_SETTINGS.wordWrap) ?? DEFAULT_GLOBAL_SETTINGS.wordWrap,
+    echoCommands:
+      optional(obj.echoCommands, isBoolean, DEFAULT_GLOBAL_SETTINGS.echoCommands) ??
+      DEFAULT_GLOBAL_SETTINGS.echoCommands,
   };
 }
 
@@ -141,14 +171,17 @@ export function seedDefaultWorlds(): World[] {
       tlsAllowUntrusted: false,
       autoLogin: true,
       loginTemplate: DEFAULT_LOGIN_TEMPLATE,
-      echoCommands: true,
-      characters: [{ id: crypto.randomUUID(), name: "Guest", password: "guest" }],
+      echoCommands: "inherit",
+      wordWrap: "inherit",
+      characters: [
+        { id: crypto.randomUUID(), name: "Guest", password: "guest", echoCommands: "inherit", wordWrap: "inherit" },
+      ],
     },
   ];
 }
 
 function readStateFile(filePath: string): WorldsReadResult & { missing?: boolean } {
-  const empty = (): WorldsState => ({ worlds: [], mru: [] });
+  const empty = (): WorldsState => ({ worlds: [], mru: [], globalSettings: DEFAULT_GLOBAL_SETTINGS });
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, "utf-8").trim();
@@ -176,7 +209,8 @@ function readStateFile(filePath: string): WorldsReadResult & { missing?: boolean
   }
   const rawMru: unknown[] = Array.isArray(parsed.mru) ? parsed.mru : [];
   const mru = rawMru.map(parseMruEntry).filter((entry): entry is MruEntry => entry !== null);
-  return { state: { worlds, mru } };
+  const globalSettings = parseGlobalSettings(parsed.globalSettings);
+  return { state: { worlds, mru, globalSettings } };
 }
 
 // "worlds.unreadable-20261004-153000", for setting an unreadable file aside.
@@ -218,10 +252,14 @@ function writeState(filePath: string, state: WorldsState, read: WorldsReadResult
 // synchronously in it, so no two can interleave.
 
 // Throws if the existing file couldn't be read, rather than replace it.
-export function saveWorlds(filePath: string, worlds: World[]): void {
+export function saveWorlds(
+  filePath: string,
+  worlds: World[],
+  globalSettings: GlobalSettings = DEFAULT_GLOBAL_SETTINGS,
+): void {
   const read = readWorldsFile(filePath);
   if (read.error) throw new Error(read.error);
-  writeState(filePath, { ...read.state, worlds }, read);
+  writeState(filePath, { ...read.state, worlds, globalSettings }, read);
 }
 
 // Returns the new MRU list, or null if the file couldn't be read (in which

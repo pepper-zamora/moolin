@@ -57,7 +57,13 @@ async function waitUntil(condition: () => boolean): Promise<void> {
   while (!condition()) await new Promise((resolve) => setTimeout(resolve, 10));
 }
 
-const cowpernica: Character = { id: "c", name: "Cowpernica", password: "hunter2" };
+const cowpernica: Character = {
+  id: "c",
+  name: "Cowpernica",
+  password: "hunter2",
+  echoCommands: "inherit",
+  wordWrap: "inherit",
+};
 
 test("auto-login sends the expanded template after connecting as a character", {
   timeout: TEST_TIMEOUT_MS,
@@ -74,6 +80,7 @@ test("auto-login sends the expanded template after connecting as a character", {
       label: "Cowpernica - Test",
       address: `127.0.0.1:${port}`,
       tls: null,
+      wordWrap: false,
     });
     await waitUntil(() => received().length > 0);
     assert.equal(received(), 'co "Cowpernica" hunter2\r');
@@ -113,6 +120,47 @@ test("a world without a host or port is refused with a message", () => {
   assert.match(messages[0], /can't connect to Blank/);
 });
 
+test("connect()'s resolved settings carry through to getState() and echoCommandsEnabled()", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port } = await recordingServer();
+  const { manager, connected } = managerWithLog();
+  try {
+    manager.connect(
+      { world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null },
+      { wordWrap: true, echoCommands: false },
+    );
+    await connected;
+    assert.equal(manager.getState().wordWrap, true);
+    assert.equal(manager.echoCommandsEnabled(), false);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("omitting connect()'s resolved settings defaults to no word-wrap and echo on", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port } = await recordingServer();
+  const { manager, connected } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null });
+    await connected;
+    assert.equal(manager.getState().wordWrap, false);
+    assert.equal(manager.echoCommandsEnabled(), true);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("getState().wordWrap and echoCommandsEnabled() fall back once disconnected", () => {
+  const { manager } = managerWithLog();
+  assert.equal(manager.getState().wordWrap, false);
+  assert.equal(manager.echoCommandsEnabled(), true);
+});
+
 test("disconnecting returns to the disconnected state", { timeout: TEST_TIMEOUT_MS }, async () => {
   const { server, port } = await recordingServer();
   const { manager, messages, connected } = managerWithLog();
@@ -121,7 +169,13 @@ test("disconnecting returns to the disconnected state", { timeout: TEST_TIMEOUT_
     await connected;
     manager.disconnect();
     await waitUntil(() => !manager.isActive());
-    assert.deepEqual(manager.getState(), { status: "disconnected", label: null, address: null, tls: null });
+    assert.deepEqual(manager.getState(), {
+      status: "disconnected",
+      label: null,
+      address: null,
+      tls: null,
+      wordWrap: false,
+    });
     assert.equal(manager.getConnected(), null);
     assert.match(messages[messages.length - 1], /disconnected/);
   } finally {

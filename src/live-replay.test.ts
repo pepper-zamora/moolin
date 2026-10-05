@@ -13,7 +13,7 @@ function recorder(): { live: LiveReplay; shown: string[] } {
 }
 
 const data = (text: string, seq: number): LiveEvent => ({ kind: "data", data: text, time: null, seq });
-const replay = (chunks: string[], seq: number): ScrollbackReplay => ({ chunks, times: [], seq });
+const replay = (chunks: string[], seq: number): ScrollbackReplay => ({ chunks, times: [], seq, wordWrap: false });
 
 test("a replay landing mid-stream doesn't repeat the live messages it already contains", () => {
   // The bug: the replay (taken after all three writes) arrives after the

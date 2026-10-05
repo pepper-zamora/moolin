@@ -3,12 +3,30 @@ import assert from "node:assert/strict";
 import {
   expandLoginTemplate,
   isConnectable,
+  newCharacter,
   newWorld,
+  resolveTriState,
   targetLabel,
   DEFAULT_LOGIN_TEMPLATE,
   deleteCharacterPrompt,
   deleteWorldPrompt,
 } from "./world-utils";
+
+test('resolveTriState falls back to Global when every override is "inherit"', () => {
+  assert.equal(resolveTriState(true), true);
+  assert.equal(resolveTriState(false), false);
+  assert.equal(resolveTriState(true, "inherit", "inherit"), true);
+  assert.equal(resolveTriState(false, "inherit", "inherit"), false);
+});
+
+test("resolveTriState lets the first non-inherit override win, most specific first", () => {
+  // Character ("on") overrides World ("off") overrides Global (false).
+  assert.equal(resolveTriState(false, "on", "off"), true);
+  // World ("off") applies when Character doesn't override.
+  assert.equal(resolveTriState(true, "inherit", "off"), false);
+  // Character overriding, with World also set, still wins (first match).
+  assert.equal(resolveTriState(false, "off", "on"), false);
+});
 
 test("expandLoginTemplate substitutes the character and password", () => {
   assert.equal(expandLoginTemplate(DEFAULT_LOGIN_TEMPLATE, "Cowpernica", "hunter2"), 'co "Cowpernica" hunter2\r');
@@ -38,7 +56,7 @@ test("isConnectable requires a host and a valid port", () => {
 
 test("targetLabel names the character and world, with fallbacks for blank names", () => {
   const world = { ...newWorld("w"), name: "LambdaMOO", host: "lambda.moo.mud.org" };
-  const character = { id: "c", name: "Cowpernica", password: "" };
+  const character = { ...newCharacter("c"), name: "Cowpernica" };
   assert.equal(targetLabel(world, character), "Cowpernica - LambdaMOO");
   assert.equal(targetLabel(world, null), "LambdaMOO");
   assert.equal(targetLabel({ ...world, name: "" }, null), "lambda.moo.mud.org");
@@ -49,7 +67,7 @@ test("targetLabel names the character and world, with fallbacks for blank names"
 });
 
 test("deleteWorldPrompt says which characters go with the world", () => {
-  const character = (id: string, name: string) => ({ id, name, password: "" });
+  const character = (id: string, name: string) => ({ ...newCharacter(id), name });
   const world = { ...newWorld("w"), name: "Moo" };
   assert.deepEqual(deleteWorldPrompt(world), {
     message: 'Delete the world "Moo"?',
@@ -73,7 +91,7 @@ test("deleteWorldPrompt says which characters go with the world", () => {
 test("deleteCharacterPrompt names the character and its world", () => {
   const world = { ...newWorld("w"), name: "Moo" };
   assert.equal(
-    deleteCharacterPrompt(world, { id: "c", name: "Cowpernica", password: "" }).message,
+    deleteCharacterPrompt(world, { ...newCharacter("c"), name: "Cowpernica" }).message,
     'Delete the character "Cowpernica" from "Moo"?',
   );
 });

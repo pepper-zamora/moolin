@@ -5,6 +5,21 @@ gets its own branch when we pick it up; move it out of this list then.
 Larger feature ideas (triggers, aliases, a mapper and so on) live in
 [GAPS.md](GAPS.md) instead.
 
+## App
+
+- **Word-wrap's resize scroll position is only approximate.** When a window
+  resizes while word-wrap is on, `reflowForResize()` (src/renderer.ts)
+  restores scroll position as a proportion of the buffer (`viewportY /
+  length` before, scaled by the new `length` after) rather than anchoring to
+  the exact logical line that was on screen — reflowing at a new width
+  changes how many visual rows each logical line takes, so an exact anchor
+  would need per-logical-line marker tracking through the redraw. This was a
+  deliberate v1 scoping call, not an oversight, but it needs a hard look
+  before it's accepted as the long-term answer: give it real usage (does the
+  approximation drift noticeably with a large scrollback or lots of
+  wrapped lines?) and decide whether it's good enough or needs the
+  marker-based exact version.
+
 ## Testing
 
 - **macOS.** Apple silicon confirmed: the "damaged and can't be opened"
