@@ -257,6 +257,11 @@ html, body {
   white-space: nowrap;
 }
 
+#screen-size {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .security-icon,
 #logging-status {
   display: flex;

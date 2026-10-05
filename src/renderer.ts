@@ -90,6 +90,7 @@ const gutter = element<HTMLDivElement>("gutter");
 const inputArea = element<HTMLTextAreaElement>("input-area");
 const statusBar = element<HTMLDivElement>("status-bar");
 const statusText = element<HTMLSpanElement>("status-text");
+const screenSize = element<HTMLSpanElement>("screen-size");
 const loggingStatus = element<HTMLSpanElement>("logging-status");
 
 term.open(terminalContainer);
@@ -124,7 +125,9 @@ const securityStatus = new SecurityStatus(() => {
 term.onResize(({ cols, rows }) => {
   window.moolin.log("debug", "renderer", "terminal resized to", `${cols}x${rows}`);
   window.moolin.sendResize(cols, rows);
+  screenSize.textContent = `${cols}x${rows}`;
 });
+screenSize.textContent = `${term.cols}x${term.rows}`;
 
 try {
   term.loadAddon(new WebglAddon());

@@ -22,6 +22,8 @@ renames that section to the new version and date.
 - Iosevka Moolin, a custom [Iosevka](https://typeof.net/Iosevka/) build
   bundled with the app, is now the default terminal font (`npm run
   build:font` rebuilds it from `font/private-build-plans.toml`).
+- The status bar shows the terminal's current size in characters (e.g.
+  `80x25`), next to the logging indicator.
 
 ### Fixed
 

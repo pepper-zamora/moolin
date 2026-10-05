@@ -227,7 +227,8 @@ world only once they reconnect.
 
 Type commands in the input area at the bottom; the scrollback above is output
 only. The status bar below the input area shows what the window is connected
-to; the input area is disabled while it isn't connected.
+to, plus the terminal's current size in characters (e.g. `80x25`); the input
+area is disabled while it isn't connected.
 
 ### Auto-login templates
 

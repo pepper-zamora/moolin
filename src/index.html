@@ -36,6 +36,8 @@
       <textarea id="input-area" rows="1" spellcheck="false" disabled></textarea>
       <div id="status-bar" data-status="disconnected">
         <span id="status-text">Not connected</span>
+        <!-- The terminal's current size, in characters (cols x rows). -->
+        <span id="screen-size" title="Terminal size, in characters"></span>
         <!-- Whether this window is writing the session log: a scroll when it
              is, a "no" sign when another window connected to the same
              world/character already owns the log. -->
