@@ -538,6 +538,58 @@ try {
     expectEqual(clipboard, "short", "clipboard after copying part of an unwrapped line");
   });
 
+  // Ordinary multi-line selection across separate (non-wrapped) lines must
+  // still behave exactly like xterm's own default: the first and last lines
+  // contribute only their selected portion, joined by "\n" — none of them
+  // individually wrap, so getWrapAwareSelection's whole-paragraph
+  // substitution never triggers here; this only exercises its single-row
+  // extraction branch, once per touched line.
+  await check("a selection spanning parts of two separate lines copies just the selected part of each", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    latestSocket.write("alpha bravo charlie\r\n");
+    latestSocket.write("delta echo foxtrot\r\n");
+    await sleep(1500); // see the accessibility-tree lag note above
+    const rowA = await main.findVisibleRow("alpha bravo");
+    if (rowA < 0) throw new Error("couldn't find the first line in the viewport");
+
+    // From column 6 of the first line ("bravo charlie", skipping "alpha ")
+    // to column 5 of the next ("delta") — neither line's full text.
+    await main.dragSelectRange(rowA, 6, cols + (5 - 6), cols);
+    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
+    await sleep(150);
+    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
+    expectEqual(clipboard, "bravo charlie\ndelta", "clipboard after spanning two partially-selected lines");
+  });
+
+  // Same shape, but with one COMPLETE line in between: that middle line must
+  // come through in full (the ordinary "middle lines of a selection are
+  // whole" rule xterm already applies), while the first and last still only
+  // contribute their selected portion.
+  await check(
+    "a selection spanning two partial lines with a complete line between them copies all three correctly",
+    async () => {
+      if (!latestSocket) throw new Error("no server socket to write to");
+      latestSocket.write("golf hotel india\r\n");
+      latestSocket.write("juliet kilo lima\r\n");
+      latestSocket.write("mike november oscar\r\n");
+      await sleep(1500); // see the accessibility-tree lag note above
+      const rowFirst = await main.findVisibleRow("golf hotel");
+      if (rowFirst < 0) throw new Error("couldn't find the first line in the viewport");
+
+      // From column 5 of the first line ("hotel india", skipping "golf ")
+      // through the whole second line, to column 6 of the third ("mike n").
+      await main.dragSelectRange(rowFirst, 5, 2 * cols + (6 - 5), cols);
+      await main.key("c", "KeyC", 67, 2 /* Ctrl */);
+      await sleep(150);
+      const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
+      expectEqual(
+        clipboard,
+        "hotel india\njuliet kilo lima\nmike n",
+        "clipboard after spanning two partial lines with a full line between them",
+      );
+    },
+  );
+
   // Launching again opens a second window in the running instance; it starts
   // disconnected, and (usually) takes focus from the first.
   console.log("smoke: a second, disconnected window");
