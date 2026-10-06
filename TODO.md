@@ -41,6 +41,38 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
   `powerMonitor` `"resume"` event to proactively probe or re-check the
   connection right after a sleep/wake cycle, rather than waiting on TCP's own
   (sometimes very slow, or silent) failure detection.
+- **The View menu shows "Toggle Full Screen" twice on macOS (upstream
+  Electron bug).** One row with fn+F (the Globe key), one with Ctrl+Cmd+F.
+  This is [electron/electron#52821](https://github.com/electron/electron/issues/52821),
+  open as of this writing, with an unmerged fix in
+  [PR #53137](https://github.com/electron/electron/pull/53137). Cause, per
+  that thread: AppKit sees the `togglefullscreen` role's menu item and
+  injects its own *hidden* duplicate carrying the system shortcut; Electron
+  then makes every item visible, exposing it. It was first reported as
+  #49048, fixed in #49074, and has since regressed — reproduced on 42.x,
+  43.x and our 44.5.1 (macOS Tahoe 26.6.2). Nothing to do here but wait for
+  the upstream fix and re-test on the Electron bump.
+
+  Every app-side workaround was tried and each costs the working fn+F
+  shortcut, which is why the duplicate is left in place:
+
+  | Menu config | Visible rows | fn+F works |
+  | --- | --- | --- |
+  | `role: "togglefullscreen"` (what we ship) | 2 | yes |
+  | role + explicit `accelerator` | 2 | yes (that accelerator doesn't) |
+  | role + `registerAccelerator: false` | 2 | yes |
+  | role + `accelerator: ""` | 1 | no |
+  | role + `visible: false` | 0 | yes |
+  | role hidden *plus* a plain visible item | 1 | no |
+  | plain item + click handler, no role | 1 | no |
+  | no item at all | 0 | no |
+
+  Also tried: forcing AppKit's own automatic item via the
+  `NSFullScreenMenuItemEverywhere` Info.plist key (absent from Electron's
+  bundle). No effect — an Electron maintainer notes in #49074 that this
+  workaround no longer functions. Note too that fn+F is assigned by macOS
+  to the role's item; Electron accelerators have no Globe/fn modifier, so
+  it can't be bound directly.
 
 - **`--screen-reader-mode` is internal/undocumented, but could be a real
   feature.** Added so `scripts/smoke.mjs` could read rendered text and

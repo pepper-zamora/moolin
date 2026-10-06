@@ -429,6 +429,13 @@ function buildMenu(terminal: TerminalWindow): void {
           },
         },
         { type: "separator" },
+        // Shows twice on macOS Tahoe — one row with fn+F, one with
+        // Ctrl+Cmd+F. That's an open Electron bug, not ours: AppKit injects
+        // its own hidden duplicate for this role, carrying the system
+        // shortcut, and Electron then makes every item visible, exposing it
+        // (electron/electron#52821, fix PR #53137 still unmerged). Leave it
+        // as-is until that lands — every app-side workaround tried costs the
+        // working fn+F shortcut; see TODO.md for the full matrix.
         { role: "togglefullscreen", label: "Toggle &Full Screen" },
       ],
     },
