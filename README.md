@@ -264,11 +264,14 @@ the column edge, mid-word if that's where it lands. Turning word wrap on
 (Global, World or Character — see [Using Moolin](#using-moolin) above)
 wraps at the last word boundary that fits instead, without changing what the
 line copies as: selecting and copying a wrapped line still gives you back
-exactly the one line the server sent, never split by an inserted line break.
-That's done by padding the row with spaces until xterm's own column wrap
-lands exactly on the word boundary, rather than by Moolin inserting a break
-of its own — xterm ends up doing the actual wrapping either way, just where
-word wrap asks it to.
+exactly the one line the server sent, never split by an inserted line break
+and never including the padding spaces used to trigger the wrap. That's done
+by padding the row with spaces until xterm's own column wrap lands exactly on
+the word boundary, rather than by Moolin inserting a break of its own — xterm
+ends up doing the actual wrapping either way, just where word wrap asks it
+to; copying substitutes the original line back in, so selecting only part of
+a wrapped paragraph copies that paragraph's whole original line, not just the
+highlighted portion.
 
 Resizing the window re-wraps already-displayed text to the new width if word
 wrap is on; this redraws the whole scrollback (debounced until the resize

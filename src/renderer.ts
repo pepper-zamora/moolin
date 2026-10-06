@@ -16,6 +16,7 @@ import { LiveReplay } from "./live-replay";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import { fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
 import { WordWrapper } from "./word-wrap";
+import { RawLineAccumulator } from "./raw-line-tracker";
 
 window.addEventListener("error", (event) => {
   window.moolin.log("error", "renderer", "uncaught error:", event.error ?? event.message);
@@ -42,6 +43,7 @@ const term = new Terminal({
   disableStdin: true, // scrollback is output-only; all typing goes to #input-area
   cursorInactiveStyle: "none", // term never actually has focus, so the hollow "inactive" cursor is just noise
   allowProposedApi: true, // the search addon's match highlighting uses decorations
+  screenReaderMode: window.moolin.screenReaderMode,
   // A strip beside the scrollbar marking where search matches are.
   overviewRuler: { width: 10 },
   fontFamily: fontFamilyFor(initialFont.fontId),
@@ -266,23 +268,39 @@ function transformForWrite(data: string | Uint8Array): string | Uint8Array {
 // The arrival time is kept alongside each marker; renderGutter derives the
 // time label and date from it, dedups a run of same-minute lines, and shows
 // the date on the first stamped line and wherever the local day changes.
+//
+// Only lines that got a timestamp (server output, not Moolin's own status
+// lines) go into lineStamps — renderGutter's same-minute/day-change collapsing
+// depends on consecutive entries always being real timestamps. rawLines
+// (below) is the dense counterpart: every completed line, timestamped or not.
 const lineStamps: Array<{ marker: IMarker; time: Date }> = [];
 let timestampsShown = false;
-// The time (epoch ms) to stamp onto each upcoming line, or null for a line
-// that gets no stamp — Moolin's own status lines, Clear Screen's blank filler,
-// and replayed history with no recorded time. Filled in the same order lines
-// are written and consumed one per onLineFeed (which fires once for each byte
-// countLineFeeds counts), so every line gets exactly the time recorded for it.
-const stampQueue: Array<number | null> = [];
 
-// Writes a chunk and queues `time` (or null) for each line it contains, so the
-// onLineFeed handler stamps them in step. Line-feed counting always runs on
-// the original, untransformed `data` — word-wrap only ever inserts spaces
-// (never a line feed) and holds back an incomplete trailing word instead of
-// emitting it early (see WordWrapper), so the two can never disagree about
-// how many real lines a chunk contains.
+// The original (pre-word-wrap) plain text of every line still in the
+// scrollback, keyed the same way as lineStamps (one entry per real line feed,
+// sorted by marker.line). Used by getWrapAwareSelection (see copySelection)
+// to substitute a word-wrapped paragraph's real text instead of xterm's
+// padded display text when it's copied.
+const rawLines: Array<{ marker: IMarker; text: string }> = [];
+const rawLineAccumulator = new RawLineAccumulator();
+
+// One entry queued per line feed a chunk contains, consumed one per real
+// onLineFeed event below — time (or null, for a line that gets no stamp:
+// Moolin's own status lines, Clear Screen's blank filler, and replayed
+// history with no recorded time) and the line's raw plain text together,
+// since both are always derived from the exact same chunk at the exact same
+// call sites and must never drift relative to each other.
+const pendingLines: Array<{ time: number | null; text: string }> = [];
+
+// Writes a chunk and queues an entry for each line it contains, so the
+// onLineFeed handler below consumes them in step. Line-feed counting and raw
+// text extraction both always run on the original, untransformed `data` —
+// word-wrap only ever inserts spaces (never a line feed) and holds back an
+// incomplete trailing word instead of emitting it early (see WordWrapper), so
+// neither can ever disagree with xterm's real line-feed count.
 function writeStamped(data: string | Uint8Array, time: number | null): void {
-  for (let i = 0, n = countLineFeeds(data); i < n; i++) stampQueue.push(time);
+  const texts = rawLineAccumulator.push(data);
+  for (let i = 0, n = countLineFeeds(data); i < n; i++) pendingLines.push({ time, text: texts[i] ?? "" });
   term.write(transformForWrite(data));
 }
 
@@ -320,30 +338,35 @@ function cellWidth(): number {
   return screen && term.cols > 0 ? screen.clientWidth / term.cols : 0;
 }
 
-function stampLine(time: Date): void {
+// Walks back from `row` over isWrapped continuation rows to the logical
+// line's first visual row — the only row word-wrap's padding never touches
+// (padding only ever lands at the end of a row immediately before a wrap).
+// Also used by getWrapAwareSelection (see copySelection) to find where a
+// touched logical line actually begins.
+function logicalLineStart(row: number): number {
   const buffer = term.buffer.active;
-  const cursorAbs = buffer.baseY + buffer.cursorY;
-  // The line feed moved the cursor off the line it ended; that line is the one
-  // just above the cursor. Walk back over wrapped continuation rows so the
-  // stamp lands on the logical line's first visual row, not its last.
-  let startAbs = cursorAbs - 1;
-  if (startAbs < 0) return;
-  while (startAbs > 0 && buffer.getLine(startAbs)?.isWrapped) startAbs--;
-  const marker = term.registerMarker(startAbs - cursorAbs);
-  if (!marker) return;
-  const stamp = { marker, time };
-  lineStamps.push(stamp);
-  marker.onDispose(() => {
-    const i = lineStamps.indexOf(stamp);
-    if (i !== -1) lineStamps.splice(i, 1);
-  });
+  let r = row;
+  while (r > 0 && buffer.getLine(r)?.isWrapped) r--;
+  return r;
 }
 
-function clearStamps(): void {
-  // Empty the list before disposing, so each marker's onDispose handler finds
-  // nothing to remove; splicing them out one by one would be O(n²) across a
-  // full scrollback.
-  for (const { marker } of lineStamps.splice(0)) marker.dispose();
+// Walks forward from a logical line's first row to its last visual row.
+function logicalLineEnd(row: number): number {
+  const buffer = term.buffer.active;
+  let r = row;
+  while (r + 1 < buffer.length && buffer.getLine(r + 1)?.isWrapped) r++;
+  return r;
+}
+
+function clearLineRecords(): void {
+  // Empty both lists before disposing, so each marker's onDispose handler
+  // finds nothing to remove; splicing them out one by one would be O(n²)
+  // across a full scrollback. rawLines holds every marker ever registered
+  // here (lineStamps only a subset of the same markers), so disposing its
+  // markers covers both.
+  const markers = rawLines.splice(0).map((r) => r.marker);
+  lineStamps.splice(0);
+  for (const marker of markers) marker.dispose();
   gutter.replaceChildren();
 }
 
@@ -421,9 +444,32 @@ function scheduleGutter(): void {
 }
 
 term.onLineFeed(() => {
-  // One queued time per line feed; null means this line carries no stamp.
-  const time = stampQueue.shift();
-  if (time != null) stampLine(new Date(time));
+  const entry = pendingLines.shift();
+  const buffer = term.buffer.active;
+  const cursorAbs = buffer.baseY + buffer.cursorY;
+  // The line feed moved the cursor off the line it ended; that line is the
+  // one just above the cursor.
+  const startAbs = cursorAbs - 1;
+  if (startAbs < 0) return;
+  const lineStart = logicalLineStart(startAbs);
+  const marker = term.registerMarker(lineStart - cursorAbs);
+  if (!marker) return;
+
+  const rawEntry = { marker, text: entry?.text ?? "" };
+  rawLines.push(rawEntry);
+  marker.onDispose(() => {
+    const i = rawLines.indexOf(rawEntry);
+    if (i !== -1) rawLines.splice(i, 1);
+  });
+
+  if (entry?.time != null) {
+    const stamp = { marker, time: new Date(entry.time) };
+    lineStamps.push(stamp);
+    marker.onDispose(() => {
+      const i = lineStamps.indexOf(stamp);
+      if (i !== -1) lineStamps.splice(i, 1);
+    });
+  }
 });
 // Re-render on new output and on any scroll — xterm fires onScroll for the
 // wheel and scrollbar as well as for output pushing the buffer up.
@@ -604,6 +650,77 @@ window.addEventListener("focus", () => setTimeout(reclaimFocus));
 // scrollback selection.
 inputArea.addEventListener("select", () => term.clearSelection());
 
+// Exact-row lookup into rawLines (mirrors firstVisibleStamp's binary search,
+// but for an exact match rather than "first at or after").
+function findRawLine(row: number): string | null {
+  let lo = 0;
+  let hi = rawLines.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (rawLines[mid].marker.line < row) lo = mid + 1;
+    else hi = mid;
+  }
+  const hit = rawLines[lo];
+  return hit && hit.marker.line === row && !hit.marker.isDisposed ? hit.text : null;
+}
+
+// Reconstructs a scrollback selection using the ORIGINAL pre-wrap server line
+// for any paragraph word-wrap actually wrapped across more than one visual
+// row — xterm's own padding spaces, which a plain term.getSelection() would
+// include verbatim, only ever land at the end of such a row (see
+// word-wrap.ts). A logical line that fits on one row is never padded, so it's
+// extracted precisely via translateToString, clipped to the selection's
+// start/end column only on the selection's first/last row respectively
+// (exactly how xterm's own getSelection already joins ordinary multi-line
+// selections). Returns null if reconstruction isn't possible (no selection,
+// or a row with no raw line recorded yet — e.g. an in-progress line with no
+// terminating line feed), so the caller can fall back to term.getSelection(),
+// never worse than before.
+//
+// Deliberate tradeoff, per design discussion: a selection that only partly
+// overlaps a wrapped paragraph still copies that paragraph's WHOLE original
+// line, not just the highlighted portion — see CHANGELOG.md. Also assumes an
+// ordinary linear selection; xterm's Alt+drag column/block select has no
+// public API to detect from getSelectionPosition() alone and isn't handled
+// specially (see TODO.md).
+function getWrapAwareSelection(): string | null {
+  const pos = term.getSelectionPosition();
+  if (!pos) return null;
+  const buffer = term.buffer.active;
+  const { start, end } = pos;
+  const parts: string[] = [];
+  let row = start.y;
+  while (row <= end.y) {
+    // How far this row's wrap-chain extends *within the selection* — never
+    // past end.y. A logical line can continue further off-selection (e.g.
+    // double-clicking one word on the first row of a long wrapped
+    // paragraph): that doesn't make this SELECTION wrapped, since nothing
+    // padded was actually touched. Only a span that reaches past `row`
+    // *inside* [start.y, end.y] means the selection itself crosses a real
+    // wrap boundary, where xterm's padding could appear in a plain extract.
+    const spanEnd = Math.min(logicalLineEnd(row), end.y);
+    if (spanEnd > row) {
+      // Crosses a wrap boundary: substitute the WHOLE original logical line
+      // (which may extend further than spanEnd, if the paragraph continues
+      // past where the selection ends) — looked up by the line's actual
+      // start row, where rawLines' marker was registered, not `row` itself.
+      const lineStart = logicalLineStart(row);
+      const text = findRawLine(lineStart);
+      if (text === null) return null;
+      parts.push(text);
+      row = logicalLineEnd(row) + 1; // skip the whole paragraph, not just the selected part
+      continue;
+    }
+    const line = buffer.getLine(row);
+    if (!line) return null;
+    const colStart = parts.length === 0 ? start.x : 0;
+    const colEnd = row === end.y ? end.x : undefined;
+    parts.push(line.translateToString(true, colStart, colEnd));
+    row = spanEnd + 1;
+  }
+  return parts.join("\n");
+}
+
 // Copy/paste go through Electron's clipboard module (via preload) rather
 // than the browser's native copy/paste commands, which don't reliably see
 // xterm.js's canvas/WebGL-rendered selection. A scrollback selection wins
@@ -613,7 +730,7 @@ function copySelection(): void {
   const text =
     securityStatus.selectedText() ||
     (term.hasSelection()
-      ? term.getSelection()
+      ? ((wordWrapEnabled ? getWrapAwareSelection() : null) ?? term.getSelection())
       : inputArea.value.slice(inputArea.selectionStart, inputArea.selectionEnd));
   if (text.length > 0) {
     window.moolin.clipboard.writeText(text);
@@ -761,7 +878,10 @@ function writeReplay(replay: ScrollbackReplay): void {
   }
   wordWrapper.reset();
   wordWrapper.setCols(term.cols);
-  for (const time of replay.times) stampQueue.push(time);
+  rawLineAccumulator.reset();
+  const texts: string[] = [];
+  for (const chunk of replay.chunks) texts.push(...rawLineAccumulator.push(chunk));
+  for (let i = 0; i < replay.times.length; i++) pendingLines.push({ time: replay.times[i], text: texts[i] ?? "" });
   for (const chunk of replay.chunks) term.write(transformForWrite(chunk));
 }
 
@@ -774,7 +894,7 @@ function writeReplay(replay: ScrollbackReplay): void {
 function applyReset(replay: ScrollbackReplay): void {
   isCleared = false;
   term.write("", () => {
-    clearStamps();
+    clearLineRecords();
     term.reset();
   });
   writeReplay(replay);

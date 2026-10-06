@@ -102,6 +102,7 @@ contextBridge.exposeInMainWorld("moolin", {
   // (see WindowManager); such a window reports its measured content size
   // once so main.ts can size it to fit an 80x25 terminal before centering it.
   fitToContentOnLoad: process.argv.includes("--fit-to-content"),
+  screenReaderMode: process.argv.includes("--screen-reader-mode"),
   reportInitialSize: (size: { width: number; height: number }): void => {
     ipcRenderer.send(IpcChannels.terminalInitialSize, size);
   },

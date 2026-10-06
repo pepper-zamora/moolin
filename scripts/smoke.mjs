@@ -198,6 +198,75 @@ class Page {
     await sleep(150);
   }
 
+  // The on-screen rect of one currently-visible row (0 = top of viewport),
+  // via xterm's accessibility tree — a hidden, full-size DOM mirror of the
+  // rendered rows it maintains for screen readers (one real <div> per
+  // viewport row, kept in sync with rendering regardless of which renderer,
+  // canvas/WebGL/DOM, is actually drawing the visible terminal). Reading
+  // real rendered text and real screen coordinates from it, rather than
+  // reaching into xterm's internal buffer API, keeps this a true black-box
+  // "drive it like a user would" check.
+  async rowRect(viewportRow) {
+    return this.evaluate(
+      `document.querySelectorAll("#terminal .xterm-accessibility-tree > div")[${viewportRow}]?.getBoundingClientRect().toJSON()`,
+    );
+  }
+
+  async allRowTexts() {
+    return this.evaluate(
+      `Array.from(document.querySelectorAll("#terminal .xterm-accessibility-tree > div")).map((d) => d.textContent)`,
+    );
+  }
+
+  async rowText(viewportRow) {
+    return (await this.allRowTexts())[viewportRow] ?? "";
+  }
+
+  // The viewport row index (0 = top) of the first currently-visible row whose
+  // text starts with `prefix`, or -1 if none does.
+  async findVisibleRow(prefix) {
+    return (await this.allRowTexts()).findIndex((t) => t.startsWith(prefix));
+  }
+
+  // A point at (row, col) in screen pixels, using the full terminal screen's
+  // rect (not just one row's, which is only as wide as its own text) so a
+  // column past a short row's rendered content still resolves to a real
+  // on-screen x; the row's own rect still supplies y, since accessibility
+  // rows don't all share the screen rect's full height.
+  async cellPoint(row, col, cols) {
+    const rowRect = await this.rowRect(row);
+    const screenRect = await this.evaluate(
+      `document.querySelector("#terminal .xterm-screen").getBoundingClientRect().toJSON()`,
+    );
+    const cellWidth = screenRect.width / cols;
+    return { x: screenRect.x + col * cellWidth + cellWidth / 2, y: rowRect.y + rowRect.height / 2 };
+  }
+
+  // Drags a selection spanning `length` characters starting at column
+  // `startCol` of viewport row `startRow`, wrapping to subsequent rows past
+  // `cols` columns — the same linear-range semantics as xterm's own
+  // term.select(col, row, length), driven here via real mouse events instead
+  // of that internal API. `cols` comes from the status bar's own #screen-size
+  // text (real rendered UI, not an internal reached into for the test).
+  async dragSelectRange(startRow, startCol, length, cols) {
+    const startPoint = await this.cellPoint(startRow, startCol, cols);
+    const endIndex = startCol + length;
+    const endRow = startRow + Math.floor(endIndex / cols);
+    const endCol = endIndex % cols;
+    const endPoint = await this.cellPoint(endRow, endCol, cols);
+    await this.mouse("mousePressed", startPoint);
+    const steps = Math.max(5, (endRow - startRow + 1) * 5);
+    for (let i = 1; i <= steps; i++) {
+      await this.mouse("mouseMoved", {
+        x: startPoint.x + ((endPoint.x - startPoint.x) * i) / steps,
+        y: startPoint.y + ((endPoint.y - startPoint.y) * i) / steps,
+      });
+      await sleep(10);
+    }
+    await this.mouse("mouseReleased", endPoint);
+    await sleep(150);
+  }
+
   // Drags from just inside the scrollback's top-left corner to just inside
   // its bottom-right, selecting every row currently visible — used instead
   // of Select All (Ctrl+A), which only ever reaches the renderer through a
@@ -275,7 +344,11 @@ async function typingReachesServer(page, text) {
 
 const pages = [];
 try {
-  launch("--remote-debugging-port=0");
+  // --screen-reader-mode enables xterm's accessibility tree (a hidden DOM
+  // mirror of rendered rows — see src/global.d.ts), which the word-wrap copy
+  // checks below use to read rendered text and real screen coordinates
+  // without reaching into xterm's internal buffer/selection API.
+  launch("--remote-debugging-port=0", "--screen-reader-mode");
   // Chromium writes the port it picked into the profile folder.
   const portFile = path.join(userDataDir, "DevToolsActivePort");
   devtoolsPort = await waitFor("the app to start", () =>
@@ -336,50 +409,133 @@ try {
     await typingReachesServer(main, "after double-click");
   });
 
-  // The concrete regression test for word wrap's one hard requirement: a
-  // line from the server must always copy/paste back out as one line, never
-  // split by an inserted line break. Word wrap works by padding a row with
-  // spaces until xterm's own column-overflow wrap lands on a word boundary
-  // (see word-wrap.ts) — this only matters at all if that line actually
-  // gets wrapped onto multiple visual rows, so the line below is built long
-  // enough (several "words" with no real line anywhere near this wide) to
-  // wrap at least once on any reasonable window width.
+  // The concrete regression tests for word wrap's copy guarantee: a line
+  // from the server must copy back out as EXACTLY the line it sent — not
+  // just "no inserted newline" (xterm's own isWrapped row-joining already
+  // gave us that for free), but no extra whitespace either. Word wrap pads a
+  // row with spaces to trigger xterm's own wrap at a word boundary (see
+  // word-wrap.ts); getWrapAwareSelection (src/renderer.ts) is what keeps
+  // those padding spaces out of a copy by substituting the original raw line
+  // instead of xterm's padded display text — but ONLY when the selection
+  // itself actually crosses a wrap boundary; a selection confined to one
+  // visual row (even one that's part of a longer wrapped paragraph, e.g.
+  // double-clicking a single word) must still copy precisely, not the whole
+  // paragraph. The line below is built long enough (several "words" with no
+  // real line anywhere near this wide) to wrap at least twice on any
+  // reasonable window width, so all of these cases are actually exercised.
   //
-  // The drag-to-select-everything step (selectAllVisible) is simulated mouse
-  // input over CDP, which — independent of anything word wrap does — has
-  // proven flaky in practice: the simulated drag itself occasionally selects
-  // short. Retried a few times rather than chasing the exact CDP timing
-  // quirk, the same way waitFor() already tolerates other asynchronous
-  // flakiness in this file.
-  //
-  // The comparison normalizes runs of spaces to a single space before
-  // comparing. Word wrap's padding (see word-wrap.ts) lands extra spaces at
-  // the exact point where xterm wraps the row, so the copied text legitimately
-  // has more whitespace there than the original line did — that's an accepted
-  // cosmetic side effect of reusing xterm's own wrap-triggered copy join. What
-  // actually matters, the hard requirement this check exists to enforce, is
-  // that no newline got inserted into the line: normalizing whitespace before
-  // comparing still catches that (a real line split adds a "\n", which this
-  // normalization never touches), while not failing on the padding itself.
-  await check("a word-wrapped long line still copies back as exactly one line", async () => {
-    const longLine = Array.from({ length: 15 }, (_, i) => `wordNumber${i}IsDeliberatelyLong`).join(" ");
-    const normalize = (text) => text.replace(/ +/g, " ");
+  // Selection is driven via real mouse events against xterm's accessibility
+  // tree (a hidden DOM mirror of the rendered rows — see Page#rowRect),
+  // never by reaching into xterm's internal buffer/selection API, so this
+  // stays a true "drive it like a user would" check.
+  const cols = Number((await main.evaluate("document.getElementById('screen-size').textContent")).split("x")[0]);
+  let wrapRow;
+  const longLine = Array.from({ length: 15 }, (_, i) => `wordNumber${i}IsDeliberatelyLong`).join(" ");
+  await check("a word-wrapped long line copies back as exactly one line, with no padding", async () => {
     if (!latestSocket) throw new Error("no server socket to write the long line to");
+    if (cols >= longLine.length) throw new Error(`test window too wide (cols=${cols}) for this line to wrap`);
     latestSocket.write(`${longLine}\r\n`);
-    await sleep(300); // let it render (and, if wrapped, actually wrap)
+    // xterm's accessibility tree (see Page#rowRect) lags noticeably behind
+    // actual rendering -- 300ms (enough for the write/wrap itself) isn't
+    // enough for its own text mirror to catch up, confirmed empirically.
+    await sleep(1500);
 
-    let clipboard = "";
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      await main.selectAllVisible();
-      await main.key("c", "KeyC", 67, 2 /* Ctrl */);
-      await sleep(150);
-      clipboard = await main.evaluate("window.moolin.clipboard.readText()");
-      if (normalize(clipboard).includes(normalize(longLine))) return;
-      await sleep(200);
+    wrapRow = await main.findVisibleRow("wordNumber0");
+    if (wrapRow < 0) {
+      throw new Error(`couldn't find the long line in the viewport; rows were ${JSON.stringify(await main.allRowTexts())}`);
     }
-    throw new Error(
-      `expected the clipboard to contain the line unbroken after 3 attempts; got ${JSON.stringify(clipboard.slice(0, 500))}`,
-    );
+
+    await main.dragSelectRange(wrapRow, 0, longLine.length, cols);
+    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
+    await sleep(150);
+    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
+    expectEqual(clipboard, longLine, "clipboard after copying the whole wrapped line");
+  });
+
+  // The user-visible tradeoff behind the fix above, made explicit (see
+  // CHANGELOG.md): since a selection that crosses a wrap boundary
+  // substitutes the whole ORIGINAL line rather than splicing a sub-range out
+  // of it, selecting only part of a wrapped paragraph — as long as that part
+  // still straddles the actual wrap point — copies that paragraph's whole
+  // original line, never a truncated or padded fragment of it. The range
+  // below deliberately straddles the exact column where word wrap pads: 5
+  // characters before the row ends, 5 into the next one.
+  await check("a selection crossing the wrap point still copies the whole original line", async () => {
+    await main.dragSelectRange(wrapRow, cols - 5, 10, cols);
+    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
+    await sleep(150);
+    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
+    expectEqual(clipboard, longLine, "clipboard after copying across the wrap point");
+  });
+
+  // The flip side, and the reason the fix above has to check what the
+  // SELECTION spans, not just what paragraph it's part of: a selection
+  // confined to one visual row of a wrapped paragraph — nowhere near the
+  // wrap point — never touches any padding, so it must still copy exactly
+  // the selected text, not the whole paragraph.
+  await check("a selection confined to one row of a wrapped paragraph copies precisely, not the whole paragraph", async () => {
+    await main.dragSelectRange(wrapRow, 0, 10, cols); // "wordNumber" — well short of the wrap point
+    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
+    await sleep(150);
+    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
+    expectEqual(clipboard, longLine.slice(0, 10), "clipboard after a single-row selection within a wrapped paragraph");
+  });
+
+  // The real-world version of the same case: double-clicking a word inside a
+  // wrapped paragraph must copy just that word. Word wrap guarantees a word
+  // is never itself split across the wrap (that's its whole purpose), so
+  // this is always a single-row selection — double-clicking the second word
+  // ("wordNumber1IsDeliberatelyLong", comfortably within the first visual
+  // row) must never pull in the rest of the paragraph.
+  await check("double-clicking a word inside a wrapped paragraph copies just that word", async () => {
+    const rowText = await main.rowText(wrapRow);
+    const wordCol = rowText.indexOf("wordNumber1");
+    if (wordCol < 0) throw new Error(`"wordNumber1" not found on the wrapped line's first row: ${JSON.stringify(rowText)}`);
+    const point = await main.cellPoint(wrapRow, wordCol + 5, cols); // well inside the word, not at its edge
+    for (const clickCount of [1, 2]) {
+      await main.mouse("mousePressed", point, clickCount);
+      await main.mouse("mouseReleased", point, clickCount);
+    }
+    await sleep(150);
+    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
+    await sleep(150);
+    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
+    expectEqual(clipboard, "wordNumber1IsDeliberatelyLong", "clipboard after double-clicking a word mid-paragraph");
+  });
+
+  // The third standard selection gesture (after drag and double-click-word):
+  // triple-click to select a whole line. xterm treats a word-wrapped
+  // paragraph's chained isWrapped rows as one "line" for this purpose, so
+  // triple-clicking anywhere in it selects the whole paragraph in one
+  // gesture — the most natural way a real user would select "this one line
+  // of chat" to copy it, and worth its own check alongside the manual
+  // full-paragraph drag above.
+  await check("triple-clicking a wrapped paragraph selects and copies the whole original line", async () => {
+    const point = await main.cellPoint(wrapRow, 5, cols);
+    for (const clickCount of [1, 2, 3]) {
+      await main.mouse("mousePressed", point, clickCount);
+      await main.mouse("mouseReleased", point, clickCount);
+    }
+    await sleep(150);
+    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
+    await sleep(150);
+    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
+    expectEqual(clipboard, longLine, "clipboard after triple-clicking the wrapped paragraph");
+  });
+
+  // Regression guard: an ordinary short line (never wrapped) must still copy
+  // exactly the selected substring, unaffected by the wrap-aware path above.
+  await check("a partial selection on a short, non-wrapped line is still copied precisely", async () => {
+    if (!latestSocket) throw new Error("no server socket to write the short line to");
+    latestSocket.write("short line\r\n");
+    await sleep(1500); // see the accessibility-tree lag note above
+    const shortRow = await main.findVisibleRow("short line");
+    if (shortRow < 0) throw new Error("couldn't find the short line in the viewport");
+    await main.dragSelectRange(shortRow, 0, 5, cols); // "short"
+    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
+    await sleep(150);
+    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
+    expectEqual(clipboard, "short", "clipboard after copying part of an unwrapped line");
   });
 
   // Launching again opens a second window in the running instance; it starts

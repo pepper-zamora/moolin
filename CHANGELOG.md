@@ -26,10 +26,14 @@ renames that section to the new version and date.
   `80x25`), next to the logging indicator.
 - Word wrap: an opt-in Global/World/Character setting (Inherit/On/Off,
   Character overrides World overrides Global) that wraps long server lines
-  at word boundaries for display, without changing what a line copies as.
-  Off by default. The Worlds dialog's Global Settings tab also gained its
-  first real setting, **Echo typed commands into the scrollback**, promoted
-  from a World-only checkbox to the same Global/World/Character cascade.
+  at word boundaries for display, without changing what a line copies as —
+  copying a wrapped paragraph substitutes the original server line, so the
+  padding spaces word wrap uses to trigger the wrap are never included
+  (selecting only part of a wrapped paragraph copies that paragraph's whole
+  original line, not just the highlighted portion). Off by default. The
+  Worlds dialog's Global Settings tab also gained its first real setting,
+  **Echo typed commands into the scrollback**, promoted from a World-only
+  checkbox to the same Global/World/Character cascade.
 
 ### Changed
 
