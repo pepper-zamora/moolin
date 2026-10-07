@@ -32,6 +32,24 @@ linux:
       Keywords: MOO;MUD;MUSH;MUCK;telnet;
       StartupWMClass: moolin
 
+# electron-builder's default pacman depends include http-parser, which Arch
+# has dropped (Electron bundles its own), so pacman -U can't resolve it. These
+# match packaging/aur/PKGBUILD, plus alsa-lib and mesa (libgbm), which the
+# binary links against.
+pacman:
+  depends:
+    - gtk3
+    - nss
+    - alsa-lib
+    - mesa
+    - libxss
+    - libxtst
+    - libnotify
+    - xdg-utils
+    - at-spi2-core
+    - libsecret
+    - util-linux-libs
+
 win:
   icon: icons/icon-512.png
   target:
