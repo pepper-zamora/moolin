@@ -357,13 +357,16 @@ test("the server sees a graceful close when the computer goes to sleep", { timeo
     socket.write("hi\r\n");
   });
   await new Promise<void>((resolve) => server.listen(0, resolve));
-  const { manager, connected } = managerWithLog();
+  const { manager, events, connected } = managerWithLog();
   try {
     manager.connect({
       world: { ...newWorld("w"), host: "127.0.0.1", port: (server.address() as net.AddressInfo).port },
       character: null,
     });
     await connected;
+    // Closing a socket that still has unread input can reset it instead of
+    // ending it cleanly, so let the greeting arrive first.
+    await waitUntil(() => events.includes("data:hi"));
     manager.disconnectForSleep();
     await waitUntil(() => ended);
   } finally {
