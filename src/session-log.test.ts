@@ -157,15 +157,12 @@ test("locateLogFile creates nothing, and names new folders by id and label", () 
   assert.deepEqual(fs.readdirSync(root), []);
 });
 
-test("locateLogFile moves a pre-prefix folder, and follows renames", () => {
+test("locateLogFile follows renames of a world and character", () => {
   const root = tempDir();
   const world = { ...newWorld("3f2a9c1e-x"), name: "LambdaMOO" };
-  // From before folders had id prefixes.
-  fs.mkdirSync(path.join(root, "LambdaMOO", "Cowpernica"), { recursive: true });
-  fs.writeFileSync(path.join(root, "LambdaMOO", "Cowpernica", "moolin.log"), "old\n");
   const file = locateLogFile(root, world, cowpernica);
-  assert.equal(file, path.join(root, "3f2a9c1e.LambdaMOO", "7b0d44aa.Cowpernica", "moolin.log"));
-  assert.equal(fs.readFileSync(file, "utf8"), "old\n");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "old\n");
 
   // Renaming the world and character renames their folders to match.
   const renamed = locateLogFile(root, { ...world, name: "LambdaCOW" }, { ...cowpernica, name: "Nica" });

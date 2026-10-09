@@ -110,9 +110,7 @@ from source never check at startup.
   characters of the world's or character's id, as in
   `3f2a9c1e.LambdaMOO/7b0d44aa.Cowpernica/`, so worlds with the same name (or
   names differing only in case) get folders of their own, and renaming a
-  world or character renames its folder to match. Folders from before the
-  ids were added are renamed the first time their world or character
-  connects. Connecting pre-populates the scrollback with the last 2 MiB of
+  world or character renames its folder to match. Connecting pre-populates the scrollback with the last 2 MiB of
   the log. A log belongs to one window at a time: the first window to
   connect to a world and character reads and writes it until it
   disconnects (its last line is the "disconnected" one), and other windows

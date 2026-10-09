@@ -46,8 +46,7 @@ export function logPathFor(root: string, world: World, character: Character | nu
 
 // Picks the folder in `dir` for one world or character, renaming an existing
 // one to match: a folder with its id prefix under an old name (it was renamed
-// since), or failing that a folder named just its label (from before folders
-// had id prefixes). If the rename fails the existing folder is used as it is.
+// since). If the rename fails the existing folder is used as it is.
 function locateFolder(dir: string, id: string, label: string): string {
   const wanted = folderName(id, label);
   let folders: string[];
@@ -60,8 +59,7 @@ function locateFolder(dir: string, id: string, label: string): string {
     return wanted; // `dir` doesn't exist yet
   }
   const prefix = idPrefix(id);
-  const existing =
-    folders.find((name) => name.startsWith(prefix)) ?? folders.find((name) => name === sanitizePathSegment(label));
+  const existing = folders.find((name) => name.startsWith(prefix));
   if (existing === undefined || existing === wanted) return wanted;
   try {
     fs.renameSync(path.join(dir, existing), path.join(dir, wanted));
