@@ -41,8 +41,13 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y rpm libarchive-tools
       - run: npm ci
-      - run: npm test
+      # Typecheck, lint and formatting, once (they don't differ by OS).
+      - run: npm run typecheck && npm run lint && npm run format:check
         if: runner.os == 'Linux'
+      # The tests shell out to openssl, which Linux and macOS runners have.
+      # Windows isn't run: openssl isn't reliably on its PATH.
+      - run: npm test
+        if: runner.os != 'Windows'
       # Catches the Mac build not starting/working at all; Linux and Windows
       # aren't covered here yet (see TODO.md).
       - run: npm run smoke

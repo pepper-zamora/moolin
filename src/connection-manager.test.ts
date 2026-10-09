@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as net from "node:net";
-import { ConnectionManager, type ConnectionManagerHandlers, PUEBLO_CLIENT_REPLY } from "./connection-manager";
+import { ConnectionManager, type ConnectionManagerHandlers, PUEBLO_CLIENT_REPLY, plain } from "./connection-manager";
 import { newWorld } from "./world-utils";
 import type { Character, ConnectTarget } from "./worlds-types";
 
@@ -49,6 +49,7 @@ function managerWithLog(): {
       resolveConnected(target);
     },
     onDisconnected: () => events.push("disconnected"),
+    onGreetingClosed: () => events.push("greeting-closed"),
   };
   return { manager: new ConnectionManager(handlers, noopLog), messages, events, connected };
 }
@@ -357,13 +358,16 @@ test("the server sees a graceful close when the computer goes to sleep", { timeo
     socket.write("hi\r\n");
   });
   await new Promise<void>((resolve) => server.listen(0, resolve));
-  const { manager, connected } = managerWithLog();
+  const { manager, events, connected } = managerWithLog();
   try {
     manager.connect({
       world: { ...newWorld("w"), host: "127.0.0.1", port: (server.address() as net.AddressInfo).port },
       character: null,
     });
     await connected;
+    // Closing a socket that still has unread input can reset it instead of
+    // ending it cleanly, so let the greeting arrive first.
+    await waitUntil(() => events.includes("data:hi"));
     manager.disconnectForSleep();
     await waitUntil(() => ended);
   } finally {
@@ -387,6 +391,176 @@ test("an ordinary disconnect keeps the plain message, and disconnecting with not
     manager.disconnect();
     assert.match(messages[messages.length - 1], /\[disconnected\]/);
   } finally {
+    server.close();
+  }
+});
+
+// A server that says nothing until `speak()` is called, then writes `text`, and
+// records what it gets.
+async function quietServer(): Promise<{
+  server: net.Server;
+  port: number;
+  received: () => string;
+  speak: (text: string) => Promise<void>;
+}> {
+  const chunks: Buffer[] = [];
+  let accepted: (socket: net.Socket) => void = () => {};
+  const client = new Promise<net.Socket>((resolve) => (accepted = resolve));
+  const server = net.createServer((socket) => {
+    accepted(socket);
+    socket.on("data", (chunk) => chunks.push(chunk));
+    socket.on("error", () => {});
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  return {
+    server,
+    port: (server.address() as net.AddressInfo).port,
+    received: () => Buffer.concat(chunks).toString("utf8"),
+    // The client sees the connection before the server has accepted it.
+    speak: async (text) => {
+      (await client).write(text);
+    },
+  };
+}
+
+test("auto-login waits for the server to send a whole line first", { timeout: TEST_TIMEOUT_MS }, async () => {
+  const { server, port, received, speak } = await quietServer();
+  const world = { ...newWorld("w"), host: "127.0.0.1", port, characters: [cowpernica] };
+  const { manager, events, connected } = managerWithLog();
+  try {
+    manager.connect({ world, character: cowpernica });
+    await connected;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(received(), "", "nothing is sent to a server that hasn't spoken");
+    assert.equal(manager.isGreetingOpen(), true);
+    await speak("login:");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(received(), "", "nor to one that has only sent part of a line");
+    assert.equal(manager.isGreetingOpen(), true);
+    await speak(" Welcome!\r\n");
+    await waitUntil(() => received().length > 0);
+    assert.equal(received(), 'co "Cowpernica" hunter2\r');
+    assert.equal(manager.isGreetingOpen(), false);
+    assert.equal(events.filter((e) => e === "greeting-closed").length, 1);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("a greeting in the welcome is answered before an auto-login, which then closes the greeting", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port, received, speak } = await quietServer();
+  const world = { ...newWorld("w"), host: "127.0.0.1", port, characters: [cowpernica] };
+  const { manager, connected } = managerWithLog();
+  try {
+    manager.connect({ world, character: cowpernica });
+    await connected;
+    await speak("This world is Pueblo 1.0 Enhanced.\r\n");
+    await waitUntil(() => received().includes("hunter2"));
+    assert.equal(received(), `${PUEBLO_CLIENT_REPLY}co "Cowpernica" hunter2\r`);
+    assert.equal(manager.isPueblo(), true);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("the words said after an auto-login are not a greeting", { timeout: TEST_TIMEOUT_MS }, async () => {
+  const { server, port, received, speak } = await quietServer();
+  const world = { ...newWorld("w"), host: "127.0.0.1", port, characters: [cowpernica] };
+  const { manager, connected } = managerWithLog();
+  try {
+    manager.connect({ world, character: cowpernica });
+    await connected;
+    await speak("Welcome!\r\n");
+    await waitUntil(() => received().includes("hunter2"));
+    await speak('Mallory says, "This world is Pueblo"\r\n');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(received(), 'co "Cowpernica" hunter2\r');
+    assert.equal(manager.isPueblo(), false);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("the words said after a typed line are not a greeting, but a greeting before one is", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port, received, speak } = await quietServer();
+  const { manager, events, connected } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null });
+    await connected;
+    assert.equal(manager.isGreetingOpen(), true);
+    manager.sendLine("look");
+    assert.equal(manager.isGreetingOpen(), false);
+    manager.sendLine("again");
+    assert.equal(events.filter((e) => e === "greeting-closed").length, 1, "closing is reported once");
+    await speak("This world is Pueblo\r\n");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(received(), "look\r\nagain\r\n");
+    assert.equal(manager.isPueblo(), false);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("a new connection opens the greeting again", { timeout: TEST_TIMEOUT_MS }, async () => {
+  const { server, port } = await quietServer();
+  const { manager, connected } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null });
+    await connected;
+    manager.sendLine("look");
+    assert.equal(manager.isGreetingOpen(), false);
+    manager.connect({ world: { ...newWorld("w2"), host: "127.0.0.1", port }, character: null });
+    assert.equal(manager.isGreetingOpen(), true);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("plain() makes control characters in a status line harmless", () => {
+  assert.equal(plain("bad\x1b[31mhost\r\nname\x07\x9b"), "bad [31mhost  name  ");
+  assert.equal(plain("café – ok"), "café – ok");
+});
+
+test("a status line built from a certificate error can't carry an escape sequence", async () => {
+  const { manager, messages } = managerWithLog();
+  manager.connect({
+    world: { ...newWorld("w"), name: "Evil\x1b[2J\x1b]0;x\x07", host: "", port: null },
+    character: null,
+  });
+  assert.ok(messages.length > 0);
+  for (const message of messages) {
+    // Only Moolin's own colour codes are left: ESC [ digits m.
+    assert.equal(message.replace(/\x1b\[\d+m/g, "").includes("\x1b"), false, JSON.stringify(message));
+  }
+});
+
+test("a greeting split across two reads is still answered before the auto-login", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port, received, speak } = await quietServer();
+  const world = { ...newWorld("w"), host: "127.0.0.1", port, characters: [cowpernica] };
+  const { manager, connected } = managerWithLog();
+  try {
+    manager.connect({ world, character: cowpernica });
+    await connected;
+    await speak("Welcome. This wor");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(received(), "", "the login waits for the end of the line");
+    await speak("ld is Pueblo 1.0 Enhanced.\r\n");
+    await waitUntil(() => received().includes("hunter2"));
+    assert.equal(received(), `${PUEBLO_CLIENT_REPLY}co "Cowpernica" hunter2\r`);
+    assert.equal(manager.isPueblo(), true);
+  } finally {
+    manager.disconnect();
     server.close();
   }
 });

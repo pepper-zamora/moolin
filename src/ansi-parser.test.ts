@@ -113,6 +113,23 @@ test("an unterminated string gives up rather than eating all later output", () =
   assert.deepEqual(summarize(p.parse("visible")), [["visible", -1, -1]]);
 });
 
+test("an endless control sequence gives up rather than eating all later output", () => {
+  const p = new AnsiParser();
+  p.parse(`\x1b[${"1;".repeat(5000)}`);
+  assert.deepEqual(summarize(p.parse("visible")), [["visible", -1, -1]]);
+  // The junk was not applied as a style either.
+  assert.deepEqual(summarize(p.parse("\x1b[31mred")), [["red", 1, -1]]);
+});
+
+test("the cache of appearances stays bounded however many colours the server uses", () => {
+  const p = new AnsiParser();
+  for (let i = 0; i < 5000; i++) {
+    for (const token of p.parse(`\x1b[38;2;${i % 256};${Math.floor(i / 256)};7mx`)) {
+      if (token.kind === "text") assert.match(appearance(token.style).css, /color:#/);
+    }
+  }
+});
+
 test("a sequence split across chunks is held over", () => {
   const p = new AnsiParser();
   assert.deepEqual(summarize(p.parse("a\x1b[3")), [["a", -1, -1]]);

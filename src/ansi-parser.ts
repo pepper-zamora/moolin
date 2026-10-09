@@ -55,6 +55,10 @@ function isLineFeed(code: number): boolean {
 
 // An unterminated OSC/DCS string would otherwise swallow the output after it.
 const MAX_STRING_LENGTH = 4096;
+// Real colour sequences are a few dozen characters; a CSI that goes on past
+// this is junk (or hostile), and is given up on rather than held in memory
+// while it swallows everything after it.
+const MAX_CSI_LENGTH = 256;
 
 type State = "ground" | "esc" | "escIntermediate" | "csi" | "string" | "stringEsc";
 
@@ -152,6 +156,7 @@ export class AnsiParser {
             this.state = "ground";
           } else if (code >= 0x20 && code <= 0x3f) {
             this.csi += text[i];
+            if (this.csi.length > MAX_CSI_LENGTH) this.state = "ground";
           }
           runStart = i + 1;
           break;
@@ -238,6 +243,9 @@ export interface Appearance {
   css: string;
 }
 
+// Keyed by style, and a style can carry any 24-bit colour, so a server could
+// otherwise make this grow without end; past the cap it starts over.
+const MAX_CACHED_APPEARANCES = 2048;
 const appearances = new Map<string, Appearance>();
 
 function hex(color: number): string {
@@ -273,6 +281,7 @@ export function appearance(style: Style): Appearance {
   if (style.underline) classes.push("ul");
   if (style.strike) classes.push("st");
   const result = { className: classes.join(" "), css };
+  if (appearances.size >= MAX_CACHED_APPEARANCES) appearances.clear();
   appearances.set(style.key, result);
   return result;
 }

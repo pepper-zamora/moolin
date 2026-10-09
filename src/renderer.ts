@@ -73,6 +73,7 @@ const linkMenu = new LinkMenu(sendLinkCommand);
 
 // The scrollback is output-only; all typing goes to #input-area, and the
 // scrollback never takes keyboard focus (see reclaimFocus).
+
 // How long after a click in the scrollback another can still make it a double
 // or triple click (the usual system default).
 const MULTI_CLICK_MS = 500;
@@ -279,12 +280,13 @@ inputArea.addEventListener("keydown", (event) => {
 
 inputArea.addEventListener("input", () => resizeInput());
 
-// Captured before the value mutates (unlike "input", which fires after), so
-// the pre-edit state can be pushed as an undo step. Consecutive keystrokes
-// coalesce into one step via InputUndoStack's own debounce.
 // Working in the input line (clicking into it, or editing it) ends a lingering
 // scrollback selection, so Select All then means the input line.
 inputArea.addEventListener("mousedown", () => view.clearSelection());
+// "beforeinput" is captured before the value mutates (unlike "input", which
+// fires after), so the pre-edit state can be pushed as an undo step.
+// Consecutive keystrokes coalesce into one step via InputUndoStack's own
+// debounce.
 inputArea.addEventListener("beforeinput", () => {
   view.clearSelection();
   inputUndo.pushTyping(inputSnapshot(), Date.now());
@@ -483,7 +485,7 @@ document.addEventListener("contextmenu", (event) => {
 // Lines with no recorded time (null — old history, or Moolin's own lines) get
 // no stamp (see GAPS.md §8).
 function writeReplay(replay: ScrollbackReplay): void {
-  view.replay(replay.chunks, replay.times, replay.pueblo);
+  view.replay(replay.chunks, replay.times, replay.pueblo, replay.greetingOpen);
 }
 
 // Starts over from a replay: the connect-time switch to a world's logged
@@ -505,10 +507,12 @@ function applyData(data: string | Uint8Array, time: number | null): void {
 async function loadScrollback(): Promise<void> {
   const live = new LiveReplay(writeReplay, (event) => {
     if (event.kind === "data") applyData(event.data, event.time);
+    else if (event.kind === "greetingClosed") view.closeGreeting();
     else applyReset(event.replay);
   });
   window.moolin.onTerminalReset((replay) => live.receive({ kind: "reset", replay }));
   window.moolin.onTelnetData((data, time, seq) => live.receive({ kind: "data", data, time, seq }));
+  window.moolin.onGreetingClosed((seq) => live.receive({ kind: "greetingClosed", seq }));
   const replay = await window.moolin.getScrollback();
   window.moolin.log("debug", "renderer", "replaying", replay.chunks.length, "buffered chunk(s)");
   live.replay(replay);

@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./file-modes";
 import { countLineFeeds } from "./line-feeds";
 import type { Character, World } from "./worlds-types";
 import { characterLabel, worldLabel } from "./world-utils";
@@ -258,6 +259,18 @@ export interface LogHistory {
   times: Array<number | null>;
 }
 
+// Opens a file for appending, readable by its owner alone. A log written by an
+// earlier version is tightened too.
+function openPrivate(file: string): number {
+  const fd = fs.openSync(file, "a", PRIVATE_FILE_MODE);
+  try {
+    fs.fchmodSync(fd, PRIVATE_FILE_MODE);
+  } catch {
+    // Not supported everywhere (Windows); the mode above is all there is.
+  }
+  return fd;
+}
+
 // Writes all of `bytes` at the end of `fd`'s file (opened for append),
 // looping in case the OS takes it in parts.
 function writeAll(fd: number, bytes: Uint8Array): void {
@@ -306,11 +319,11 @@ export class SessionLog {
     try {
       if (this.fd === null) {
         this.prepare();
-        fs.mkdirSync(path.dirname(this.file), { recursive: true });
-        this.fd = fs.openSync(this.file, "a");
-        this.timesFd = fs.openSync(timesFileFor(this.file), "a");
+        fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: PRIVATE_DIR_MODE });
+        this.fd = openPrivate(this.file);
+        this.timesFd = openPrivate(timesFileFor(this.file));
         const sizes = { log: fs.fstatSync(this.fd).size, times: fs.fstatSync(this.timesFd).size };
-        fs.writeFileSync(openFileFor(this.file), JSON.stringify(sizes));
+        fs.writeFileSync(openFileFor(this.file), JSON.stringify(sizes), { mode: PRIVATE_FILE_MODE });
       }
       writeAll(this.fd, typeof data === "string" ? Buffer.from(data, "utf8") : data);
       const lineFeeds = countLineFeeds(data);

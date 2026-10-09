@@ -81,20 +81,36 @@ export class LineStream {
     this.ingest(data, constantTime(time));
   }
 
+  // The server's Pueblo greeting no longer counts (the first line has been
+  // sent to the server); see PuebloParser.detecting.
+  closeGreeting(): void {
+    this.pueblo.detecting = false;
+  }
+
   // Adds history: chunks in order, with one time per line feed across them all
   // (null where unknown; fewer than there are line feeds is fine). `pueblo` is
-  // whether the connection is in Pueblo mode once the history ends.
-  replay(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>, pueblo = false): void {
+  // whether the connection is in Pueblo mode once the history ends, and
+  // `greetingOpen` whether a greeting could still switch it on.
+  replay(
+    chunks: ReadonlyArray<string | Uint8Array>,
+    times: ReadonlyArray<number | null>,
+    pueblo = false,
+    greetingOpen = true,
+  ): void {
     // The mode at the start: already on, unless the greeting that turns it on
     // is in the history itself.
     const decoder = new TextDecoder();
     const greeted =
       pueblo && chunks.some((chunk) => hasGreeting(typeof chunk === "string" ? chunk : decoder.decode(chunk)));
     this.pueblo.setEnabled(pueblo && !greeted);
+    // A greeting in the history is what put the connection in Pueblo mode, so
+    // it must be found again; one in a connection that isn't must not be.
+    this.pueblo.detecting = pueblo || greetingOpen;
     this.link = null;
     const source = listedTimes(times);
     for (const chunk of chunks) this.ingest(chunk, source);
     this.pueblo.setEnabled(pueblo);
+    this.pueblo.detecting = greetingOpen;
     this.link = null;
   }
 

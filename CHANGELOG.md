@@ -65,6 +65,13 @@ renames that section to the new version and date.
   saved by this version; existing files are migrated automatically on read
   (`true` → `"on"`, `false` → `"off"`).
 
+- The Pueblo greeting only counts from the start of a connection until the
+  first line is sent to the server (typed, or the auto-login). Before, anyone
+  on a world could say the words later and turn their text into links that
+  ran commands when clicked. To keep Pueblo working with auto-login, the
+  login is now held until the server has sent a whole line; a server that
+  sends none until it is spoken to no longer gets the login.
+
 ### Removed
 
 - The undocumented `--screen-reader-mode` flag, which only existed to let the
@@ -82,6 +89,23 @@ renames that section to the new version and date.
   Before, the sleep cut the connection off silently, and the window looked
   live after waking until a line sent failed with an error like `read
   EADDRNOTAVAIL`.
+- The worlds file, its backup, and session logs (and the folders made for
+  them) are now readable by their owner alone on macOS and Linux, where they
+  used the system default, usually readable by every user on the machine. A
+  file from an earlier version is tightened the next time it is written. The
+  README now has a section on what Moolin stores and who can read it.
+- The main process now checks everything the window sends it, and only from
+  a Moolin window's own page, since that page displays whatever servers send:
+  sizes, addresses (only `http` and `https` are opened), text, menu items and
+  log calls are all validated before use. The window is sandboxed explicitly,
+  can't open other windows or navigate away, and its content security policy
+  is stricter. Status lines no longer pass control characters on, such as from
+  a certificate's host names in an error, and a connection that never
+  answers gives up after 20 seconds instead of waiting for the system's much
+  longer timeout.
+- A server can no longer make Moolin hold memory without end with a control
+  sequence that never finishes, endless distinct colours, or endless made-up
+  Pueblo tag names; each is now capped.
 - Keyboard shortcuts now use Cmd instead of Ctrl on macOS, matching that
   platform's convention.
 

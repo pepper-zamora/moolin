@@ -14,6 +14,10 @@ const TELOPT_NAWS = 31;
 // error, but some just sit waiting for a login line.
 const TLS_HANDSHAKE_TIMEOUT_MS = 15000;
 
+// How long to wait for the TCP connection itself, which the OS would otherwise
+// leave to its own (minutes-long) timeout for a host that never answers.
+export const CONNECT_TIMEOUT_MS = 20000;
+
 // What to do as an option is switched on or off at one end.
 interface OptionSide {
   onEnable?: () => void;
@@ -39,6 +43,8 @@ export interface ConnectOptions {
   tls: boolean;
   // Connect even if the server's certificate fails verification.
   tlsAllowUntrusted: boolean;
+  // Overrides CONNECT_TIMEOUT_MS (for tests).
+  connectTimeoutMs?: number;
 }
 
 // One certificate from the server's chain, flattened to plain strings so it
@@ -213,10 +219,16 @@ export class TelnetSession {
   connect(options: ConnectOptions): void {
     const { host, port } = options;
     this.log("debug", "tcp connecting to", `${host}:${port}`, options.tls ? "(TLS)" : "(plaintext)");
+    const connectTimeout = options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
+    const giveUp = (socket: Socket): void => {
+      socket.setTimeout(connectTimeout, () => socket.destroy(new Error(`timed out connecting to ${host}:${port}`)));
+    };
     if (!options.tls) {
       const socket = net.createConnection({ host, port });
       this.pendingSocket = socket;
+      giveUp(socket);
       this.handlePendingSocket(socket, "connect", () => {
+        socket.setTimeout(0);
         this.log("debug", "tcp connected (plaintext)");
         this.establish(socket, false);
       });
@@ -229,6 +241,7 @@ export class TelnetSession {
     // Only TLS 1.2+; no maxVersion ceiling, so newer versions stay allowed.
     const socket = tls.connect({ host, port, rejectUnauthorized: false, minVersion: "TLSv1.2" });
     this.pendingSocket = socket;
+    giveUp(socket);
     socket.once("connect", () => {
       socket.setTimeout(TLS_HANDSHAKE_TIMEOUT_MS, () => {
         socket.destroy(new Error("TLS handshake timed out (is this port really TLS?)"));
@@ -418,8 +431,9 @@ export class TelnetSession {
   }
 
   resize(cols: number, rows: number): void {
-    this.cols = cols;
-    this.rows = rows;
+    // NAWS carries two bytes each.
+    this.cols = Math.min(0xffff, Math.max(1, Math.trunc(cols) || 1));
+    this.rows = Math.min(0xffff, Math.max(1, Math.trunc(rows) || 1));
     this.sendNaws();
   }
 

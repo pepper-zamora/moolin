@@ -4,6 +4,7 @@ import * as path from "node:path";
 import type { Character, GlobalSettings, MruEntry, TriState, World } from "./worlds-types";
 import { DEFAULT_GLOBAL_SETTINGS, DEFAULT_LOGIN_TEMPLATE, isValidPort } from "./world-utils";
 import { log } from "./logger";
+import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./file-modes";
 
 const DEFAULT_WORLDS_PATH = path.join("~", "Documents", "Moolin", "worlds");
 
@@ -229,9 +230,10 @@ function unreadablePathFor(filePath: string, now: Date): string {
 // under a dated name so the backup it was recovered from stays intact.
 function writeState(filePath: string, state: WorldsState, read: WorldsReadResult): void {
   const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
   const tmpPath = path.join(dir, `.${path.basename(filePath)}.tmp-${process.pid}`);
-  fs.writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, "utf-8");
+  // It becomes the worlds file, passwords and all, when renamed into place.
+  fs.writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, { encoding: "utf-8", mode: PRIVATE_FILE_MODE });
   if (read.recovered) {
     const aside = unreadablePathFor(filePath, new Date());
     fs.renameSync(filePath, aside);
@@ -239,6 +241,7 @@ function writeState(filePath: string, state: WorldsState, read: WorldsReadResult
   } else if (fs.existsSync(filePath)) {
     try {
       fs.copyFileSync(filePath, backupPathFor(filePath));
+      fs.chmodSync(backupPathFor(filePath), PRIVATE_FILE_MODE); // a copy keeps an older backup's mode
     } catch (err) {
       // A backup is a nicety; not having one mustn't stop the save.
       log("warn", "worlds", "could not back up", filePath, ":", (err as Error).message);

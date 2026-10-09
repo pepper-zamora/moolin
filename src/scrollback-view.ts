@@ -184,9 +184,19 @@ export class ScrollbackView {
   }
 
   // Adds history; see LineStream.replay.
-  replay(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>, pueblo = false): void {
-    this.stream.replay(chunks, times, pueblo);
+  replay(
+    chunks: ReadonlyArray<string | Uint8Array>,
+    times: ReadonlyArray<number | null>,
+    pueblo = false,
+    greetingOpen = true,
+  ): void {
+    this.stream.replay(chunks, times, pueblo, greetingOpen);
     this.flush();
+  }
+
+  // See LineStream.closeGreeting.
+  closeGreeting(): void {
+    this.stream.closeGreeting();
   }
 
   // Starts over: no lines, and no half-received escape sequence or style.

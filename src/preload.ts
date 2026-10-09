@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld("moolin", {
   onTerminalReset: (callback: (replay: ScrollbackReplay) => void): void => {
     ipcRenderer.on(IpcChannels.terminalReset, (_event, replay: ScrollbackReplay) => callback(replay));
   },
+  onGreetingClosed: (callback: (seq: number) => void): void => {
+    ipcRenderer.on(IpcChannels.terminalGreetingClosed, (_event, seq: number) => callback(seq));
+  },
   getConnectionState: (): Promise<WindowState> => ipcRenderer.invoke(IpcChannels.connectionGetState),
   onTelnetData: (callback: (data: string | Uint8Array, time: number | null, seq: number) => void): void => {
     ipcRenderer.on(IpcChannels.telnetData, (_event, data: string | Uint8Array, time: number | null, seq: number) =>
@@ -95,7 +98,7 @@ contextBridge.exposeInMainWorld("moolin", {
       callback(font),
     );
   },
-  // The font/size a freshly opened window's Terminal should construct with,
+  // The font/size a freshly opened window's scrollback should start with,
   // read from argv (see parseFontArgs) so it's available before the first
   // paint rather than arriving a tick late over IPC.
   initialFont: parseFontArgs(process.argv),

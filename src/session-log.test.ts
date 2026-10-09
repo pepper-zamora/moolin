@@ -337,3 +337,27 @@ test("after a crash, times recorded for output the log lost are dropped", () => 
   assert.deepEqual(history.times, [1]);
   reopened.close();
 });
+
+test("log files and the folders made for them can be read by their owner alone", {
+  skip: process.platform === "win32",
+}, () => {
+  const root = tempDir();
+  const file = path.join(root, "w", "c", "moolin.log");
+  const log = new SessionLogRegistry().claim(file, () => file);
+  assert.ok(log);
+  log.append("secret\r\n", 1000);
+  const mode = (target: string) => fs.statSync(target).mode & 0o777;
+  assert.equal(mode(file), 0o600);
+  assert.equal(mode(`${file}.times`), 0o600);
+  assert.equal(mode(`${file}.open`), 0o600);
+  assert.equal(mode(path.dirname(file)), 0o700);
+  log.close();
+
+  // A log from an earlier version, readable by everyone, is tightened when reopened.
+  fs.chmodSync(file, 0o644);
+  const again = new SessionLogRegistry().claim(file, () => file);
+  assert.ok(again);
+  again.append("more\r\n", 2000);
+  assert.equal(mode(file), 0o600);
+  again.close();
+});

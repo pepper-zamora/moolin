@@ -36,16 +36,17 @@ npm run format:check # Biome; npm run format to apply
 npm test             # src/*.test.ts via Node's test runner
 ```
 
-CI (`.github/workflows/release.yml`) only runs `npm test`, on Linux, and only
-when packaging a release build — it does not typecheck or lint. Treat the
-commands above as mandatory locally regardless; nothing else will catch a
-type or style regression before review.
+CI (`.github/workflows/release.yml`) runs on pushes to `dev`, pull requests
+into `dev` or `main`, and release tags. On Linux it runs `typecheck`, `lint`
+and `format:check`, and on Linux and macOS `npm test`; on macOS it also runs
+`npm run smoke`. Windows is only built, not tested. Treat the commands above
+as mandatory locally regardless: CI reports a problem only after it's pushed.
 
 The TLS tests shell out to `openssl` to generate a throwaway certificate, so
 it must be on `PATH`. If you touch anything under terminal rendering, the
 Worlds dialog, or focus/keyboard handling, also run `npm run smoke` (Linux
 and macOS; needs a real display, or `xvfb-run` on headless Linux) — it drives
-a real packaged window over the Chrome DevTools Protocol and catches things
+a real window over the Chrome DevTools Protocol and catches things
 unit tests can't, such as focus ending up in the wrong element.
 
 ## Code style
@@ -73,3 +74,12 @@ feature that prompted them, not as separate catch-up commits). Keep that
 habit: when you change behavior, update README.md/GAPS.md/PROTOCOLS.md in the
 same change if they describe the old behavior, and prefer small, reviewable
 commits over sweeping ones.
+
+## Security
+
+The renderer displays whatever servers send, so the main process treats
+everything the renderer sends it as untrusted input: a new IPC message gets a
+parser in `src/ipc-validate.ts` (with tests), and its handler in `src/main.ts`
+uses only what that returns. Server text is only ever put in the page with
+`textContent`, never as HTML. Files holding passwords or logs are written with
+the modes in `src/file-modes.ts`.
