@@ -118,15 +118,17 @@ from source never check at startup.
   disconnects (its last line is the "disconnected" one), and other windows
   connected meanwhile don't log. The status bar shows which: a scroll beside
   the security shield when the window is logging, a red "no" sign when
-  another window has the log. The log grows without bound for now, as does
-  the `moolin.log.times` file beside it (see timestamps, below); delete or
-  prune the two together. While a window has the log open there's also a
-  small `moolin.log.open` file beside it, which lets Moolin repair the
-  timestamps if it crashes.
+  another window has the log. The log grows without bound for now; delete or
+  prune it as a whole. It isn't plain text: its first line says what it is
+  (`MOOLIN-LOG 1 plain`), and every line after it is a base64 record holding
+  what was shown and when each line arrived, so a server that sends escape
+  sequences can't make a terminal act on them if you `cat` the log. A log
+  from 0.1.x (the raw bytes, with a `moolin.log.times` file beside it) is
+  converted the first time Moolin uses it.
 - **Line timestamps.** View > Show Timestamps adds a gutter showing when each
   line from the server arrived, with the date wherever the day changes. The
   times are display-only: they never appear in copied text or in the log,
-  and are kept in `moolin.log.times` so logged history keeps its times on
+  and are kept in the log so logged history keeps its times on
   reconnect. The last setting chosen is remembered for new windows (see
   [Preferences](#preferences)).
 - **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
@@ -378,9 +380,8 @@ Beyond that, it's up to you:
   of a synced folder by passing the worlds file's path on the command line,
   or exclude the `Moolin` folder from the sync.
 - Backups of your home folder include them too.
-- A log holds the server's raw escape sequences. Open it in an editor or with
-  `less -R`; writing it straight to a terminal with `cat` makes the terminal
-  act on whatever the server sent.
+- A log is base64 text, so `cat`ing it is safe whatever the server sent. It
+  also isn't readable as it is; Moolin shows its tail when you reconnect.
 - Without TLS, anything you send, an auto-login's password included, can be
   read by anyone on the network path. The shield in the status bar says which
   you have.
@@ -499,7 +500,9 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
 | `src/ipc-validate.ts`     | Checks on every message the window sends the main process (sizes, addresses, text, ...) |
 | `src/file-modes.ts`       | The owner-only permissions for the worlds file and session logs            |
-| `src/session-log.ts`      | Persistent per-world/character logs, their `.times` sidecar, and which window owns each |
+| `src/session-log.ts`      | Persistent per-world/character logs and which window owns each              |
+| `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting older logs |
+| `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
 | `src/renderer.ts`         | The terminal window's page: wires the scrollback, gutter, input area, status bar and keys together |

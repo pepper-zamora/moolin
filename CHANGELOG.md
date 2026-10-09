@@ -89,6 +89,13 @@ renames that section to the new version and date.
   Before, the sleep cut the connection off silently, and the window looked
   live after waking until a line sent failed with an error like `read
   EADDRNOTAVAIL`.
+- **Session logs have a new format.** Instead of the server's raw bytes plus a
+  `moolin.log.times` file of arrival times (and a `moolin.log.open` marker
+  while open), `moolin.log` is now one file: a first line saying what it is,
+  then one base64 record per write, each holding the bytes and the time of
+  each line feed in them. It is safe to `cat` whatever the server sent. A log
+  from an earlier version is converted the first time Moolin uses it, and an
+  older Moolin can't read the new format.
 - The worlds file, its backup, and session logs (and the folders made for
   them) are now readable by their owner alone on macOS and Linux, where they
   used the system default, usually readable by every user on the machine. A
