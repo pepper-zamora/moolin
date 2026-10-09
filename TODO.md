@@ -7,6 +7,64 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
 
 ## App
 
+- **Endless scroll: page older history into the scrollback from main.** The
+  scrollback keeps the newest 20,000 lines as page elements (`SCROLLBACK_LINES`
+  in `src/renderer.ts`); anything older is gone from the window even though
+  the main process still has it. Paging it back in would let the user scroll
+  through far more without paying for it in page elements. Not urgent: the
+  bounded scrollback is already cheap. Measured in Electron on macOS, a
+  40,000-line replay (reload, world switch) takes about 250 ms with only the
+  newest 20,000 drawn, a 30,000-line flood about 260 ms including layout,
+  steady output no measurable work beyond the frame, and scrolling back
+  through 20,000 lines about 8 ms a frame. Two things tried and rejected:
+  `content-visibility: auto` on the lines was about five times *slower*
+  (57 ms against 10 ms a frame with steady output, 41 ms against 8 ms a
+  scrolled frame), because pinning to the bottom and the gutter's `offsetTop`
+  reads keep forcing layout of the skipped content; and drawing a long replay
+  in slices across frames isn't needed (lines about to be trimmed are never
+  drawn). Do this only if people want deep history.
+
+  The data is already in main: `ScrollbackBuffer` (`src/scrollback-buffer.ts`)
+  records every line a window receives, in memory, whether or not the session
+  log file is being written (the file is skipped when another window owns it),
+  and the log file with its `.times` sidecar (`src/session-log.ts`) is a
+  colder tier behind it when this window owns it. Today the buffer is capped
+  at 2 MiB (`MAX_SCROLLBACK_BYTES`, `src/terminal-window.ts`) and the
+  renderer replays all of it. The design:
+
+  - The renderer holds a window of recent lines (live data plus the initial
+    replay). Older lines are fetched on demand as the user scrolls toward the
+    top, prepended with the scroll position compensated (`overflow-anchor`, or
+    `scrollTop` plus the added height), and dropped from the far end when
+    scrolling back down. Pages rather than per-line virtualization: wrapping
+    makes line heights variable, so fixed-height virtual lists don't work, and
+    pages avoid estimating heights. The scrollbar then reflects the loaded
+    window, as in a chat app, not the whole history; jumping to an arbitrary
+    old position is out of scope.
+  - Give `ScrollbackBuffer` a monotonically increasing absolute position
+    (bytes trimmed so far plus the offset), raise its cap well above what the
+    renderer draws (raw text is far cheaper than page elements), and add IPC
+    (`ipc-channels.ts`, `preload.ts`, `main.ts`): `getHistoryPage(beforePosition,
+    maxBytes)` returning `{ bytes, times, nextPosition | null }`, with the
+    initial replay carrying its own start position. Pages are strictly older
+    than the replay, so `LiveReplay`'s sequence de-duplication is unaffected.
+  - Page backward by bytes and cut forward to the first line feed (LF never
+    occurs inside UTF-8 or an escape sequence, the same argument as
+    `ScrollbackBuffer.trim`), counting line feeds with `countLineFeeds` and
+    taking the matching times by counting from the end. Past the memory cap,
+    read from the file tail the same way (the sidecar's fixed-width records
+    make a line's time an O(1) lookup from the end).
+  - The seam is `LineStream` (`src/line-stream.ts`): lines already carry a
+    `time` and a stable `id`. Add a `loadOlder(): Promise<Page | null>` source
+    and a `prepend` on `LineBuilder` that doesn't touch the open line.
+
+  Caveats: the SGR state at a page start is unknown going backward, so older
+  pages start in the default style (wrong only for a colour opened on a
+  previous line and never reset). Find and select-all only cover loaded
+  lines, unless search moves to main, which would also find all history.
+  Main's memory grows with the raised cap. Check whether the log file is
+  size-capped or rotated, and note `session-log.ts`'s reads are synchronous,
+  so page reads should be small and async.
 - **A dead connection isn't detected after the Mac sleeps and wakes.**
   Reported on macOS: suspending (lid close / sleep) and later waking leaves
   the window showing "Connected" with no error, but the underlying telnet

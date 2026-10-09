@@ -7,6 +7,11 @@ import { linkify } from "./linkify";
 // Pixels from the bottom within which the view counts as scrolled to the bottom.
 const STICK_THRESHOLD = 4;
 
+// Output is drawn once per animation frame, but a hidden window gets none, so
+// it is also drawn by a timer, and at once when this many lines are waiting.
+const FLUSH_FALLBACK_MS = 250;
+const EAGER_FLUSH_LINES = 2000;
+
 // A trim drops this fraction of the cap at once, so a full scrollback is
 // trimmed every so many lines rather than on every one.
 const TRIM_SLACK_FRACTION = 0.1;
@@ -40,6 +45,9 @@ export class ScrollbackView {
   private readonly changeListeners: Array<() => void> = [];
   private readonly scrollListeners: Array<() => void> = [];
   private stuck = true;
+  private flushPending = false;
+  private flushFrame = 0;
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private cols = 0;
   private rows = 0;
   private cellHeight = 18;
@@ -124,7 +132,7 @@ export class ScrollbackView {
   // Adds server (or Moolin) output; see LineStream.write.
   write(data: string | Uint8Array, time: number | null): void {
     this.stream.write(data, time);
-    this.flush();
+    this.scheduleFlush();
   }
 
   // Adds history; see LineStream.replay.
@@ -151,12 +159,36 @@ export class ScrollbackView {
     this.flush();
   }
 
+  // Output is parsed as it arrives but drawn in batches: one DOM update (and
+  // layout) per frame however many chunks came in.
+  private scheduleFlush(): void {
+    if (this.stream.dirtyCount > EAGER_FLUSH_LINES) {
+      this.flush();
+      return;
+    }
+    if (this.flushPending) return;
+    this.flushPending = true;
+    this.flushFrame = requestAnimationFrame(() => this.flush());
+    this.flushTimer = setTimeout(() => this.flush(), FLUSH_FALLBACK_MS);
+  }
+
   // Draws what has been added since the last flush.
   flush(): void {
+    if (this.flushPending) {
+      cancelAnimationFrame(this.flushFrame);
+      if (this.flushTimer !== null) clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+      this.flushPending = false;
+    }
     const dirty = this.stream.takeDirty();
     if (dirty.length === 0) return;
+    // Trim first, so lines about to be discarded (a replay longer than the
+    // cap) are never drawn.
+    this.trim();
     const fresh = document.createDocumentFragment();
     for (const line of dirty) {
+      // Dropped before it was drawn.
+      if (line.dropped) continue;
       if (!line.el) {
         line.el = document.createElement("div");
         line.el.className = "line";
@@ -166,7 +198,6 @@ export class ScrollbackView {
       if (line !== this.stream.openLine) line.runs = null;
     }
     this.linesEl.append(fresh);
-    this.trim();
     if (this.stuck) this.scrollToBottomNow();
     this.emitChange();
   }
@@ -201,9 +232,12 @@ export class ScrollbackView {
     const { maxLines } = this.options;
     const count = this.stream.lines.length;
     if (count <= maxLines + Math.ceil(maxLines * TRIM_SLACK_FRACTION)) return;
-    const dropped = this.stream.dropFront(count - maxLines);
-    const first = dropped[0].el as HTMLElement;
-    const last = dropped[dropped.length - 1].el as HTMLElement;
+    // Only the lines already drawn have anything to remove; they are the
+    // oldest, so they are a run at the front.
+    const drawn = this.stream.dropFront(count - maxLines).filter((line) => line.el);
+    if (drawn.length === 0) return;
+    const first = drawn[0].el as HTMLElement;
+    const last = drawn[drawn.length - 1].el as HTMLElement;
     const range = document.createRange();
     range.setStartBefore(first);
     range.setEndAfter(last);

@@ -118,3 +118,13 @@ test("ids are unique and increasing, even across trims", () => {
     [...b.lines.map((l) => l.id)].sort((x, y) => x - y),
   );
 });
+
+test("dropped lines are marked, so a view can skip ones it never drew", () => {
+  const b = new LineBuilder();
+  b.feed(new AnsiParser().parse("a\nb\nc\n"), () => null);
+  const [a, bLine] = b.dropFront(2);
+  assert.equal(a.dropped, true);
+  assert.equal(bLine.dropped, true);
+  assert.equal(b.lines[0].dropped, undefined);
+  assert.equal(b.dirtyCount, 3);
+});

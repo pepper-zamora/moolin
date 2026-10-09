@@ -20,6 +20,8 @@ export interface Line {
   runs: Run[] | null;
   // Set by the view once drawn.
   el?: HTMLElement;
+  // Set when trimmed away, so a line dropped before it was drawn never is.
+  dropped?: boolean;
 }
 
 // A line that grows without a line feed (a stuck server, a binary dump) is cut
@@ -104,6 +106,7 @@ export class LineBuilder {
   // Drops the oldest `count` lines, returning them.
   dropFront(count: number): Line[] {
     const dropped = this.lines.splice(0, count);
+    for (const line of dropped) line.dropped = true;
     if (this.open && dropped.includes(this.open)) this.open = null;
     return dropped;
   }
