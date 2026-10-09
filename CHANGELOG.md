@@ -89,6 +89,11 @@ renames that section to the new version and date.
   Before, the sleep cut the connection off silently, and the window looked
   live after waking until a line sent failed with an error like `read
   EADDRNOTAVAIL`.
+- The worlds file, its backup, and session logs (and the folders made for
+  them) are now readable by their owner alone on macOS and Linux, where they
+  used the system default, usually readable by every user on the machine. A
+  file from an earlier version is tightened the next time it is written. The
+  README now has a section on what Moolin stores and who can read it.
 - A server can no longer make Moolin hold memory without end with a control
   sequence that never finishes, endless distinct colours, or endless made-up
   Pueblo tag names; each is now capped.

@@ -254,3 +254,29 @@ test("updateMru reports a failed write instead of throwing", () => {
     assert.deepEqual(readWorldsFile(file).state.mru, []);
   });
 });
+
+// Windows has no POSIX modes to check.
+const posix = { skip: process.platform === "win32" };
+
+test("the worlds file and its backup can be read by their owner alone", posix, () => {
+  withTempDir((dir) => {
+    const file = path.join(dir, "worlds");
+    saveWorlds(file, [newWorld("a")]);
+    // A backup left by an older version, readable by everyone.
+    fs.writeFileSync(backupPathFor(file), "{}", { mode: 0o644 });
+    fs.chmodSync(backupPathFor(file), 0o644);
+    saveWorlds(file, [newWorld("a"), newWorld("b")]);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    assert.equal(fs.statSync(backupPathFor(file)).mode & 0o777, 0o600);
+  });
+});
+
+test("a worlds file that was readable by everyone is tightened by the next save", posix, () => {
+  withTempDir((dir) => {
+    const file = path.join(dir, "worlds");
+    fs.writeFileSync(file, JSON.stringify({ worlds: [] }));
+    fs.chmodSync(file, 0o644);
+    saveWorlds(file, [newWorld("a")]);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  });
+});

@@ -340,7 +340,8 @@ the running instance's worlds file, whatever path is passed.
 If the file doesn't exist yet, Moolin creates it with one world already in
 it — LambdaMOO, with a Guest character — rather than starting empty.
 
-Character passwords are stored in this file **in plain text**.
+Character passwords are stored in this file **in plain text** (see
+[What Moolin stores, and who can read it](#what-moolin-stores-and-who-can-read-it)).
 
 Writes are atomic (write to a temporary file, then rename), and each one
 first copies the previous version to `worlds.bak` beside it. If the file
@@ -350,6 +351,39 @@ the unreadable file kept beside it as `worlds.unreadable-<date>`, so a typo
 from hand-editing never costs you anything. If the backup can't be read
 either, the dialog says so and Moolin refuses to save at all. Malformed
 individual entries are skipped with a warning.
+
+### What Moolin stores, and who can read it
+
+Moolin keeps two things on disk that you should treat as private:
+
+- **Passwords.** The worlds file, and its `worlds.bak` copy, hold every
+  character's password **in plain text**. Moolin doesn't encrypt them (it has
+  no master password or keychain support yet), so anyone who can read the
+  file can read them.
+- **Logs.** Each `moolin.log` holds everything a window showed: what the
+  world sent you, private messages included, and the commands you typed, as
+  Moolin echoed them. If you type a password into a command yourself
+  (`connect Name secret`), the echo puts it in the log; turn off **Echo typed
+  commands** for that world, or use auto-login, which is never logged.
+
+On macOS and Linux, Moolin writes these files readable by you alone (mode
+`600`, and `700` for the folders it creates), and tightens a file made by an
+earlier version the next time it writes it. Folders that already existed are
+left as they were. On Windows it relies on your user folder's own permissions.
+
+Beyond that, it's up to you:
+
+- `~/Documents` is synced to the cloud on many systems (iCloud Drive,
+  OneDrive), which would copy your passwords and logs with it. Keep them out
+  of a synced folder by passing the worlds file's path on the command line,
+  or exclude the `Moolin` folder from the sync.
+- Backups of your home folder include them too.
+- A log holds the server's raw escape sequences. Open it in an editor or with
+  `less -R`; writing it straight to a terminal with `cat` makes the terminal
+  act on whatever the server sent.
+- Without TLS, anything you send, an auto-login's password included, can be
+  read by anyone on the network path. The shield in the status bar says which
+  you have.
 
 ## Preferences
 
@@ -463,6 +497,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/world-utils.ts`      | World helpers shared by main and renderer (defaults, labels, login templates) |
 | `src/update-check.ts`     | Asking GitHub whether a newer release exists                              |
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
+| `src/file-modes.ts`       | The owner-only permissions for the worlds file and session logs            |
 | `src/session-log.ts`      | Persistent per-world/character logs, their `.times` sidecar, and which window owns each |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
