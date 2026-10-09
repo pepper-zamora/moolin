@@ -84,6 +84,7 @@ export class TerminalWindow {
         onConnected: (target) => handlers.onConnected(target),
         // After the "disconnected" line, so the log ends with it.
         onDisconnected: () => this.sessionLog.release(),
+        onGreetingClosed: () => this.send(IpcChannels.terminalGreetingClosed, ++this.seq),
       },
       (level, ...args) => log(level, `telnet:${id}`, ...args),
     );
@@ -187,6 +188,7 @@ export class TerminalWindow {
       times: this.scrollback.snapshotTimes(),
       seq: this.seq,
       pueblo: this.connection.isPueblo(),
+      greetingOpen: this.connection.isGreetingOpen(),
     };
   }
 }

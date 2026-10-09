@@ -58,6 +58,9 @@ export interface ConnectionManagerHandlers {
   // written through onMessage — the point to stop recording the window's
   // output for that target.
   onDisconnected: () => void;
+  // The server's Pueblo greeting no longer counts: a line has been sent to it
+  // (see ConnectionManager.isGreetingOpen).
+  onGreetingClosed: () => void;
 }
 
 // What Pueblo clients send on seeing the server's greeting (see pueblo.ts); a
@@ -87,6 +90,14 @@ export class ConnectionManager {
   // Why this side is ending the connection, for the status line, until the
   // session reports it ended.
   private disconnectReason: string | null = null;
+  // Whether the server's Pueblo greeting still counts. It does from the start
+  // of a connection until the first line is sent to the server, typed or an
+  // auto-login: the greeting comes with the server's welcome, before anyone has
+  // spoken, while a player could say the same words later and, were it taken
+  // for a greeting, turn their text into links that run commands when clicked.
+  private greetingOpen = false;
+  // The auto-login, held until the server has sent something (see connect).
+  private pendingLogin: string | null = null;
   private readonly greeting = new GreetingDetector();
   private greetingDecoder = new TextDecoder();
   // The window's current size, applied to each new session so NAWS reports
@@ -128,6 +139,17 @@ export class ConnectionManager {
     return this.pueblo;
   }
 
+  // Whether the server's greeting could still switch Pueblo on (see greetingOpen).
+  isGreetingOpen(): boolean {
+    return this.greetingOpen;
+  }
+
+  private closeGreeting(): void {
+    if (!this.greetingOpen) return;
+    this.greetingOpen = false;
+    this.handlers.onGreetingClosed();
+  }
+
   // Whether the telnet session is fully established (not just "a connect
   // attempt is in flight") — used to decide whether typed input can be sent.
   isConnected(): boolean {
@@ -154,6 +176,8 @@ export class ConnectionManager {
     this.tlsInfo = null;
     this.resolved = resolved;
     this.pueblo = false;
+    this.greetingOpen = true;
+    this.pendingLogin = null;
     this.greeting.reset();
     this.greetingDecoder = new TextDecoder();
     const host = world.host.trim();
@@ -173,15 +197,24 @@ export class ConnectionManager {
           this.handlers.onConnected(target);
           this.handlers.onStateChange();
           this.handlers.onMessage(green(`connected to ${label}${secure ? ", securely (TLS)" : ""}`));
+          // Held until the server speaks first, so its greeting is seen before
+          // anything is sent (see greetingOpen). A server that says nothing
+          // until it is spoken to never gets the login.
           if (character && world.autoLogin) {
-            this.log("debug", "sending auto-login for", label);
-            session.sendRaw(expandLoginTemplate(world.loginTemplate, character.name, character.password));
+            this.pendingLogin = expandLoginTemplate(world.loginTemplate, character.name, character.password);
           }
         },
         onData: (data) => {
           if (this.session !== session) return;
           this.handlers.onData(data);
           this.watchForPuebloGreeting(session, data);
+          if (this.pendingLogin !== null) {
+            this.log("debug", "sending auto-login for", label);
+            const login = this.pendingLogin;
+            this.pendingLogin = null;
+            this.closeGreeting();
+            session.sendRaw(login);
+          }
         },
         onDisconnect: (reason, certificateRejected) => {
           if (this.session !== session) return;
@@ -189,6 +222,7 @@ export class ConnectionManager {
           this.disconnectReason = null;
           this.log(reason ? "error" : "info", reason ? `connection error: ${reason}` : "disconnected");
           this.session = null;
+          this.pendingLogin = null;
           this.target = null;
           this.connected = false;
           this.tlsInfo = null;
@@ -232,7 +266,7 @@ export class ConnectionManager {
   // through the scrollback or the log: it is the client's half of the greeting,
   // not something typed.
   private watchForPuebloGreeting(session: TelnetSession, data: Uint8Array): void {
-    if (this.pueblo) return;
+    if (this.pueblo || !this.greetingOpen) return;
     if (this.greeting.feed(this.greetingDecoder.decode(data, { stream: true })) < 0) return;
     this.pueblo = true;
     this.log("debug", "Pueblo greeting seen; answering");
@@ -258,6 +292,7 @@ export class ConnectionManager {
 
   sendLine(text: string): { echoed: boolean } {
     if (!this.session) return { echoed: false };
+    this.closeGreeting();
     return this.session.sendLine(text);
   }
 

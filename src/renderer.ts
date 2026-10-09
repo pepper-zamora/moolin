@@ -483,7 +483,7 @@ document.addEventListener("contextmenu", (event) => {
 // Lines with no recorded time (null — old history, or Moolin's own lines) get
 // no stamp (see GAPS.md §8).
 function writeReplay(replay: ScrollbackReplay): void {
-  view.replay(replay.chunks, replay.times, replay.pueblo);
+  view.replay(replay.chunks, replay.times, replay.pueblo, replay.greetingOpen);
 }
 
 // Starts over from a replay: the connect-time switch to a world's logged
@@ -505,10 +505,12 @@ function applyData(data: string | Uint8Array, time: number | null): void {
 async function loadScrollback(): Promise<void> {
   const live = new LiveReplay(writeReplay, (event) => {
     if (event.kind === "data") applyData(event.data, event.time);
+    else if (event.kind === "greetingClosed") view.closeGreeting();
     else applyReset(event.replay);
   });
   window.moolin.onTerminalReset((replay) => live.receive({ kind: "reset", replay }));
   window.moolin.onTelnetData((data, time, seq) => live.receive({ kind: "data", data, time, seq }));
+  window.moolin.onGreetingClosed((seq) => live.receive({ kind: "greetingClosed", seq }));
   const replay = await window.moolin.getScrollback();
   window.moolin.log("debug", "renderer", "replaying", replay.chunks.length, "buffered chunk(s)");
   live.replay(replay);

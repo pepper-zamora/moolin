@@ -563,7 +563,8 @@ ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRe
 
 ipcMain.handle(
   IpcChannels.terminalGetScrollback,
-  (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0, pueblo: false },
+  (event) =>
+    terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0, pueblo: false, greetingOpen: false },
 );
 
 // A freshly opened (non-cascaded) window's one-shot report of how big its

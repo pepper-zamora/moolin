@@ -118,6 +118,10 @@ function attributes(source: string): Record<string, string> {
 
 export class PuebloParser {
   enabled = false;
+  // Whether the server's greeting still counts. It only does until the first
+  // line is sent to the server (see ConnectionManager); after that, a player
+  // saying the words can't switch Pueblo on and so make their text clickable.
+  detecting = true;
   // Tag names already reported through `onNote`, so each is mentioned once.
   private readonly noted = new Set<string>();
   private readonly greeting = new GreetingDetector();
@@ -141,6 +145,7 @@ export class PuebloParser {
   reset(): void {
     this.noted.clear();
     this.enabled = false;
+    this.detecting = true;
     this.greeting.reset();
     this.held = "";
     this.afterBreak = false;
@@ -156,17 +161,18 @@ export class PuebloParser {
 
   // Whether `text` would switch Pueblo on.
   wouldEnable(text: string): boolean {
-    return !this.enabled && this.greeting.test(text);
+    return !this.enabled && this.detecting && this.greeting.test(text);
   }
 
   // Notes text that passed through unparsed, so a greeting split across it and
   // the next chunk is still found.
   noteText(text: string): void {
-    if (!this.enabled) this.greeting.feed(text);
+    if (!this.enabled && this.detecting) this.greeting.feed(text);
   }
 
   parse(chunk: string): PuebloToken[] {
     if (!this.enabled) {
+      if (!this.detecting) return [{ kind: "text", text: chunk }];
       const end = this.greeting.feed(chunk);
       if (end < 0) return [{ kind: "text", text: chunk }];
       // The greeting is shown as it came; what follows it is Pueblo.

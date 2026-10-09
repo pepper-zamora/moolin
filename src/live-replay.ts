@@ -2,10 +2,12 @@ import type { ScrollbackReplay } from "./scrollback-buffer";
 
 export type LiveEvent =
   | { kind: "data"; data: string | Uint8Array; time: number | null; seq: number }
-  | { kind: "reset"; replay: ScrollbackReplay };
+  | { kind: "reset"; replay: ScrollbackReplay }
+  // The server's Pueblo greeting no longer counts (see PuebloParser.detecting).
+  | { kind: "greetingClosed"; seq: number };
 
 function seqOf(event: LiveEvent): number {
-  return event.kind === "data" ? event.seq : event.replay.seq;
+  return event.kind === "reset" ? event.replay.seq : event.seq;
 }
 
 // Merges a window's initial scrollback replay with its live output. The replay

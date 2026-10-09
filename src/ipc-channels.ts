@@ -18,6 +18,9 @@ export const IpcChannels = {
   terminalGetScrollback: "terminal:getScrollback",
   // main -> renderer: the scrollback was replaced; clear and write these chunks.
   terminalReset: "terminal:reset",
+  // main -> renderer: the server's Pueblo greeting no longer counts, with the
+  // output sequence number it falls at.
+  terminalGreetingClosed: "terminal:greetingClosed",
   terminalZoom: "terminal:zoom",
   terminalContextMenu: "terminal:contextMenu",
   terminalCopyRequested: "terminal:copyRequested",

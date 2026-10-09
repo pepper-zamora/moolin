@@ -282,3 +282,35 @@ test("the stream says what it decides that could explain odd output", () => {
     "pueblo: cleared the screen for the server (4 blank lines added)",
   ]);
 });
+
+test("once the greeting is closed, the words are only text, and tags stay as written", () => {
+  const s = new LineStream();
+  s.write("welcome\r\n", 1);
+  s.closeGreeting();
+  s.write(`${GREETING}<a xch_cmd="x">link</a>\r\n`, 2);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["welcome", "This world is Pueblo 1.0 Enhanced.", '<a xch_cmd="x">link</a>'],
+  );
+});
+
+test("a replay of a connection that isn't in Pueblo mode ignores a greeting once closed, but not while open", () => {
+  const history = [`${GREETING}<b>x</b>\r\n`];
+  const closed = new LineStream();
+  closed.replay(history, [1, 2], false, false);
+  assert.equal(closed.lines[1].text, "<b>x</b>");
+  const open = new LineStream();
+  open.replay(history, [1, 2], false, true);
+  assert.equal(open.lines[1].text, "x");
+});
+
+test("a replay of a Pueblo connection still finds the greeting that turned it on, and carries on closed", () => {
+  const s = new LineStream();
+  s.replay([`<b>before</b>\r\n${GREETING}<b>after</b>\r\n`], [1, 2, 3], true, false);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["<b>before</b>", "This world is Pueblo 1.0 Enhanced.", "after"],
+  );
+  s.write("<b>live</b>\r\n", 4);
+  assert.equal(s.lines[3].text, "live", "tags are still read; only a new greeting is ignored");
+});

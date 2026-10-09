@@ -21,6 +21,7 @@ declare global {
       sendResize(cols: number, rows: number): void;
       getScrollback(): Promise<ScrollbackReplay>;
       onTerminalReset(callback: (replay: ScrollbackReplay) => void): void;
+      onGreetingClosed(callback: (seq: number) => void): void;
       getConnectionState(): Promise<WindowState>;
       onTelnetData(callback: (data: string | Uint8Array, time: number | null, seq: number) => void): void;
       onConnectionState(callback: (state: WindowState) => void): void;

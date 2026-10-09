@@ -7,13 +7,26 @@ function recorder(): { live: LiveReplay; shown: string[] } {
   const shown: string[] = [];
   const live = new LiveReplay(
     (replay) => shown.push(`replay:${replay.chunks.join("")}`),
-    (event) => shown.push(event.kind === "data" ? `data:${event.data}` : `reset:${event.replay.chunks.join("")}`),
+    (event) =>
+      shown.push(
+        event.kind === "data"
+          ? `data:${event.data}`
+          : event.kind === "reset"
+            ? `reset:${event.replay.chunks.join("")}`
+            : "greeting-closed",
+      ),
   );
   return { live, shown };
 }
 
 const data = (text: string, seq: number): LiveEvent => ({ kind: "data", data: text, time: null, seq });
-const replay = (chunks: string[], seq: number): ScrollbackReplay => ({ chunks, times: [], seq, pueblo: false });
+const replay = (chunks: string[], seq: number): ScrollbackReplay => ({
+  chunks,
+  times: [],
+  seq,
+  pueblo: false,
+  greetingOpen: true,
+});
 
 test("a replay landing mid-stream doesn't repeat the live messages it already contains", () => {
   // The bug: the replay (taken after all three writes) arrives after the
@@ -42,4 +55,12 @@ test("a reset the replay already reflects is dropped; a later one is applied", (
   live.replay(replay(["log", "x"], 2));
   live.receive({ kind: "reset", replay: replay(["other"], 3) });
   assert.deepEqual(shown, ["replay:logx", "reset:other"]);
+});
+
+test("a greeting closing is ordered with the data like any other live event", () => {
+  const { live, shown } = recorder();
+  live.receive({ kind: "greetingClosed", seq: 2 });
+  live.receive({ kind: "greetingClosed", seq: 4 });
+  live.replay(replay(["a", "b"], 3));
+  assert.deepEqual(shown, ["replay:ab", "greeting-closed"]);
 });

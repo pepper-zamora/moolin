@@ -17,6 +17,9 @@ export interface ScrollbackReplay {
   // Whether the connection is in Pueblo mode at the end of the buffer, so a
   // replay that no longer holds the server's greeting still reads the tags.
   pueblo: boolean;
+  // Whether the server's greeting could still switch Pueblo on (no line has
+  // been sent to the server yet).
+  greetingOpen: boolean;
 }
 
 function byteLength(data: TerminalChunk): number {

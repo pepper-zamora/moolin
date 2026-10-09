@@ -185,7 +185,15 @@ Spec: <https://www.zuggsoft.com/zmud/mxp.htm>
 Not a telnet option: the server announces it in the text itself, with a
 line such as `This world is Pueblo 1.0 Enhanced.`. Moolin answers that with
 `PUEBLOCLIENT 2.01`, as other Pueblo clients do, and from the greeting on
-reads a few HTML-style tags in the server's text ([pueblo.ts](src/pueblo.ts)):
+reads a few HTML-style tags in the server's text ([pueblo.ts](src/pueblo.ts)).
+
+The greeting only counts from the start of a connection until the first line
+is sent to the server, whether you typed it or it is the auto-login. Anyone
+on a world can make it say those words later, and were that taken for the
+greeting, they could turn their text into links that run commands as you when
+clicked. For the same reason a world's auto-login is held until the server has
+sent something, so its welcome (and any greeting in it) is seen first; a
+server that sends nothing until it is spoken to never gets the login.
 
 - `<a xch_cmd="look|inventory">text</a>` and `<send>look</send>` (or
   `<send href="look">`) make the text a link that sends a command when
@@ -230,7 +238,10 @@ How it fits together:
 - **The renderer reads the tags** (`LineStream`), turning Pueblo on where the
   greeting appears in the text it is given, so a replay is read the same way
   the live output was. A replay that contains the greeting reads tags only
-  after it.
+  after it. Main says when the greeting stops counting (`terminalGreetingClosed`,
+  ordered with the output like any other live message, and
+  `ScrollbackReplay.greetingOpen` for a reload), and the renderer ignores the
+  words from then on.
 - **Moolin's own lines are never read as Pueblo**, so a command echoed with a
   `<` in it is shown as typed. The only thing that tells them from the
   server's is that they have no arrival time, which is also true of old

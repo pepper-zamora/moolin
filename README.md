@@ -86,7 +86,9 @@ from source never check at startup.
   server lines at word boundaries instead of at the last column, mid-word.
   See [Word wrap](#word-wrap) below.
 - **Auto-login.** Connecting as a character can send a login command built
-  from a per-world template, e.g. `co "{{character}}" {{password}}\r`.
+  from a per-world template, e.g. `co "{{character}}" {{password}}\r`. It is
+  sent once the server has sent something first (its welcome), so a server
+  that says nothing until it is spoken to won't get it.
 - **TLS, explicitly.** Each world either uses TLS or doesn't; Moolin never
   guesses, so a connection can't be silently downgraded. Certificates are
   verified unless the world opts into accepting untrusted (e.g. self-signed)
