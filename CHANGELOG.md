@@ -72,6 +72,11 @@ renames that section to the new version and date.
 
 ### Fixed
 
+- Select All (Cmd/Ctrl+A) now selects the input line, so what's in it can be
+  typed over, unless something is selected in the scrollback, when it selects
+  the whole scrollback. Before, it always took the scrollback. Clicking into
+  or editing the input line lets go of a lingering scrollback selection, and
+  the right-click menu's Select All follows what was clicked on.
 - Putting the computer to sleep now closes every connection properly and
   prints "[disconnected: the computer is going to sleep]" in its window.
   Before, the sleep cut the connection off silently, and the window looked

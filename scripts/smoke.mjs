@@ -484,6 +484,41 @@ try {
     expectEqual(await main.copy(), "hotel india\njuliet kilo lima\nmike n", "clipboard after spanning three lines");
   });
 
+  // Select All (Cmd/Ctrl+A) selects the input line, so it can be typed over,
+  // unless something is selected in the scrollback, when it selects the whole
+  // scrollback.
+  await check("Select All selects the input line, or the scrollback when it has a selection", async () => {
+    const input = () =>
+      main.evaluate(`(() => { const i = document.getElementById("input-area"); return [i.selectionStart, i.selectionEnd, i.value.length]; })()`);
+    const pageSelection = () => main.evaluate("getSelection().toString()");
+    // The earlier checks left a selection in the scrollback; clicking into the
+    // input line is what lets go of it.
+    await main.evaluate(`document.getElementById("input-area").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+    await main.evaluate(`(() => { const i = document.getElementById("input-area"); i.focus(); i.value = "say hello"; i.setSelectionRange(9, 9); })()`);
+    await main.key("a", "KeyA", 65, 2 /* Ctrl */);
+    await sleep(150);
+    expectEqual(JSON.stringify(await input()), "[0,9,9]", "input selection after Select All with nothing selected above");
+    // Select something in the scrollback with the mouse; focus returns to the input line.
+    await main.selectText("Welcome to the smoke test", 0, 7);
+    await waitFor("focus back in the input line", async () => (await main.activeElement()) === "input-area", 2000);
+    await main.key("a", "KeyA", 65, 2 /* Ctrl */);
+    await sleep(150);
+    const everything = (await main.lineTexts()).join("\n");
+    const whole = await pageSelection();
+    if (whole.trimEnd() !== everything.trimEnd()) {
+      throw new Error(
+        `Select All with a scrollback selection didn't select the whole scrollback (${whole.length} of ${everything.length} characters)`,
+      );
+    }
+    // Clicking into the input line lets go of the scrollback selection, so Select All is the input line's again.
+    await main.evaluate(`document.getElementById("input-area").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+    await main.evaluate(`(() => { const i = document.getElementById("input-area"); i.focus(); i.setSelectionRange(3, 3); })()`);
+    await main.key("a", "KeyA", 65, 2 /* Ctrl */);
+    await sleep(150);
+    expectEqual(JSON.stringify(await input()), "[0,9,9]", "input selection after clicking back into the input line");
+    await main.evaluate(`document.getElementById("input-area").value = ""`);
+  });
+
   // A web address in the output shows where it goes in the status bar's left
   // area while the pointer is over it, and the connection status returns when
   // it leaves.

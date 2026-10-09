@@ -290,6 +290,7 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
 | Ctrl+F                   | Find in the scrollback                                  |
 | F3 / Shift+F3            | Next / previous match                                   |
+| Ctrl+A                   | Select all of the input line, or of the scrollback if something there is selected |
 | Ctrl+X / Ctrl+C / Ctrl+V | Cut / copy the selection / paste into the input area    |
 | Ctrl+Z                   | Undo in the input area                                  |
 | Ctrl+Shift+Z / Ctrl+Y    | Redo in the input area (Ctrl+Y only on Windows/Linux)   |
