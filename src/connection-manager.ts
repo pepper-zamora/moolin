@@ -67,9 +67,17 @@ export interface ConnectionManagerHandlers {
 // Pueblo world waits for it before sending its tags.
 export const PUEBLO_CLIENT_REPLY = "PUEBLOCLIENT 2.01\r\n";
 
-const yellow = (text: string): string => `\x1b[33m[${text}]\x1b[0m\r\n`;
-const green = (text: string): string => `\x1b[32m[${text}]\x1b[0m\r\n`;
-const red = (text: string): string => `\x1b[31m[${text}]\x1b[0m\r\n`;
+// Moolin's status lines go through the same parser as the server's output, and
+// some of what they say comes from outside (a certificate's host names in an
+// error, say, or a world's name from a hand-edited file), so control
+// characters, escape included, are made harmless before they are interpolated.
+export function plain(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
+}
+
+const yellow = (text: string): string => `\x1b[33m[${plain(text)}]\x1b[0m\r\n`;
+const green = (text: string): string => `\x1b[32m[${plain(text)}]\x1b[0m\r\n`;
+const red = (text: string): string => `\x1b[31m[${plain(text)}]\x1b[0m\r\n`;
 
 // Owns one window's TelnetSession plus the "what are we connected to, and
 // how" bookkeeping (see TerminalWindow, which holds one of these each).

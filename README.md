@@ -497,6 +497,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/world-utils.ts`      | World helpers shared by main and renderer (defaults, labels, login templates) |
 | `src/update-check.ts`     | Asking GitHub whether a newer release exists                              |
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
+| `src/ipc-validate.ts`     | Checks on every message the window sends the main process (sizes, addresses, text, ...) |
 | `src/file-modes.ts`       | The owner-only permissions for the worlds file and session logs            |
 | `src/session-log.ts`      | Persistent per-world/character logs, their `.times` sidecar, and which window owns each |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |

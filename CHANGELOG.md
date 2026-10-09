@@ -94,6 +94,15 @@ renames that section to the new version and date.
   used the system default, usually readable by every user on the machine. A
   file from an earlier version is tightened the next time it is written. The
   README now has a section on what Moolin stores and who can read it.
+- The main process now checks everything the window sends it, and only from
+  a Moolin window's own page, since that page displays whatever servers send:
+  sizes, addresses (only `http` and `https` are opened), text, menu items and
+  log calls are all validated before use. The window is sandboxed explicitly,
+  can't open other windows or navigate away, and its content security policy
+  is stricter. Status lines no longer pass control characters on, such as from
+  a certificate's host names in an error, and a connection that never
+  answers gives up after 20 seconds instead of waiting for the system's much
+  longer timeout.
 - A server can no longer make Moolin hold memory without end with a control
   sequence that never finishes, endless distinct colours, or endless made-up
   Pueblo tag names; each is now capped.

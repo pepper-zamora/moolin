@@ -13,7 +13,7 @@ import {
 } from "./worlds";
 import { WindowManager } from "./window-manager";
 import type { TerminalWindow } from "./terminal-window";
-import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
+import { configureLogger, getCliLogLevel, log } from "./logger";
 import { SessionLogRegistry } from "./session-log";
 import { IpcChannels } from "./ipc-channels";
 import {
@@ -24,11 +24,23 @@ import {
   type Preferences,
 } from "./preferences";
 import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-types";
-import { resolveTriState, targetLabel } from "./world-utils";
+import { DEFAULT_GLOBAL_SETTINGS, resolveTriState, targetLabel } from "./world-utils";
 import type { ResolvedSettings, WindowState } from "./connection-manager";
-import type { SelectAllTarget } from "./select-all";
 import { checkForUpdate } from "./update-check";
 import { fontFamilyFor } from "./fonts";
+import {
+  parseBooleanPair,
+  parseClipboardText,
+  parseConfirmText,
+  parseConnectRequest,
+  parseContextMenuOptions,
+  parseExternalUrl,
+  parseInitialSize,
+  parseInputText,
+  parseLogCall,
+  parseMenuItems,
+  parseSize,
+} from "./ipc-validate";
 
 function cliArgs(): string[] {
   return app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
@@ -456,14 +468,28 @@ function buildMenu(terminal: TerminalWindow): void {
   terminal.setMenu(Menu.buildFromTemplate(template));
 }
 
-// Every IPC handler below acts on the terminal window the message came from.
+// Every IPC handler below acts on the terminal window the message came from,
+// and only for a message from that window's own page: not from a frame inside
+// it, nor from a window that isn't one of ours. What the page sends is checked
+// before it is used (see ipc-validate.ts), since the page displays whatever
+// servers send.
 function terminalFor(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): TerminalWindow | undefined {
   const terminal = windowManager.terminalFor(event.sender);
-  if (!terminal) log("warn", "main", "IPC from an unknown window, ignoring");
+  if (!terminal || event.senderFrame !== event.sender.mainFrame) {
+    log("warn", "main", "IPC from an unknown window or frame, ignoring");
+    return undefined;
+  }
   return terminal;
 }
 
-ipcMain.handle(IpcChannels.worldsLoad, (): WorldsLoadResult => {
+function ignoreBad(channel: string, value: unknown): void {
+  log("warn", "main", `ignoring a malformed ${channel} message:`, JSON.stringify(value)?.slice(0, 200));
+}
+
+ipcMain.handle(IpcChannels.worldsLoad, (event): WorldsLoadResult => {
+  if (!terminalFor(event)) {
+    return { worlds: [], globalSettings: DEFAULT_GLOBAL_SETTINGS, error: "Not a Moolin window" };
+  }
   const { state, error, recovered } = readWorldsFile(worldsPath);
   if (error) log("error", "worlds", error);
   else log("debug", "worlds", "loaded", state.worlds.length, "world(s) from", worldsPath);
@@ -475,36 +501,45 @@ ipcMain.handle(IpcChannels.worldsLoad, (): WorldsLoadResult => {
   return { worlds: state.worlds, globalSettings: state.globalSettings, error, warning };
 });
 
-ipcMain.handle(
-  IpcChannels.worldsSave,
-  (event, rawWorlds: unknown[], rawGlobalSettings: unknown): { error?: string } => {
-    const worlds = rawWorlds.map(parseWorld).filter((w): w is World => w !== null);
-    const globalSettings = parseGlobalSettings(rawGlobalSettings);
-    try {
-      saveWorlds(worldsPath, worlds, globalSettings);
-    } catch (err) {
-      const error = `Could not save ${worldsPath}: ${(err as Error).message}`;
-      log("error", "worlds", error);
-      return { error };
-    }
-    log("debug", "worlds", "saved", worlds.length, "world(s) to", worldsPath);
-    for (const terminal of windowManager.all()) {
-      if (terminal.window.webContents.id !== event.sender.id) terminal.send(IpcChannels.worldsChanged);
-    }
-    rebuildAllMenus(); // names may have changed, which affects MRU labels
-    return {};
-  },
-);
+ipcMain.handle(IpcChannels.worldsSave, (event, rawWorlds: unknown, rawGlobalSettings: unknown): { error?: string } => {
+  if (!terminalFor(event)) return { error: "Not a Moolin window" };
+  if (!Array.isArray(rawWorlds)) {
+    ignoreBad(IpcChannels.worldsSave, rawWorlds);
+    return { error: "Could not save: the worlds list was malformed" };
+  }
+  const worlds = rawWorlds.map(parseWorld).filter((w): w is World => w !== null);
+  if (worlds.length !== rawWorlds.length) {
+    log("warn", "worlds", `dropping ${rawWorlds.length - worlds.length} malformed world(s) from a save request`);
+  }
+  const globalSettings = parseGlobalSettings(rawGlobalSettings);
+  try {
+    saveWorlds(worldsPath, worlds, globalSettings);
+  } catch (err) {
+    const error = `Could not save ${worldsPath}: ${(err as Error).message}`;
+    log("error", "worlds", error);
+    return { error };
+  }
+  log("debug", "worlds", "saved", worlds.length, "world(s) to", worldsPath);
+  for (const terminal of windowManager.all()) {
+    if (terminal.window.webContents.id !== event.sender.id) terminal.send(IpcChannels.worldsChanged);
+  }
+  rebuildAllMenus(); // names may have changed, which affects MRU labels
+  return {};
+});
 
 // The Worlds dialog's delete confirmations.
-ipcMain.handle(IpcChannels.dialogConfirm, (event, message: string, detail?: string): Promise<boolean> => {
+ipcMain.handle(IpcChannels.dialogConfirm, (event, message: unknown, detail?: unknown): Promise<boolean> => {
+  const text = parseConfirmText(message, detail);
+  if (!terminalFor(event) || !text) return Promise.resolve(false);
   const sourceWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-  return confirmAction(sourceWindow, message, "Delete", detail);
+  return confirmAction(sourceWindow, text.message, "Delete", text.detail);
 });
 
 // Native popup menu for the Worlds dialog. Resolves with the chosen item's
 // id, or null.
-ipcMain.handle(IpcChannels.menuPopup, (event, items: Array<{ id: string; label: string }>) => {
+ipcMain.handle(IpcChannels.menuPopup, (event, rawItems: unknown) => {
+  const items = parseMenuItems(rawItems);
+  if (!terminalFor(event) || !items) return Promise.resolve(null);
   const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   return new Promise<string | null>((resolve) => {
     let chosen: string | null = null;
@@ -523,17 +558,21 @@ ipcMain.handle(IpcChannels.menuPopup, (event, items: Array<{ id: string; label: 
 
 // The dialog sends its in-memory copy of the world, so edits not yet saved
 // still apply; it's validated like a record read from disk.
-ipcMain.on(IpcChannels.connectRequest, (event, request: { world: unknown; characterId: string | null }) => {
+ipcMain.on(IpcChannels.connectRequest, (event, rawRequest: unknown) => {
   const terminal = terminalFor(event);
+  const request = parseConnectRequest(rawRequest);
+  if (!request) return ignoreBad(IpcChannels.connectRequest, rawRequest);
   const world = parseWorld(request.world);
   if (!terminal || !world) return;
   const character = world.characters.find((c) => c.id === request.characterId) ?? null;
   connectOrNewWindow(terminal, { world, character });
 });
 
-ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
+ipcMain.on(IpcChannels.telnetInput, (event, rawText: unknown) => {
   const terminal = terminalFor(event);
+  const text = parseInputText(rawText);
   if (!terminal) return;
+  if (text === null) return ignoreBad(IpcChannels.telnetInput, typeof rawText);
   if (!terminal.connection.isConnected()) {
     log("debug", "main", "input while not connected, ignoring:", JSON.stringify(text));
     terminal.writeStatus("\x1b[90m[not connected]\x1b[0m\r\n");
@@ -548,17 +587,20 @@ ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
   }
 });
 
-ipcMain.on(IpcChannels.telnetResize, (event, { cols, rows }: { cols: number; rows: number }) => {
-  log("debug", "main", "terminal resized to", `${cols}x${rows}`);
-  terminalFor(event)?.connection.resize(cols, rows);
+ipcMain.on(IpcChannels.telnetResize, (event, rawSize: unknown) => {
+  const size = parseSize(rawSize);
+  if (!size) return ignoreBad(IpcChannels.telnetResize, rawSize);
+  log("debug", "main", "terminal resized to", `${size.cols}x${size.rows}`);
+  terminalFor(event)?.connection.resize(size.cols, size.rows);
 });
 
 // Keeps the Edit menu's Undo/Redo items' enabled state in sync with the
 // renderer's input-undo stack.
-ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRedo: boolean) => {
+ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, rawCanUndo: unknown, rawCanRedo: unknown) => {
   const terminal = terminalFor(event);
-  if (!terminal) return;
-  if (terminal.setUndoState(canUndo, canRedo)) buildMenu(terminal);
+  const state = parseBooleanPair(rawCanUndo, rawCanRedo);
+  if (!terminal || !state) return;
+  if (terminal.setUndoState(state[0], state[1])) buildMenu(terminal);
 });
 
 ipcMain.handle(
@@ -569,7 +611,9 @@ ipcMain.handle(
 
 // A freshly opened (non-cascaded) window's one-shot report of how big its
 // content needs to be to show an 80x25 terminal at its starting font.
-ipcMain.on(IpcChannels.terminalInitialSize, (event, size: { width: number; height: number }) => {
+ipcMain.on(IpcChannels.terminalInitialSize, (event, rawSize: unknown) => {
+  const size = parseInitialSize(rawSize);
+  if (!terminalFor(event) || !size) return;
   windowManager.applyInitialSize(event.sender, size);
 });
 
@@ -577,7 +621,10 @@ ipcMain.on(IpcChannels.terminalInitialSize, (event, size: { width: number; heigh
 // is this window's own per-window state (same as the View menu's checkbox),
 // while checkForUpdates and the font/size also become the default for new
 // windows; the font change additionally re-renders this window's terminal.
-ipcMain.handle(IpcChannels.preferencesSave, (event, partial: Partial<Preferences>) => {
+ipcMain.handle(IpcChannels.preferencesSave, (event, rawPartial: unknown) => {
+  if (!terminalFor(event)) return;
+  if (typeof rawPartial !== "object" || rawPartial === null) return ignoreBad(IpcChannels.preferencesSave, rawPartial);
+  const partial = rawPartial as Partial<Preferences>;
   const merged = sanitizePreferences(partial, prefs);
   prefs.showTimestamps = merged.showTimestamps;
   prefs.checkForUpdates = merged.checkForUpdates;
@@ -612,39 +659,46 @@ ipcMain.handle(
 
 // The clipboard module is unavailable to the sandboxed preload/renderer
 // contexts, so writes/reads are proxied through the main process instead.
-ipcMain.on(IpcChannels.clipboardWriteText, (_event, text: string) => clipboard.writeText(text));
-ipcMain.handle(IpcChannels.clipboardReadText, (): Promise<string> => clipboard.readText());
+ipcMain.on(IpcChannels.clipboardWriteText, (event, rawText: unknown) => {
+  const text = parseClipboardText(rawText);
+  if (terminalFor(event) && text !== null) clipboard.writeText(text);
+});
+ipcMain.handle(
+  IpcChannels.clipboardReadText,
+  async (event): Promise<string> => (terminalFor(event) ? await clipboard.readText() : ""),
+);
 
 // Restricted to http(s) so a malicious server can't trick a click into
 // opening e.g. a file:// or custom-protocol URI on the user's machine.
-ipcMain.on(IpcChannels.shellOpenExternal, (_event, url: string) => {
-  if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+ipcMain.on(IpcChannels.shellOpenExternal, (event, rawUrl: unknown) => {
+  const url = parseExternalUrl(rawUrl);
+  if (terminalFor(event) && url) void shell.openExternal(url);
 });
 
-ipcMain.on(
-  IpcChannels.terminalContextMenu,
-  (event, options: { hasSelection: boolean; selectAllTarget: SelectAllTarget }) => {
-    const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const template: Electron.MenuItemConstructorOptions[] = [
-      { label: "Cut", enabled: options.hasSelection, click: () => event.sender.send(IpcChannels.terminalCutRequested) },
-      {
-        label: "Copy",
-        enabled: options.hasSelection,
-        click: () => event.sender.send(IpcChannels.terminalCopyRequested),
-      },
-      { label: "Paste", click: () => event.sender.send(IpcChannels.terminalPasteRequested) },
-      { type: "separator" },
-      {
-        label: "Select All",
-        click: () => event.sender.send(IpcChannels.terminalSelectAllRequested, options.selectAllTarget),
-      },
-    ];
-    Menu.buildFromTemplate(template).popup({ window });
-  },
-);
+ipcMain.on(IpcChannels.terminalContextMenu, (event, rawOptions: unknown) => {
+  const options = parseContextMenuOptions(rawOptions);
+  if (!terminalFor(event) || !options) return;
+  const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
+  const template: Electron.MenuItemConstructorOptions[] = [
+    { label: "Cut", enabled: options.hasSelection, click: () => event.sender.send(IpcChannels.terminalCutRequested) },
+    {
+      label: "Copy",
+      enabled: options.hasSelection,
+      click: () => event.sender.send(IpcChannels.terminalCopyRequested),
+    },
+    { label: "Paste", click: () => event.sender.send(IpcChannels.terminalPasteRequested) },
+    { type: "separator" },
+    {
+      label: "Select All",
+      click: () => event.sender.send(IpcChannels.terminalSelectAllRequested, options.selectAllTarget),
+    },
+  ];
+  Menu.buildFromTemplate(template).popup({ window });
+});
 
-ipcMain.on(IpcChannels.logEmit, (_event, level: Exclude<LogLevel, "none">, scope: string, args: unknown[]) => {
-  log(level, scope, ...args);
+ipcMain.on(IpcChannels.logEmit, (event, level: unknown, scope: unknown, args: unknown) => {
+  const call = parseLogCall(level, scope, args);
+  if (terminalFor(event) && call) log(call.level, call.scope, ...call.args);
 });
 
 if (isPrimaryInstance) {

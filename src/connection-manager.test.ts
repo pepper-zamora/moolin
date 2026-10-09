@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as net from "node:net";
-import { ConnectionManager, type ConnectionManagerHandlers, PUEBLO_CLIENT_REPLY } from "./connection-manager";
+import { ConnectionManager, type ConnectionManagerHandlers, PUEBLO_CLIENT_REPLY, plain } from "./connection-manager";
 import { newWorld } from "./world-utils";
 import type { Character, ConnectTarget } from "./worlds-types";
 
@@ -518,5 +518,23 @@ test("a new connection opens the greeting again", { timeout: TEST_TIMEOUT_MS }, 
   } finally {
     manager.disconnect();
     server.close();
+  }
+});
+
+test("plain() makes control characters in a status line harmless", () => {
+  assert.equal(plain("bad\x1b[31mhost\r\nname\x07\x9b"), "bad [31mhost  name  ");
+  assert.equal(plain("café – ok"), "café – ok");
+});
+
+test("a status line built from a certificate error can't carry an escape sequence", async () => {
+  const { manager, messages } = managerWithLog();
+  manager.connect({
+    world: { ...newWorld("w"), name: "Evil\x1b[2J\x1b]0;x\x07", host: "", port: null },
+    character: null,
+  });
+  assert.ok(messages.length > 0);
+  for (const message of messages) {
+    // Only Moolin's own colour codes are left: ESC [ digits m.
+    assert.equal(message.replace(/\x1b\[\d+m/g, "").includes("\x1b"), false, JSON.stringify(message));
   }
 });
