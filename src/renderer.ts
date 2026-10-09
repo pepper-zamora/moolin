@@ -6,7 +6,9 @@ import { SecurityStatus } from "./security-status";
 import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
 import { InputUndoStack, type InputSnapshot } from "./input-undo";
 import type { WindowState } from "./connection-manager";
+import { LinkMenu } from "./link-menu";
 import { LiveReplay } from "./live-replay";
+import { linkCommands } from "./pueblo";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import { fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
 import { ScrollbackView } from "./scrollback-view";
@@ -61,6 +63,13 @@ function setHoverMessage(message: string | null): void {
   showStatus();
 }
 
+// A Pueblo link's command goes out as if typed (and is echoed the same way).
+function sendLinkCommand(command: string): void {
+  window.moolin.sendInput(command);
+}
+
+const linkMenu = new LinkMenu(sendLinkCommand);
+
 // The scrollback is output-only; all typing goes to #input-area, and the
 // scrollback never takes keyboard focus (see reclaimFocus).
 // How long after a click in the scrollback another can still make it a double
@@ -85,7 +94,30 @@ const view = new ScrollbackView(terminalContainer, {
   // Renderer has no direct access to Electron's `shell` module (sandboxed),
   // so opening the link is proxied through main.ts.
   onOpenUrl: (url) => window.moolin.openExternal(url),
-  onHoverUrl: setHoverMessage,
+  onLink: (link) => {
+    if (link.cmd !== null) {
+      const [command] = linkCommands(link.cmd, link.text);
+      if (command) sendLinkCommand(command);
+    } else if (link.href !== null && /^https?:\/\//i.test(link.href)) {
+      window.moolin.openExternal(link.href);
+    }
+  },
+  // A link with several commands offers them in a menu.
+  onLinkMenu: (link, event) => {
+    const commands = link.cmd === null ? [] : linkCommands(link.cmd, link.text);
+    if (commands.length < 2) return false;
+    linkMenu.show(commands, event.clientX, event.clientY);
+    return true;
+  },
+  // Where a link goes is shown in the status bar while the pointer is on it.
+  onHover: (target) => {
+    if (target === null) setHoverMessage(null);
+    else if ("url" in target) setHoverMessage(target.url);
+    else if (target.link.cmd !== null)
+      setHoverMessage(`Send: ${linkCommands(target.link.cmd, target.link.text).join(" | ")}`);
+    else setHoverMessage(target.link.href);
+  },
+  log: (message) => window.moolin.log("debug", "renderer", message),
   onPointerDown: () => cancelPendingReclaim(),
   onPointerUp: () => {
     // Not at once: focusing the input area replaces the document's selection,
@@ -430,7 +462,7 @@ document.addEventListener("contextmenu", (event) => {
 // Lines with no recorded time (null — old history, or Moolin's own lines) get
 // no stamp (see GAPS.md §8).
 function writeReplay(replay: ScrollbackReplay): void {
-  view.replay(replay.chunks, replay.times);
+  view.replay(replay.chunks, replay.times, replay.pueblo);
 }
 
 // Starts over from a replay: the connect-time switch to a world's logged

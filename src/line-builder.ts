@@ -1,9 +1,25 @@
-import type { Style, Token } from "./ansi-parser";
+import type { Style } from "./ansi-parser";
+import type { PuebloLink } from "./pueblo";
 
 export interface Run {
   text: string;
   style: Style;
+  // The Pueblo link the text belongs to, if any.
+  link: PuebloLink | null;
 }
+
+// What the builder is fed: the parsers' output, in order.
+export type BuilderToken =
+  | { kind: "text"; text: string; style: Style; link?: PuebloLink | null }
+  // A line feed byte: ends the line, taking the next arrival time.
+  | { kind: "newline" }
+  // A break with no line feed byte behind it (Pueblo's <br>): ends the line
+  // without a time, which a swallowed line feed after it may supply.
+  | { kind: "break" }
+  // A line feed byte that makes no break (swallowed after a <br>, say). It
+  // still takes its arrival time, which goes to the line the <br> ended when
+  // `afterBreak`.
+  | { kind: "skip"; afterBreak: boolean };
 
 // A line of scrollback: what the DOM view draws, and what search reads.
 export interface Line {
@@ -34,6 +50,8 @@ export class LineBuilder {
   // Lines that changed since the last takeDirty(), oldest first.
   private dirty: Line[] = [];
   private open: Line | null = null;
+  // The line the last "break" ended, while it still has no time.
+  private lastBreak: Line | null = null;
   private nextId = 1;
 
   // How many lines have changed since the last takeDirty().
@@ -48,10 +66,12 @@ export class LineBuilder {
 
   // Adds tokens, taking each line feed's time from `nextTime`. Returns whether
   // anything was added (the view un-clears the screen on new output).
-  feed(tokens: Token[], nextTime: () => number | null): boolean {
+  feed(tokens: ReadonlyArray<BuilderToken>, nextTime: () => number | null): boolean {
     for (const token of tokens) {
       if (token.kind === "newline") this.lineFeed(nextTime());
-      else this.text(token.text, token.style);
+      else if (token.kind === "break") this.lineBreak();
+      else if (token.kind === "skip") this.skip(nextTime(), token.afterBreak);
+      else this.text(token.text, token.style, token.link ?? null);
     }
     return tokens.length > 0;
   }
@@ -71,7 +91,7 @@ export class LineBuilder {
     if (this.dirty[this.dirty.length - 1] !== line) this.dirty.push(line);
   }
 
-  private text(text: string, style: Style): void {
+  private text(text: string, style: Style, link: PuebloLink | null): void {
     let rest = text;
     while (rest.length > 0) {
       if (!this.open) this.open = this.newLine();
@@ -81,8 +101,8 @@ export class LineBuilder {
       rest = rest.slice(part.length);
       const runs = line.runs as Run[];
       const last = runs[runs.length - 1];
-      if (last && last.style.key === style.key) last.text += part;
-      else runs.push({ text: part, style });
+      if (last && last.style.key === style.key && last.link === link) last.text += part;
+      else runs.push({ text: part, style, link });
       line.text += part;
       this.touch(line);
       if (line.text.length >= MAX_LINE_LENGTH) this.open = null;
@@ -94,6 +114,21 @@ export class LineBuilder {
     line.time = time;
     this.touch(line);
     this.open = null;
+    this.lastBreak = null;
+  }
+
+  private lineBreak(): void {
+    const line = this.open ?? this.newLine();
+    this.touch(line);
+    this.open = null;
+    this.lastBreak = line;
+  }
+
+  private skip(time: number | null, afterBreak: boolean): void {
+    if (!afterBreak || !this.lastBreak || this.lastBreak.time !== null) return;
+    this.lastBreak.time = time;
+    this.touch(this.lastBreak);
+    this.lastBreak = null;
   }
 
   // The lines to redraw, in order; the next call returns only newer changes.
@@ -116,5 +151,6 @@ export class LineBuilder {
     this.lines = [];
     this.dirty = [];
     this.open = null;
+    this.lastBreak = null;
   }
 }

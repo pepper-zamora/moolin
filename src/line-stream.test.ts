@@ -102,3 +102,183 @@ test("takeDirty and dropFront pass through to the builder", () => {
   );
   assert.equal(s.openLine?.text, "c");
 });
+
+// --- Pueblo -------------------------------------------------------------
+
+const GREETING = "This world is Pueblo 1.0 Enhanced.\r\n";
+
+function pueblo(): LineStream {
+  const s = new LineStream();
+  s.write(GREETING, 1);
+  return s;
+}
+
+const links = (s: LineStream) =>
+  s.lines.flatMap((l) => (l.runs ?? []).filter((r) => r.link).map((r) => [r.text, r.link?.cmd, r.link?.href]));
+
+test("until the greeting, tags are text", () => {
+  const s = new LineStream();
+  s.write("<b>hi</b> <br>\r\n", 1);
+  assert.deepEqual(view(s), [["<b>hi</b> <br>", 1]]);
+});
+
+test("after the greeting, tags are read: links, dropped tags, entities", () => {
+  const s = pueblo();
+  s.write(
+    'Exits: <a xch_cmd="north|n">north</a> <font color=red>x</font> &lt;ok&gt; <a href="https://e.com">site</a>\r\n',
+    2,
+  );
+  assert.equal(s.lines[1].text, "Exits: north x <ok> site");
+  assert.deepEqual(links(s), [
+    ["north", "north|n", null],
+    ["site", null, "https://e.com"],
+  ]);
+});
+
+test("a link ends at the end of its line", () => {
+  const s = pueblo();
+  s.write("<send>look\r\nplain\r\n", 2);
+  assert.deepEqual(links(s), [["look", "", null]]);
+});
+
+test("<br> breaks the line, and the line feed after it is swallowed without losing a time", () => {
+  const s = pueblo();
+  s.write("one<br>\r\ntwo<br>\r\nthree\r\n", 5);
+  assert.deepEqual(view(s).slice(1), [
+    ["one", 5],
+    ["two", 5],
+    ["three", 5],
+  ]);
+});
+
+test("each line feed takes its own time, <br> or not", () => {
+  const s = new LineStream();
+  s.replay([`${GREETING}a<br>\r\nb\r\nc<br>\r\n`], [1, 2, 3, 4], true);
+  // The greeting's line feed took 1, then each of the three after it one more.
+  assert.deepEqual(view(s), [
+    ["This world is Pueblo 1.0 Enhanced.", 1],
+    ["a", 2],
+    ["b", 3],
+    ["c", 4],
+  ]);
+});
+
+test("Moolin's own lines are never read as Pueblo", () => {
+  const s = pueblo();
+  s.write("\x1b[36msay <b>hi</b> <br>\x1b[0m\r\n", null);
+  s.write("<b>hi</b>\r\n", 2);
+  assert.deepEqual(view(s).slice(1), [
+    ["say <b>hi</b> <br>", null],
+    ["hi", 2],
+  ]);
+});
+
+test("a server's clear waits for something to show, then adds the blank screen once", () => {
+  const s = pueblo();
+  s.screenRows = 3;
+  s.write('<xch_page clear="text"><xch_page clear="text">\r\n', 2);
+  assert.equal(s.lines.length, 1 + 1); // only the line feed, so far
+  s.write("hello\r\n", 3);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["This world is Pueblo 1.0 Enhanced.", "", "", "", "", "hello"],
+  );
+});
+
+test("a server's clear is applied before the first text after it, in the same chunk", () => {
+  const s = pueblo();
+  s.screenRows = 2;
+  s.write('old\r\n<xch_page clear="text">new\r\n', 2);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["This world is Pueblo 1.0 Enhanced.", "old", "", "", "new"],
+  );
+});
+
+test("a server's clear at the end of a session leaves the last screen alone", () => {
+  const s = pueblo();
+  s.screenRows = 3;
+  s.write("last screen\r\n</xch_mudtext><img xch_mode=purehtml><xch_page clear=text>\r\n", 2);
+  s.write("\x1b[33m[disconnected]\x1b[0m\r\n", null);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["This world is Pueblo 1.0 Enhanced.", "last screen", "", "[disconnected]"],
+  );
+});
+
+test("a server's clear is forgotten by a reset", () => {
+  const s = pueblo();
+  s.write("<xch_page clear=text>", 2);
+  s.reset();
+  s.write("plain\r\n", 3);
+  assert.deepEqual(view(s), [["plain", 3]]);
+});
+
+test("a replay reads tags from the start when told the connection is in Pueblo mode", () => {
+  const s = new LineStream();
+  s.replay(['<a xch_cmd="x">link</a><br>\r\nplain\r\n'], [1, 2], true);
+  assert.deepEqual(links(s), [["link", "x", null]]);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["link", "plain"],
+  );
+});
+
+test("a replay not in Pueblo mode, and with no greeting, shows tags as written", () => {
+  const s = new LineStream();
+  s.replay(['<a xch_cmd="x">link</a>\r\n'], [1], false);
+  assert.deepEqual(view(s), [['<a xch_cmd="x">link</a>', 1]]);
+});
+
+test("a replay containing the greeting reads tags only after it", () => {
+  const s = new LineStream();
+  s.replay([`<b>before</b>\r\n${GREETING}<b>after</b>\r\n`], [1, 2, 3], true);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["<b>before</b>", "This world is Pueblo 1.0 Enhanced.", "after"],
+  );
+});
+
+test("live output after a replay continues in the mode the replay ended in", () => {
+  const s = new LineStream();
+  s.replay(["old\r\n"], [1], true);
+  s.write("<br>new\r\n", 2);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["old", "", "new"],
+  );
+});
+
+test("reset leaves Pueblo mode", () => {
+  const s = pueblo();
+  s.reset();
+  s.write("<br>\r\n", 2);
+  assert.deepEqual(view(s), [["<br>", 2]]);
+});
+
+test("a greeting split across chunks still turns Pueblo on", () => {
+  const s = new LineStream();
+  s.write("This world is Pue", 1);
+  s.write("blo\r\n<br>x\r\n", 1);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["This world is Pueblo", "", "x"],
+  );
+});
+
+test("the stream says what it decides that could explain odd output", () => {
+  const notes: string[] = [];
+  const s = new LineStream((message) => notes.push(message));
+  s.screenRows = 4;
+  s.write("hello\r\n", 1);
+  s.write("This world is Pueblo\r\n<font>x</font> <odd>\r\n", 2);
+  s.write('<xch_page clear="text"><xch_page clear="text">more\r\n', 3);
+  assert.deepEqual(notes, [
+    "pueblo: the server's greeting was seen, so its tags are now read",
+    "pueblo: <font> is not supported, so it is dropped (its content is still shown)",
+    "pueblo: <odd> is not a Pueblo or HTML tag, so it is shown as text",
+    "pueblo: the server asked to clear the screen; it will when more output follows",
+    "pueblo: the server asked to clear the screen; it will when more output follows",
+    "pueblo: cleared the screen for the server (4 blank lines added)",
+  ]);
+});

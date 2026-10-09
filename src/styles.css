@@ -237,6 +237,46 @@ html, body {
 /* Web addresses in the output. */
 .url { text-decoration: underline; cursor: pointer; }
 
+/* Pueblo links: dotted until hovered, so they read as clickable without
+   fighting the colours the server chose. */
+.link { text-decoration: underline dotted; cursor: pointer; }
+.link:hover { text-decoration: underline; }
+
+/* The commands of a Pueblo link that offers several. */
+#link-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 8em;
+  max-width: 40em;
+  padding: 4px 0;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+}
+
+#link-menu button {
+  padding: 4px 16px;
+  border: 0;
+  background: none;
+  color: #ccc;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+#link-menu button:hover {
+  background: #04395e;
+  color: #fff;
+}
+
 /* Scrollback find widget, styled after VS Code's: hangs from the top edge
    at the right, clear of the scrollbar and its overview ruler. */
 #find-widget {

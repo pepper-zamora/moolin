@@ -98,6 +98,10 @@ from source never check at startup.
 - **Scrollback that survives a reload.** 20,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
+- **Pueblo.** On a world that speaks it, links are clickable (right-click
+  one with several commands to choose), and the status bar shows what a link
+  will send or open while the pointer is on it. See
+  [PROTOCOLS.md](PROTOCOLS.md#pueblo).
 - **Persistent logs.** Everything a window shows, colors included, is appended
   to `~/Documents/Moolin/<world>/<character>/moolin.log` (just `<world>/` when
   connecting without a character). Each folder's name starts with 8
@@ -467,6 +471,8 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/held-selection.ts`   | Keeps the scrollback's selection, and its highlight, after focus moves away |
 | `src/timestamp-gutter.ts` | The per-line timestamp column                                              |
 | `src/linkify.ts`          | Finding web addresses in text                                              |
+| `src/pueblo.ts`           | Pueblo: the greeting, and reading its links, line breaks and clears        |
+| `src/link-menu.ts`        | The popup that lists a Pueblo link's commands                              |
 | `src/scrollback-search.ts`| Finding matches in the lines, and which match is current                   |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
 | `src/preferences-dialog.ts` | The Preferences dialog                                                  |

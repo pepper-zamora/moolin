@@ -516,6 +516,26 @@ try {
     await waitFor("new output after clearing", async () => (await visibleText()).includes("after the clear"), 3000);
   });
 
+  // A Pueblo world announces itself; Moolin answers, and from then on its
+  // links can be hovered (the status bar says what they send) and clicked.
+  await check("a Pueblo greeting is answered, and its links show their command and send it", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    received = "";
+    latestSocket.write('This world is Pueblo 1.0 Enhanced.\r\nExits: <a xch_cmd="north|n">north</a><br>\r\n');
+    await waitFor("the Pueblo reply", () => received.includes("PUEBLOCLIENT 2.01\r\n"), 3000);
+    await waitFor("the link", () => main.evaluate("!!document.querySelector('#terminal .link')"), 3000);
+    const status = () => main.evaluate("document.getElementById('status-text').textContent");
+    const before = await status();
+    const point = await main.textPoint("Exits:", 8, "middle");
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+    await waitFor("the link's command in the status bar", async () => (await status()) === "Send: north | n", 2000);
+    received = "";
+    await main.clickAt(point, 1);
+    await waitFor("the command", () => received === "north\r\n", 2000);
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...(await main.textPoint("Exits:", 0, "middle")) });
+    await waitFor("the status to return", async () => (await status()) === before, 2000);
+  });
+
   // Launching again opens a second window in the running instance; it starts
   // disconnected, and (usually) takes focus from the first.
   console.log("smoke: a second, disconnected window");

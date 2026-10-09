@@ -182,6 +182,11 @@ export class TerminalWindow {
   }
 
   getScrollback(): ScrollbackReplay {
-    return { chunks: this.scrollback.snapshot(), times: this.scrollback.snapshotTimes(), seq: this.seq };
+    return {
+      chunks: this.scrollback.snapshot(),
+      times: this.scrollback.snapshotTimes(),
+      seq: this.seq,
+      pueblo: this.connection.isPueblo(),
+    };
   }
 }

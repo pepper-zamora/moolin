@@ -7,6 +7,22 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
 
 ## App
 
+- **Decide whether to honour a Pueblo server's clear.** `<xch_page
+  clear=text>` adds a screenful of blank lines (as Ctrl+L does), once
+  something follows it (`LineStream`, `src/line-stream.ts`). Penultimate
+  Destination (PennMUSH) sends `</xch_mudtext><img xch_mode=purehtml><xch_page
+  clear=text>` at the end of every login burst, right after the room
+  description (seen in its session log at 09:42:17 and 09:49:05, in the same
+  burst as the login text), so the room scrolls out of view as soon as the
+  reply to your first command arrives. A first version honoured the clear at
+  once and scrolled the room away during login, which is how this was found;
+  deferring it only delays the same loss. Options: ignore server clears
+  entirely (history is scrollable anyway, Ctrl+L stays your own clear, and
+  `--log-level=debug` still notes them); ignore them by default with a
+  Global/World/Character Inherit/On/Off setting like word wrap; or keep it
+  as is. Other clients mostly ignore `xch_page` clears, which argues for the
+  first. Whichever is chosen, `README.md`, `PROTOCOLS.md` and
+  `CHANGELOG.md` describe the current behaviour.
 - **Endless scroll: page older history into the scrollback from main.** The
   scrollback keeps the newest 20,000 lines as page elements (`SCROLLBACK_LINES`
   in `src/renderer.ts`); anything older is gone from the window even though

@@ -14,6 +14,9 @@ export interface ScrollbackReplay {
   // or reset numbered at or below it is already reflected here (see
   // TerminalWindow).
   seq: number;
+  // Whether the connection is in Pueblo mode at the end of the buffer, so a
+  // replay that no longer holds the server's greeting still reads the tags.
+  pueblo: boolean;
 }
 
 function byteLength(data: TerminalChunk): number {

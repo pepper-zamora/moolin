@@ -3,7 +3,8 @@
 This is a developer-directed review of telnet option negotiation as Moolin
 implements it, and of the MUD-specific protocols layered on top of telnet
 that Moolin doesn't implement yet (GMCP, MSDP, MXP, MCCP, MSP), plus a
-note on how vertical tab and form feed in world output are handled. For each
+note on how vertical tab and form feed in world output are handled, and
+what Moolin does implement of Pueblo. For each
 unimplemented one: what it's *for*, and why Moolin's codebase specifically
 would benefit from it. This is not a wire-format reference — see the linked
 specs for byte layouts.
@@ -178,6 +179,70 @@ is also achievable per-MUD via triggers once Moolin has those (see
 navigation, but triggers are the more general tool and should land first.
 
 Spec: <https://www.zuggsoft.com/zmud/mxp.htm>
+
+## Pueblo
+
+Not a telnet option: the server announces it in the text itself, with a
+line such as `This world is Pueblo 1.0 Enhanced.`. Moolin answers that with
+`PUEBLOCLIENT 2.01`, as other Pueblo clients do, and from the greeting on
+reads a few HTML-style tags in the server's text ([pueblo.ts](src/pueblo.ts)):
+
+- `<a xch_cmd="look|inventory">text</a>` and `<send>look</send>` (or
+  `<send href="look">`) make the text a link that sends a command when
+  clicked: the first of the `|`-separated commands, or, with a right click on
+  one that has several, the one picked from a menu. A bare `<send>` sends its
+  own text. The command is sent as if typed, and echoed like it. While the
+  pointer is over a link, the status bar's left area says what it will send.
+- `<a href="https://…">` opens the address in the browser (http and https
+  only).
+- `<br>` is a line break, and a line feed directly after it is swallowed
+  rather than breaking a second time.
+- `<xch_page clear="text">` clears the screen, as Ctrl+L does, but only
+  once something follows it to show on the clean screen, so a clear with
+  nothing after it doesn't blank the screen for no reason. Some servers send
+  one at the end of their login output, which then scrolls the room
+  description away when the next output arrives; whether to honour server
+  clears at all is an open question (see [TODO.md](TODO.md)).
+
+Every other HTML or Pueblo tag is dropped and its content shown as plain
+text, so formatting tags (`<b>`, `<font>`) and images have no effect.
+Anything else in angle brackets is shown as sent: servers don't always
+escape the `<` in what they print (PennMUSH's `Use create <name> <password>`
+and an exit called `<O>`), and text that merely looks like a tag is not
+markup. Character references (`&lt;`, `&#65;`) are decoded. A link ends
+with its line.
+
+To see what Moolin made of a world's output, run it with
+`--log-level=debug`: it says when the greeting turned Pueblo on, once for
+each tag it dropped or showed as text, and each time a server clear was
+asked for and applied. The session log (`moolin.log`, with its `.times`
+sidecar) keeps the server's bytes exactly as they arrived, tags included, so
+a login can be replayed afterwards.
+
+How it fits together:
+
+- **Main answers the greeting** (`ConnectionManager`), because it is part of
+  the connection: the reply is written straight to the socket, so it is
+  neither echoed nor logged. Whether a connection is in Pueblo mode is kept
+  there, reset when the next connection begins, and sent with the scrollback
+  replay (`ScrollbackReplay.pueblo`), so reloading the window keeps links
+  working even once the greeting has scrolled out of the buffer.
+- **The renderer reads the tags** (`LineStream`), turning Pueblo on where the
+  greeting appears in the text it is given, so a replay is read the same way
+  the live output was. A replay that contains the greeting reads tags only
+  after it.
+- **Moolin's own lines are never read as Pueblo**, so a command echoed with a
+  `<` in it is shown as typed. The only thing that tells them from the
+  server's is that they have no arrival time, which is also true of old
+  history logged before the log recorded times; such history shows its tags
+  as written.
+- **Arrival times stay lined up.** The scrollback keeps one time per line
+  feed byte (see [GAPS.md](GAPS.md) §8). A swallowed line feed still takes
+  its time, which goes to the line the `<br>` ended, and character references
+  are never decoded into line feeds.
+- The log keeps the server's text as sent, tags included.
+
+Spec: <http://www.chaco.com/pueblo/doc/>
 
 ## MSDP — MUD Server Data Protocol
 

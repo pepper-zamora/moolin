@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as net from "node:net";
-import { ConnectionManager, type ConnectionManagerHandlers } from "./connection-manager";
+import { ConnectionManager, type ConnectionManagerHandlers, PUEBLO_CLIENT_REPLY } from "./connection-manager";
 import { newWorld } from "./world-utils";
 import type { Character, ConnectTarget } from "./worlds-types";
 
@@ -234,5 +234,97 @@ test("connecting again ends the first connection, and ignores its late events", 
   } finally {
     manager.disconnect();
     server.close();
+  }
+});
+
+// A server that greets each connection by writing `pieces` in turn (with a
+// pause between, so each arrives as its own chunk), and records what it gets.
+async function greetingServer(pieces: string[]): Promise<{ server: net.Server; port: number; received: () => string }> {
+  const chunks: Buffer[] = [];
+  const server = net.createServer((socket) => {
+    socket.on("data", (chunk) => chunks.push(chunk));
+    socket.on("error", () => {});
+    void (async () => {
+      for (const piece of pieces) {
+        socket.write(piece);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+    })();
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  return {
+    server,
+    port: (server.address() as net.AddressInfo).port,
+    received: () => Buffer.concat(chunks).toString("utf8"),
+  };
+}
+
+test("a Pueblo greeting is answered once, and the connection is marked Pueblo", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port, received } = await greetingServer(["This world is Pueblo 1.0 Enhanced.\r\n", "later\r\n"]);
+  const { manager, connected } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null });
+    assert.equal(manager.isPueblo(), false);
+    await connected;
+    await waitUntil(() => received().length > 0);
+    assert.equal(received(), PUEBLO_CLIENT_REPLY);
+    assert.equal(manager.isPueblo(), true);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("a greeting split across chunks is still answered", { timeout: TEST_TIMEOUT_MS }, async () => {
+  const { server, port, received } = await greetingServer(["This world is Pue", "blo\r\n"]);
+  const { manager } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null });
+    await waitUntil(() => received().length > 0);
+    assert.equal(received(), PUEBLO_CLIENT_REPLY);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("a server that doesn't greet is sent nothing and isn't Pueblo", { timeout: TEST_TIMEOUT_MS }, async () => {
+  const { server, port, received } = await greetingServer(["Welcome to a plain world\r\n"]);
+  const { manager, events, connected } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null });
+    await connected;
+    await waitUntil(() => events.some((event) => event.startsWith("data:")));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(received(), "");
+    assert.equal(manager.isPueblo(), false);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("Pueblo mode outlives the connection, and the next connection starts without it", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const pueblo = await greetingServer(["This world is Pueblo\r\n"]);
+  const plain = await greetingServer(["hello\r\n"]);
+  const { manager, events } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("a"), host: "127.0.0.1", port: pueblo.port }, character: null });
+    await waitUntil(() => manager.isPueblo());
+    manager.disconnect();
+    await waitUntil(() => events.includes("disconnected"));
+    assert.equal(manager.isPueblo(), true);
+    manager.connect({ world: { ...newWorld("b"), host: "127.0.0.1", port: plain.port }, character: null });
+    assert.equal(manager.isPueblo(), false);
+    await waitUntil(() => events.filter((event) => event.startsWith("data:")).length > 1);
+    assert.equal(manager.isPueblo(), false);
+  } finally {
+    manager.disconnect();
+    pueblo.server.close();
+    plain.server.close();
   }
 });

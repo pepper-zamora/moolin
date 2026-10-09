@@ -128,6 +128,11 @@ protocols that let the server drive client UI directly:
 - **MXP** (MUD eXtension Protocol) — lets the server send clickable links,
   custom colors/fonts, and simple embedded UI. Supported by MUSHclient and
   Mudlet.
+- **Pueblo** — HTML-flavoured text with clickable links, line breaks and
+  screen clears, announced by a greeting line rather than a telnet option.
+  Moolin supports the link, `<br>` and clear tags (see
+  [PROTOCOLS.md](PROTOCOLS.md#pueblo)) and drops the rest, such as
+  formatting and images.
 - **MSP** (MUD Sound Protocol) — server-triggered sound/music playback.
   Supported by MUSHclient, Mudlet.
 - **MCP** — supported by Atlantis (MOO/MUCK-oriented out-of-band protocol).

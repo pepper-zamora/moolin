@@ -32,6 +32,16 @@ renames that section to the new version and date.
   **Echo typed commands into the scrollback**, promoted from a World-only
   checkbox to the same Global/World/Character cascade.
 
+- Pueblo support. A world that greets with "This world is Pueblo" is
+  answered with `PUEBLOCLIENT 2.01`, and its `<a xch_cmd>`, `<send>` and
+  `<a href>` links become clickable in the scrollback (right-click a link
+  with several commands to choose one; the status bar shows what a link will
+  do while the pointer is on it), with `<br>` and `<xch_page clear=text>`
+  honoured (a clear waits until something follows it) and other HTML tags
+  dropped; text that only looks like a tag, such as `<name>`, is shown as
+  sent. `--log-level=debug` says what was dropped or cleared. See
+  [PROTOCOLS.md](PROTOCOLS.md).
+
 ### Changed
 
 - **The scrollback is rewritten**, no longer built on xterm.js: each server

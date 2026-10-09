@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AnsiParser } from "./ansi-parser";
+import { AnsiParser, DEFAULT_STYLE } from "./ansi-parser";
 import { LineBuilder, MAX_LINE_LENGTH } from "./line-builder";
 
 function build(chunks: string[], times: Array<number | null> = []): LineBuilder {
@@ -127,4 +127,59 @@ test("dropped lines are marked, so a view can skip ones it never drew", () => {
   assert.equal(bLine.dropped, true);
   assert.equal(b.lines[0].dropped, undefined);
   assert.equal(b.dirtyCount, 3);
+});
+
+test("a break ends the line with no time, and a swallowed line feed after it supplies one", () => {
+  const b = new LineBuilder();
+  const parser = new AnsiParser();
+  b.feed(parser.parse("one"), () => null);
+  b.feed([{ kind: "break" }, { kind: "skip", afterBreak: true }], () => 42);
+  b.feed(parser.parse("two\n"), () => 7);
+  assert.deepEqual(
+    b.lines.map((l) => [l.text, l.time]),
+    [
+      ["one", 42],
+      ["two", 7],
+    ],
+  );
+});
+
+test("a skip takes its time without ending a line, and only stamps after a break", () => {
+  const b = new LineBuilder();
+  const taken: Array<number | null> = [];
+  const times = [1, 2, 3];
+  b.feed(parser("a"), () => null);
+  b.feed([{ kind: "skip", afterBreak: false }], () => {
+    const t = times.shift() ?? null;
+    taken.push(t);
+    return t;
+  });
+  assert.deepEqual(taken, [1]);
+  assert.equal(b.openLine?.text, "a");
+  assert.equal(b.openLine?.time, null);
+});
+
+function parser(text: string) {
+  return new AnsiParser().parse(text);
+}
+
+test("runs merge only when they share a link as well as a style", () => {
+  const b = new LineBuilder();
+  const link = { id: 1, cmd: "look", href: null };
+  const other = { id: 2, cmd: "look", href: null };
+  const text = (t: string, l: typeof link | null) => ({
+    kind: "text" as const,
+    text: t,
+    style: DEFAULT_STYLE,
+    link: l,
+  });
+  b.feed([text("a", null), text("b", link), text("c", link), text("d", other)], () => null);
+  assert.deepEqual(
+    b.lines[0].runs?.map((r) => [r.text, r.link?.id ?? null]),
+    [
+      ["a", null],
+      ["bc", 1],
+      ["d", 2],
+    ],
+  );
 });

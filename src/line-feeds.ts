@@ -20,3 +20,9 @@ export function countLineFeeds(data: string | Uint8Array): number {
 function isLineFeed(code: number): boolean {
   return code === 0x0a || code === 0x0b || code === 0x0c;
 }
+
+// Splits text after each line feed, so every piece but possibly the last ends
+// with one: the unit a line's arrival time belongs to.
+export function splitAtLineFeeds(text: string): string[] {
+  return text.match(/[^\n\v\f]*[\n\v\f]|[^\n\v\f]+/g) ?? [];
+}

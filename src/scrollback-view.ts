@@ -16,6 +16,14 @@ const EAGER_FLUSH_LINES = 2000;
 // trimmed every so many lines rather than on every one.
 const TRIM_SLACK_FRACTION = 0.1;
 
+// A clickable Pueblo link as the view reports it.
+export interface LinkTarget {
+  cmd: string | null;
+  href: string | null;
+  // The link's text on its line, which is the command of a bare <send>.
+  text: string;
+}
+
 export interface ScrollbackViewOptions {
   // The most lines kept; the oldest are dropped past it.
   maxLines: number;
@@ -26,8 +34,17 @@ export interface ScrollbackViewOptions {
   // The view's size in character cells changed (sent to the server as NAWS).
   onResize: (cols: number, rows: number) => void;
   onOpenUrl: (url: string) => void;
-  // The pointer moved onto a web address (given), or off it (null).
-  onHoverUrl: (url: string | null) => void;
+  // A Pueblo link was clicked.
+  onLink: (link: LinkTarget) => void;
+  // A Pueblo link was right-clicked; return true to handle it (and so keep the
+  // usual context menu from showing).
+  onLinkMenu: (link: LinkTarget, event: MouseEvent) => boolean;
+  // The pointer moved onto a web address or Pueblo link (given), or off it
+  // (null). A link's text is what it would send or open.
+  onHover: (target: { url: string } | { link: LinkTarget } | null) => void;
+  // What the scrollback decided that could explain odd output, for the debug
+  // log (see LineStream).
+  log: (message: string) => void;
   // The primary mouse button went down in the scrollback, starting a click or
   // drag (a double or triple click goes down, up, down...), and went up again.
   onPointerDown: () => void;
@@ -38,7 +55,7 @@ export interface ScrollbackViewOptions {
 // lines a LineStream makes. The browser does the wrapping, selection and
 // scrolling; this keeps it pinned to the bottom, trims it, and reports its size.
 export class ScrollbackView {
-  private readonly stream = new LineStream();
+  private readonly stream: LineStream;
   private readonly linesEl = document.createElement("div");
   private readonly probe = document.createElement("span");
   private readonly held: HeldSelection;
@@ -53,12 +70,13 @@ export class ScrollbackView {
   private cellHeight = 18;
   private cellWidthPx = 0;
   private size: number;
-  private hoveredUrl: string | null = null;
+  private hovered: string | null = null;
 
   constructor(
     private readonly el: HTMLElement,
     private readonly options: ScrollbackViewOptions,
   ) {
+    this.stream = new LineStream(options.log);
     this.size = options.fontSize;
     this.linesEl.className = "lines";
     this.probe.className = "probe";
@@ -81,11 +99,24 @@ export class ScrollbackView {
     }).observe(el);
 
     el.addEventListener("click", (event) => {
+      // A drag that ends over a link is a selection, not a click on it.
+      if (document.getSelection()?.isCollapsed === false) return;
+      const link = this.linkTarget(event.target);
+      if (link) {
+        options.onLink(link);
+        return;
+      }
       const url = this.urlAt(event.target);
-      // A drag that ends over an address is a selection, not a click on it.
-      if (url && document.getSelection()?.isCollapsed !== false) options.onOpenUrl(url);
+      if (url) options.onOpenUrl(url);
     });
-    el.addEventListener("mouseover", (event) => this.hover(this.urlAt(event.target)));
+    el.addEventListener("contextmenu", (event) => {
+      const link = this.linkTarget(event.target);
+      if (link && options.onLinkMenu(link, event)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+    el.addEventListener("mouseover", (event) => this.hover(event.target));
     el.addEventListener("mouseleave", () => this.hover(null));
 
     this.refit();
@@ -95,10 +126,27 @@ export class ScrollbackView {
     return (target as Element | null)?.closest<HTMLElement>(".url")?.dataset.url ?? null;
   }
 
-  private hover(url: string | null): void {
-    if (url === this.hoveredUrl) return;
-    this.hoveredUrl = url;
-    this.options.onHoverUrl(url);
+  // The Pueblo link a mouse event landed on, with the text of all its pieces
+  // on the line.
+  private linkTarget(target: EventTarget | null): LinkTarget | null {
+    const span = (target as Element | null)?.closest<HTMLElement>(".link");
+    if (!span) return null;
+    const pieces = span.closest(".line")?.querySelectorAll<HTMLElement>(`[data-link="${span.dataset.link}"]`) ?? [];
+    return {
+      cmd: span.dataset.cmd ?? null,
+      href: span.dataset.href ?? null,
+      text: Array.from(pieces, (piece) => piece.textContent).join(""),
+    };
+  }
+
+  private hover(target: EventTarget | null): void {
+    const link = target ? this.linkTarget(target) : null;
+    const url = link ? null : target ? this.urlAt(target) : null;
+    // Moving within the same link or address is no change.
+    const key = link ? `link:${link.cmd}:${link.href}:${link.text}` : url ? `url:${url}` : null;
+    if (key === this.hovered) return;
+    this.hovered = key;
+    this.options.onHover(link ? { link } : url ? { url } : null);
   }
 
   // A mouse button is down in the scrollback: a click or a drag selection.
@@ -136,8 +184,8 @@ export class ScrollbackView {
   }
 
   // Adds history; see LineStream.replay.
-  replay(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): void {
-    this.stream.replay(chunks, times);
+  replay(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>, pueblo = false): void {
+    this.stream.replay(chunks, times, pueblo);
     this.flush();
   }
 
@@ -155,7 +203,7 @@ export class ScrollbackView {
   // stays scrollable.
   clear(): void {
     this.stuck = true;
-    this.stream.blankScreen(Math.ceil(this.el.clientHeight / this.cellHeight));
+    this.stream.blankScreen();
     this.flush();
   }
 
@@ -187,8 +235,9 @@ export class ScrollbackView {
     this.trim();
     const fresh = document.createDocumentFragment();
     for (const line of dirty) {
-      // Dropped before it was drawn.
-      if (line.dropped) continue;
+      // Dropped before it was drawn, or finished and drawn already (it is
+      // listed again when a swallowed line feed gives it its time).
+      if (line.dropped || line.runs === null) continue;
       if (!line.el) {
         line.el = document.createElement("div");
         line.el.className = "line";
@@ -212,6 +261,16 @@ export class ScrollbackView {
   private runNodes(run: Run): Node[] {
     const { className, css } = appearance(run.style);
     const nodes: Node[] = [];
+    if (run.link) {
+      const span = document.createElement("span");
+      span.className = `${className} link`.trim();
+      if (css) span.style.cssText = css;
+      span.dataset.link = String(run.link.id);
+      if (run.link.cmd !== null) span.dataset.cmd = run.link.cmd;
+      if (run.link.href !== null) span.dataset.href = run.link.href;
+      span.textContent = run.text;
+      return [span];
+    }
     for (const segment of linkify(run.text)) {
       if (className === "" && css === "" && !segment.url) {
         nodes.push(document.createTextNode(segment.text));
@@ -293,6 +352,7 @@ export class ScrollbackView {
   refit(): void {
     const computed = Number.parseFloat(window.getComputedStyle(this.el).lineHeight);
     this.cellHeight = Number.isFinite(computed) && computed > 0 ? computed : this.size * 1.25;
+    this.stream.screenRows = Math.max(1, Math.ceil(this.el.clientHeight / this.cellHeight));
     this.cellWidthPx = this.probe.getBoundingClientRect().width / 10;
     if (!(this.cellWidthPx > 0) || this.el.clientWidth === 0 || this.el.clientHeight === 0) return;
     const cols = Math.max(2, Math.floor(this.el.clientWidth / this.cellWidthPx + 0.0001));
