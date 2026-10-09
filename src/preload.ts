@@ -3,6 +3,7 @@ import type { GlobalSettings, World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
 import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
 import type { ScrollbackReplay } from "./scrollback-buffer";
+import type { SelectAllTarget } from "./select-all";
 import { IpcChannels } from "./ipc-channels";
 import { parseFontArgs } from "./fonts";
 import type { Preferences } from "./preferences";
@@ -57,7 +58,7 @@ contextBridge.exposeInMainWorld("moolin", {
     readText: (): Promise<string> => ipcRenderer.invoke(IpcChannels.clipboardReadText),
   },
   openExternal: (url: string): void => ipcRenderer.send(IpcChannels.shellOpenExternal, url),
-  showContextMenu: (options: { hasSelection: boolean }): void => {
+  showContextMenu: (options: { hasSelection: boolean; selectAllTarget: SelectAllTarget }): void => {
     ipcRenderer.send(IpcChannels.terminalContextMenu, options);
   },
   onCopyRequested: (callback: () => void): void => {
@@ -69,8 +70,8 @@ contextBridge.exposeInMainWorld("moolin", {
   onPasteRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalPasteRequested, () => callback());
   },
-  onSelectAllRequested: (callback: () => void): void => {
-    ipcRenderer.on(IpcChannels.terminalSelectAllRequested, () => callback());
+  onSelectAllRequested: (callback: (target?: SelectAllTarget) => void): void => {
+    ipcRenderer.on(IpcChannels.terminalSelectAllRequested, (_event, target?: SelectAllTarget) => callback(target));
   },
   onUndoRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalUndoRequested, () => callback());

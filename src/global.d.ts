@@ -1,6 +1,7 @@
 import type { GlobalSettings, World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
 import type { ScrollbackReplay } from "./scrollback-buffer";
+import type { SelectAllTarget } from "./select-all";
 import type { LogLevel } from "./logger";
 import type { Preferences } from "./preferences";
 
@@ -29,11 +30,13 @@ declare global {
         readText(): Promise<string>;
       };
       openExternal(url: string): void;
-      showContextMenu(options: { hasSelection: boolean }): void;
+      showContextMenu(options: { hasSelection: boolean; selectAllTarget: SelectAllTarget }): void;
       onCopyRequested(callback: () => void): void;
       onCutRequested(callback: () => void): void;
       onPasteRequested(callback: () => void): void;
-      onSelectAllRequested(callback: () => void): void;
+      // `target` is set when the request names where it goes (the context menu);
+      // from the Edit menu and the keyboard it isn't (see select-all.ts).
+      onSelectAllRequested(callback: (target?: SelectAllTarget) => void): void;
       onUndoRequested(callback: () => void): void;
       onRedoRequested(callback: () => void): void;
       onFindRequested(callback: (action: "open" | "next" | "previous") => void): void;

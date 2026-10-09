@@ -11,6 +11,7 @@ import { LiveReplay } from "./live-replay";
 import { linkCommands } from "./pueblo";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import { fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
+import { chooseSelectAllTarget, type SelectAllTarget } from "./select-all";
 import { ScrollbackView } from "./scrollback-view";
 import { TimestampGutter } from "./timestamp-gutter";
 
@@ -281,7 +282,11 @@ inputArea.addEventListener("input", () => resizeInput());
 // Captured before the value mutates (unlike "input", which fires after), so
 // the pre-edit state can be pushed as an undo step. Consecutive keystrokes
 // coalesce into one step via InputUndoStack's own debounce.
+// Working in the input line (clicking into it, or editing it) ends a lingering
+// scrollback selection, so Select All then means the input line.
+inputArea.addEventListener("mousedown", () => view.clearSelection());
 inputArea.addEventListener("beforeinput", () => {
+  view.clearSelection();
   inputUndo.pushTyping(inputSnapshot(), Date.now());
   reportUndoState();
 });
@@ -370,7 +375,19 @@ async function pasteIntoInput(): Promise<void> {
 window.moolin.onCopyRequested(() => copySelection());
 window.moolin.onCutRequested(() => cutSelection());
 window.moolin.onPasteRequested(() => void pasteIntoInput());
-window.moolin.onSelectAllRequested(() => view.selectAll());
+// Select All: the input line, unless something is selected in the scrollback
+// (see select-all.ts). Reached from the keyboard and from the Edit and context
+// menus; the menus name their target only where they know it.
+function selectAll(requested?: SelectAllTarget): void {
+  const target = chooseSelectAllTarget(requested, view.selectedText() !== "", !inputArea.disabled);
+  if (target === "scrollback") {
+    view.selectAll();
+  } else {
+    inputArea.focus();
+    inputArea.select(); // which also lets go of any scrollback selection (see the "select" handler)
+  }
+}
+window.moolin.onSelectAllRequested(selectAll);
 window.moolin.onUndoRequested(() => undoInput());
 window.moolin.onRedoRequested(() => redoInput());
 window.moolin.onFindRequested((action) => {
@@ -414,8 +431,10 @@ document.addEventListener(
       findWidget.findFromMenu(event.shiftKey ? "previous" : "next");
     } else if (event.key === "Escape" && findWidget.isOpen()) {
       findWidget.close();
-    } else if (editingFind && mod && ["c", "x", "v", "z", "y"].includes(key)) {
+    } else if (editingFind && mod && ["a", "c", "x", "v", "z", "y"].includes(key)) {
       handled = false;
+    } else if (mod && !event.shiftKey && key === "a") {
+      selectAll();
     } else if (mod && key === "c") {
       copySelection();
     } else if (mod && key === "x") {
@@ -454,7 +473,9 @@ document.addEventListener("contextmenu", (event) => {
     securityStatus.selectedText() !== "" ||
     view.selectedText() !== "" ||
     inputArea.selectionStart !== inputArea.selectionEnd;
-  window.moolin.showContextMenu({ hasSelection });
+  // Select All there means what was clicked on: the scrollback, or the input line.
+  const selectAllTarget = terminalContainer.contains(event.target as Node) ? "scrollback" : "input";
+  window.moolin.showContextMenu({ hasSelection, selectAllTarget });
 });
 
 // Replays buffered history (the in-memory buffer on reload, or a world's log
