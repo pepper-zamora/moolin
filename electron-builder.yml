@@ -3,7 +3,7 @@ productName: Moolin
 copyright: Copyright © Moolin contributors
 directories:
   output: release
-# esbuild bundles everything (xterm included) into dist/, so no node_modules
+# esbuild bundles everything into dist/, so no node_modules
 # ship; the renderer loads src/index.html and the window icon at runtime.
 files:
   - package.json

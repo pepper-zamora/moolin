@@ -7,28 +7,6 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
 
 ## App
 
-- **Word-wrap's resize scroll position is only approximate.** When a window
-  resizes while word-wrap is on, `reflowForResize()` (src/renderer.ts)
-  restores scroll position as a proportion of the buffer (`viewportY /
-  length` before, scaled by the new `length` after) rather than anchoring to
-  the exact logical line that was on screen — reflowing at a new width
-  changes how many visual rows each logical line takes, so an exact anchor
-  would need per-logical-line marker tracking through the redraw. This was a
-  deliberate v1 scoping call, not an oversight, but it needs a hard look
-  before it's accepted as the long-term answer: give it real usage (does the
-  approximation drift noticeably with a large scrollback or lots of
-  wrapped lines?) and decide whether it's good enough or needs the
-  marker-based exact version.
-- **Word-wrap-safe copy assumes ordinary (linear) selection.** xterm.js also
-  has an Alt+drag "column/block select" mode (rectangular, not line-wrapping
-  aware), with no public API to detect it from `getSelectionPosition()`'s
-  result, and no documented, cross-platform option to disable it
-  (`macOptionClickForcesSelection` only affects macOS). `getWrapAwareSelection()`
-  (src/renderer.ts) doesn't special-case it, so Alt+drag-selecting across a
-  word-wrapped paragraph may copy more text than the rectangle visually
-  highlighted (that paragraph's whole original line, not just the selected
-  columns). Narrow, rare-gesture limitation — never wrong/corrupted output,
-  just more than expected — accepted rather than engineered around.
 - **A dead connection isn't detected after the Mac sleeps and wakes.**
   Reported on macOS: suspending (lid close / sleep) and later waking leaves
   the window showing "Connected" with no error, but the underlying telnet
@@ -74,17 +52,11 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
   to the role's item; Electron accelerators have no Globe/fn modifier, so
   it can't be bound directly.
 
-- **`--screen-reader-mode` is internal/undocumented, but could be a real
-  feature.** Added so `scripts/smoke.mjs` could read rendered text and
-  coordinates via xterm's own accessibility tree (a hidden DOM mirror of
-  visible rows) instead of reaching into xterm's internal buffer API — see
-  `src/global.d.ts`'s `screenReaderMode` field. It genuinely enables basic
-  NVDA/VoiceOver support (xterm.js's own feature, not something built here),
-  currently off by default and unmentioned in README's command-line options
-  table. Worth deciding deliberately whether to document and ship it as a
-  real, user-facing flag (there's a real cost: a DOM node per visible row,
-  kept in sync on every render) rather than leaving it as a test-only side
-  effect.
+- **Screen readers are untested with the new scrollback.** It is ordinary
+  page content (a `div` per line) rather than a canvas, so a screen reader can
+  read it, but nothing marks it as a live log (`role="log"`, `aria-live`),
+  and a busy MUD would make announcing every new line noisy. Try NVDA and
+  VoiceOver and decide deliberately what, if anything, to announce.
 
 ## Testing
 

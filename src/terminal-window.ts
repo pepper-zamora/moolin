@@ -182,11 +182,6 @@ export class TerminalWindow {
   }
 
   getScrollback(): ScrollbackReplay {
-    return {
-      chunks: this.scrollback.snapshot(),
-      times: this.scrollback.snapshotTimes(),
-      seq: this.seq,
-      wordWrap: this.connection.getState().wordWrap,
-    };
+    return { chunks: this.scrollback.snapshot(), times: this.scrollback.snapshotTimes(), seq: this.seq };
   }
 }

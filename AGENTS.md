@@ -1,7 +1,7 @@
 # Agent instructions
 
-Moolin is a MOO/MUSH/MUCK/MUD desktop client (Electron + xterm.js,
-TypeScript), written by AI at the direction of Pepper, an experienced MU*
+Moolin is a MOO/MUSH/MUCK/MUD desktop client (Electron, with a DOM-based
+scrollback, TypeScript), written by AI at the direction of Pepper, an experienced MU*
 player who decides what it does and how it should feel. Every line of code
 and docs so far has been written by an AI agent; that's expected to continue,
 possibly across more than one vendor's agents, so keep this file accurate and

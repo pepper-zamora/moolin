@@ -94,20 +94,19 @@ breakage) but leaves real features on the table.
 
 Not a telnet option, but a related question about the byte stream: what to
 do with VT (`\v`, 0x0B) and FF (`\f`, 0x0C) when a world sends them.
-Moolin passes both through to xterm.js unchanged, and xterm treats each as
-a plain line feed: its parser maps LF, VT and FF to the same `lineFeed()`,
-which (with Moolin's `convertEol` option) also returns to column 0. So a
-form feed starts a new line rather than clearing the screen or starting a
+Moolin passes both through to its scrollback parser
+([ansi-parser.ts](src/ansi-parser.ts)) unchanged, and treats each as a plain
+line break, the same as LF. So a form feed starts a new line rather than clearing the screen or starting a
 new "page", and a vertical tab starts a new line rather than moving to a
 vertical tab stop. Both are kept as-is in the session log.
 
 Since each one is a line, it also gets its own arrival time: the
 timestamp code counts LF, VT and FF alike (`countLineFeeds` in
 [line-feeds.ts](src/line-feeds.ts)), so the times stay lined up with
-xterm's lines (see [GAPS.md](GAPS.md) §8).
+the scrollback's lines (see [GAPS.md](GAPS.md) §8).
 
-This is a deliberate choice, but a provisional one: it's xterm's behavior,
-kept because nothing yet calls for anything else. Revisit it if a real
+This is a deliberate choice, but a provisional one: it's what terminals
+do, kept because nothing yet calls for anything else. Revisit it if a real
 world turns out to rely on another meaning, such as a form feed that's
 meant to clear the screen.
 
@@ -164,15 +163,15 @@ generated text on the MUD side can't inject client-side markup).
 
 **Why Moolin might want it:** this is the protocol most entangled with
 Moolin's rendering layer rather than its networking layer, since Moolin
-renders scrollback through xterm.js
-([terminal-window.ts](src/terminal-window.ts)) which has no concept of
-clickable inline spans beyond the existing auto-linkified URL handling
+renders scrollback itself
+([scrollback-view.ts](src/scrollback-view.ts)), where the only clickable
+inline spans are the auto-linkified URLs
 mentioned in the README. Supporting MXP meaningfully would mean: parsing a
 constrained HTML-like grammar out of the byte stream (a new layer above
 `TelnetParser`, since MXP tags arrive as ordinary data bytes, not telnet
 subnegotiations, except for the mode-switching option itself), mapping a few
-of its tags (`<send>`, `<color>`, maybe `<a href>`) onto xterm.js link
-providers/decorations, and ignoring the rest. That's a reasonable amount of
+of its tags (`<send>`, `<color>`, maybe `<a href>`) onto clickable spans
+like the URL ones, and ignoring the rest. That's a reasonable amount of
 work for a feature whose main payoff — clickable room exits/command links —
 is also achievable per-MUD via triggers once Moolin has those (see
 [GAPS.md](GAPS.md)). Worth it for the subset of MUDs that lean on MXP for

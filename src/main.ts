@@ -57,11 +57,7 @@ configureLogger(logLevel);
 // per window (not a fixed array) since the font prefs it carries can change
 // at runtime via the Preferences dialog.
 function rendererArgs(): string[] {
-  const args = [`--log-level=${logLevel}`, `--font-id=${prefs.fontId}`, `--font-size=${prefs.fontSize}`];
-  // Internal/undocumented: see --fit-to-content below for the same pattern,
-  // and src/global.d.ts's screenReaderMode for what this actually enables.
-  if (process.argv.includes("--screen-reader-mode")) args.push("--screen-reader-mode");
-  return args;
+  return [`--log-level=${logLevel}`, `--font-id=${prefs.fontId}`, `--font-size=${prefs.fontSize}`];
 }
 
 const worldsPath = resolveWorldsPath(getCliWorldsArg());
@@ -307,7 +303,7 @@ function buildMenu(terminal: TerminalWindow): void {
     {
       // Not the built-in "editMenu" role: its items rely on Chromium's
       // native edit commands against the focused DOM selection, which don't
-      // reliably reach into xterm.js's canvas/WebGL-rendered selection (for
+      // usually in the input area rather than the scrollback (for
       // Cut/Copy/Paste), and whose native undo stack is unusable here anyway
       // (see input-undo.ts). Every item below carries a display-only
       // accelerator (`registerAccelerator: false`): the shortcut text shows
@@ -566,7 +562,7 @@ ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRe
 
 ipcMain.handle(
   IpcChannels.terminalGetScrollback,
-  (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0, wordWrap: false },
+  (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0 },
 );
 
 // A freshly opened (non-cascaded) window's one-shot report of how big its

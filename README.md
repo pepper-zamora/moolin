@@ -7,7 +7,7 @@ Pepper, an experienced player on social servers such as LambdaMOO, who decided
 what it should do and how it should feel to use.
 
 A desktop client for MOOs, MUSHes, MUCKs and MUDs, with buttery-smooth
-scrollback. Built on Electron and xterm.js (WebGL-rendered), for Linux,
+scrollback. Built on Electron, with its own DOM-based scrollback, for Linux,
 Windows and macOS.
 
 Moolin merges two earlier clients: moolin v1, which this repository's history
@@ -83,8 +83,8 @@ from source never check at startup.
   you play on each, then connect to a world, or to a world as a character.
 - **Word wrap.** Off by default; turn it on in the Worlds dialog's Global
   Settings tab (with a World or Character able to override it) to wrap long
-  server lines at word boundaries instead of xterm's default mid-word
-  column wrap. See [Word wrap](#word-wrap) below.
+  server lines at word boundaries instead of at the last column, mid-word.
+  See [Word wrap](#word-wrap) below.
 - **Auto-login.** Connecting as a character can send a login command built
   from a per-world template, e.g. `co "{{character}}" {{password}}\r`.
 - **TLS, explicitly.** Each world either uses TLS or doesn't; Moolin never
@@ -95,7 +95,7 @@ from source never check at startup.
   with a question mark for an untrusted certificate the world accepts, red
   with a cross for plaintext. Hover over it for the protocol, cipher, key
   exchange and the certificate chain's details.
-- **Scrollback that survives a reload.** 100,000 lines, with clickable URLs.
+- **Scrollback that survives a reload.** 20,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
 - **Persistent logs.** Everything a window shows, colors included, is appended
@@ -126,7 +126,7 @@ from source never check at startup.
 - **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
   right of the window, with match-case, whole-word and regular-expression
   toggles. Every match is highlighted, and marked beside the scrollbar, and
-  the matches update as new output arrives.
+  the matches update as new output arrives (the newest 1,000 are kept).
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
@@ -228,8 +228,8 @@ word boundaries** and **Echo typed commands into the scrollback** — that a
 World or a Character can each override: their own Settings tab offers
 **Inherit** (use whatever the level above resolves to), **On** or **Off** for
 both. Character wins over World wins over Global. Word-wrap wraps long
-server lines at word boundaries instead of mid-word, without ever changing
-what a line copies as — see [Word wrap](#word-wrap) below.
+server lines at word boundaries instead of mid-word — see
+[Word wrap](#word-wrap) below.
 
 A connection keeps the settings its world and character had when it
 connected: changes saved in the Worlds dialog, including these two cascading
@@ -259,24 +259,13 @@ Nothing else is added, so end the template with `\r` (most servers) or
 
 ### Word wrap
 
-xterm (like most terminals) wraps a line that's too long for the window at
-the column edge, mid-word if that's where it lands. Turning word wrap on
+By default a line that's too long for the window wraps at the last column,
+mid-word if that's where it lands, as a terminal does. Turning word wrap on
 (Global, World or Character — see [Using Moolin](#using-moolin) above)
-wraps at the last word boundary that fits instead, without changing what the
-line copies as: selecting and copying a wrapped line still gives you back
-exactly the one line the server sent, never split by an inserted line break
-and never including the padding spaces used to trigger the wrap. That's done
-by padding the row with spaces until xterm's own column wrap lands exactly on
-the word boundary, rather than by Moolin inserting a break of its own — xterm
-ends up doing the actual wrapping either way, just where word wrap asks it
-to; copying substitutes the original line back in, so selecting only part of
-a wrapped paragraph copies that paragraph's whole original line, not just the
-highlighted portion.
-
-Resizing the window re-wraps already-displayed text to the new width if word
-wrap is on; this redraws the whole scrollback (debounced until the resize
-settles), so a very long scrollback may pause briefly while it does, and the
-scroll position afterward is only approximately preserved.
+wraps at the last word boundary that fits instead. Either way it's only how
+the line is shown: it is still one line, so selecting and copying it gives
+back exactly the text you selected, and resizing the window re-wraps
+everything at once.
 
 ### Keyboard shortcuts
 
@@ -413,7 +402,7 @@ A missing or unreadable file just means the defaults.
 | `npm run build`     | Typecheck, then bundle main, preload and renderer into `dist/` |
 | `npm run dev`       | Rebuild on change (reload the window to pick it up)      |
 | `npm test`          | Run the unit tests (`src/*.test.ts`, Node's test runner) |
-| `npm run smoke`     | Build, then drive the real app through focus and typing checks (see below) |
+| `npm run smoke`     | Build, then drive the real app through focus, typing, copy and link checks (see below) |
 | `npm run typecheck` | Typecheck only                                          |
 | `npm run lint`      | Lint `src/` with [Biome](https://biomejs.dev/) (`npm run lint:fix` to apply safe fixes) |
 | `npm run format`    | Format `src/` with Biome (`npm run format:check` to check without writing) |
@@ -431,7 +420,7 @@ default font (`font/`). It's not part of `npm run build`: it clones the full
 only needs rerunning when `private-build-plans.toml` changes. Set
 `IOSEVKA_SRC` to point at a checkout of your own instead of letting it
 clone one. The four built faces (Regular, Bold, Italic, BoldItalic — what
-xterm actually switches between for SGR bold/italic) are committed, along
+the scrollback switches between for SGR bold/italic) are committed, along
 with the font's SIL Open Font License text (`font/LICENSE-IosevkaMoolin.md`).
 
 `npm run smoke` (`scripts/smoke.mjs`) covers what the unit tests can't
@@ -439,8 +428,9 @@ reach: the renderer in a real window. It launches Moolin in a throwaway
 sandbox (its own config folder, worlds file and Documents folder, so it
 leaves a Moolin you have running and your logs alone), connects it to a
 local test server, and drives it over the Chrome DevTools Protocol:
-clicking, selecting and typing, and checking where keyboard focus goes and
-that typed commands reach the server. Its windows appear on screen while it
+clicking, selecting, copying and typing, and checking where keyboard focus
+goes, that typed commands reach the server, what copying a wrapped or
+partial selection gives, Clear Screen, and a Pueblo world's links. Its windows appear on screen while it
 runs (a few seconds), so it needs a real display; on headless Linux use
 `xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
 work but hasn't been tried. To check a packaged build instead, point
@@ -464,11 +454,20 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/preferences.ts`      | Reading and writing app-wide preferences                                  |
 | `src/fonts.ts`            | The curated monospace font list, size bounds and sample text              |
 | `src/world-utils.ts`      | World helpers shared by main and renderer (defaults, labels, login templates) |
+| `src/update-check.ts`     | Asking GitHub whether a newer release exists                              |
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
 | `src/session-log.ts`      | Persistent per-world/character logs, their `.times` sidecar, and which window owns each |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
-| `src/renderer.ts`         | The terminal window's page: scrollback, gutter, input area, status bar, keys |
+| `src/renderer.ts`         | The terminal window's page: wires the scrollback, gutter, input area, status bar and keys together |
+| `src/scrollback-view.ts`  | The scrollback's DOM: draws lines, keeps to the bottom, trims, measures its size |
+| `src/line-stream.ts`      | What the scrollback shows: text in, lines with arrival times out (no DOM)  |
+| `src/ansi-parser.ts`      | Streaming parser for colour and attribute sequences, and how a style looks |
+| `src/line-builder.ts`     | Builds lines (their text, styled runs and time) from the parser's output   |
+| `src/held-selection.ts`   | Keeps the scrollback's selection, and its highlight, after focus moves away |
+| `src/timestamp-gutter.ts` | The per-line timestamp column                                              |
+| `src/linkify.ts`          | Finding web addresses in text                                              |
+| `src/scrollback-search.ts`| Finding matches in the lines, and which match is current                   |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
 | `src/preferences-dialog.ts` | The Preferences dialog                                                  |
 | `src/tabs.ts`             | Tab strips (the Worlds dialog's), with ‹ › scrolling when they overflow   |
