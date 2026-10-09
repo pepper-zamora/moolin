@@ -7,7 +7,7 @@
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
     />
     <title>Moolin</title>
-    <!-- Bundled by esbuild from renderer.ts's CSS imports (xterm's and styles.css). -->
+    <!-- Bundled by esbuild from renderer.ts's CSS import (styles.css). -->
     <link rel="stylesheet" href="../dist/renderer.css" />
   </head>
   <body>
@@ -17,6 +17,8 @@
              part of its buffer, kept scroll-synced in renderer.ts. -->
         <div id="gutter" hidden></div>
         <div id="terminal"></div>
+        <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
+        <canvas id="search-ruler" hidden></canvas>
         <!-- Scrollback search (Ctrl+F), floating over the terminal's top
              right; driven by find-widget.ts. -->
         <div id="find-widget" role="search" hidden>

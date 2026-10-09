@@ -128,6 +128,11 @@ protocols that let the server drive client UI directly:
 - **MXP** (MUD eXtension Protocol) — lets the server send clickable links,
   custom colors/fonts, and simple embedded UI. Supported by MUSHclient and
   Mudlet.
+- **Pueblo** — HTML-flavoured text with clickable links, line breaks and
+  screen clears, announced by a greeting line rather than a telnet option.
+  Moolin supports the link, `<br>` and clear tags (see
+  [PROTOCOLS.md](PROTOCOLS.md#pueblo)) and drops the rest, such as
+  formatting and images.
 - **MSP** (MUD Sound Protocol) — server-triggered sound/music playback.
   Supported by MUSHclient, Mudlet.
 - **MCP** — supported by Atlantis (MOO/MUCK-oriented out-of-band protocol).
@@ -234,10 +239,9 @@ currently discards or never negotiates:
     the scrollback (`#gutter` in `src/index.html`, drawn by `renderGutter`
     in `src/renderer.ts`); the last choice is saved in `preferences.json`
     (`src/preferences.ts`) as the default for new windows. It is a separate element kept aligned to the
-    viewport rather than an xterm decoration, since decorations are drawn
-    inside the terminal's columns. Each stamped line is anchored by an
-    xterm marker, which follows the line as the buffer scrolls and goes
-    away when the line leaves the scrollback. Labels are 12-hour,
+    viewport (`src/timestamp-gutter.ts`). The time is kept on each line
+    itself (`Line.time` in `src/line-builder.ts`), so it follows the line as
+    the scrollback scrolls and goes away when the line is trimmed. Labels are 12-hour,
     minute-resolution (`9:05p`), shown once per run of same-minute lines,
     with the date floated above the first line of each day.
   - **What gets a time.** Only server output (`writeServerData` in
@@ -247,11 +251,11 @@ currently discards or never negotiates:
     leaves them blank.
   - **Line model.** Rather than tracking line breaks in the byte stream,
     every layer keeps one time per *line feed*, counted by
-    `countLineFeeds` (`src/line-feeds.ts`; LF, VT and FF, the bytes xterm
-    feeds a line for). The renderer queues the times as it writes and pops
-    one each time xterm fires `onLineFeed`, so the stamps match the lines
-    exactly however the bytes were chunked. Wrapped rows don't fire it, and
-    a stamp lands on its logical line's first row.
+    `countLineFeeds` (`src/line-feeds.ts`; LF, VT and FF). The renderer's
+    parser (`src/ansi-parser.ts`) makes one line break per such byte, in
+    every parser state, and the line builder takes the next time for each,
+    so the stamps match the lines exactly however the bytes were chunked.
+    A wrapped line is still one line, and its stamp lands on its first row.
   - **History.** The replay buffer (`src/scrollback-buffer.ts`) keeps the
     times alongside its chunks, so a renderer reload restores them; it
     trims whole lines, so its times stay aligned however the output was
@@ -279,12 +283,11 @@ currently discards or never negotiates:
 - **Split-view scrolling**: scrolling back through history opens a split so
   new server output keeps arriving below while old output stays pinned above
   (Blightmud's `scroll_split`; similar in Mudlet/TinTin++). Not a quick win
-  for Moolin specifically: xterm.js (`src/renderer.ts`) is a single
-  `Terminal` instance with one viewport over one scrollback buffer, and
-  ships no split/pinned-pane addon the way it ships search (`addon-search`)
-  or gets spellcheck for free from Chromium — there's nothing to "turn on."
+  for Moolin specifically: the scrollback (`src/scrollback-view.ts`) is a
+  single scrolling element with one viewport over one set of lines, and
+  has no split/pinned-pane mode — there's nothing to "turn on."
   Getting this would mean building it: most plausibly a second, read-only
-  `Terminal` instance frozen at a scroll position, fed from the same replay
+  view frozen at a scroll position, fed from the same replay
   data Moolin already keeps per window in `scrollback-buffer.ts`, rendered
   alongside the live-tailing primary instance. That's real layout and
   state-sync work, not a config flag — treat it as closer in cost to a
@@ -298,20 +301,22 @@ currently discards or never negotiates:
 - **Built-in text-to-speech**: Blightmud can optionally speak output itself,
   independent of OS-level screen reader software, and exposes a `tts`
   scripting module so triggers can speak specific text.
-- Moolin, being a standard Electron/Chromium window, inherits whatever
+- Moolin, being a standard Electron/Chromium window whose scrollback is
+  ordinary page content (a line of text per server line), inherits whatever
   OS-level screen reader support Chromium's accessibility tree provides for
-  free, but has nothing MUD-aware layered on top (e.g. no way to have a
-  trigger speak a specific event, no reduced-overlay mode).
+  free (untested; see TODO.md), but has nothing MUD-aware layered on top
+  (e.g. no way to have a trigger speak a specific event, no reduced-overlay
+  mode).
 
 ## Suggested priority if closing these gaps
 
 1. **Scrollback search** and **spell checking**. Both are self-contained —
    neither depends on triggers, variables, or any other scripting
    primitive — and both are largely "wire up an existing library/platform
-   API" work (xterm.js has a search addon; Electron/Chromium's spellchecker
+   API" work (Electron/Chromium's spellchecker
    is available for free in any text input) rather than new design surface.
    Low-hanging fruit, worth doing first regardless of where the rest of
-   this list goes. (**Scrollback search** is done, via `addon-search`.
+   this list goes. (**Scrollback search** is done, in `src/find-widget.ts`.
    **Line timestamps**, once in this tier, are done too; see §8. Their
    gutter is where later tag marks (§1) could go.)
 2. **Triggers** (match + highlight/gag/send/script actions) and **aliases**

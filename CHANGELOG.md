@@ -26,22 +26,49 @@ renames that section to the new version and date.
   `80x25`), next to the logging indicator.
 - Word wrap: an opt-in Global/World/Character setting (Inherit/On/Off,
   Character overrides World overrides Global) that wraps long server lines
-  at word boundaries for display, without changing what a line copies as —
-  copying a wrapped paragraph substitutes the original server line, so the
-  padding spaces word wrap uses to trigger the wrap are never included
-  (selecting only part of a wrapped paragraph copies that paragraph's whole
-  original line, not just the highlighted portion). Off by default. The
+  at word boundaries for display. Copying a wrapped line gives back exactly
+  the text selected. Off by default. The
   Worlds dialog's Global Settings tab also gained its first real setting,
   **Echo typed commands into the scrollback**, promoted from a World-only
   checkbox to the same Global/World/Character cascade.
 
+- Pueblo support. A world that greets with "This world is Pueblo" is
+  answered with `PUEBLOCLIENT 2.01`, and its `<a xch_cmd>`, `<send>` and
+  `<a href>` links become clickable in the scrollback (right-click a link
+  with several commands to choose one; the status bar shows what a link will
+  do while the pointer is on it), with `<br>` and `<xch_page clear=text>`
+  honoured (a clear waits until something follows it) and other HTML tags
+  dropped; text that only looks like a tag, such as `<name>`, is shown as
+  sent. `--log-level=debug` says what was dropped or cleared. See
+  [PROTOCOLS.md](PROTOCOLS.md).
+
 ### Changed
 
+- **The scrollback is rewritten**, no longer built on xterm.js: each server
+  line is a real line of text in the page, which the browser wraps, selects
+  and scrolls, with its own parser for colours and attributes. It keeps the
+  newest 20,000 lines (it was 100,000), and the main process still keeps the
+  last 2 MiB of output for a reload. Search, the timestamp gutter, Clear Screen, links and the selection all behave as
+  before, with these differences:
+  - Searching marks matches with a ruler over the scrollbar and finds text
+    across a wrapped line; only the newest 1,000 matches are kept.
+  - A selection stays highlighted, and copyable, after focus returns to the
+    input area, until something else is selected.
+  - Moving the pointer over a web address shows it in the status bar's left
+    area until the pointer leaves.
+  - Carriage returns, backspaces and cursor-movement and erase sequences from
+    a server are ignored rather than acted on.
+  - A line more than 16,384 characters long is split into several.
 - **Breaking:** `World.echoCommands` in the worlds file is now a tri-state
   string (`"inherit"`/`"on"`/`"off"`) instead of a plain boolean, to support
   the cascading setting above. An older Moolin can't read a worlds file
   saved by this version; existing files are migrated automatically on read
   (`true` → `"on"`, `false` → `"off"`).
+
+### Removed
+
+- The undocumented `--screen-reader-mode` flag, which only existed to let the
+  smoke check read xterm's accessibility tree.
 
 ### Fixed
 

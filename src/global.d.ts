@@ -42,13 +42,6 @@ declare global {
       onSetFont(callback: (font: { fontFamily: string; fontSize: number }) => void): void;
       initialFont: { fontId: string; fontSize: number };
       fitToContentOnLoad: boolean;
-      // Internal, undocumented flag (see --fit-to-content above for the same
-      // pattern): enables xterm's own accessibility tree (a hidden DOM mirror
-      // of rendered rows, for screen readers), which scripts/smoke.mjs reads
-      // to verify rendered text/geometry without reaching into xterm
-      // internals. Off by default: it costs a DOM node per visible row kept
-      // in sync on every render, not worth paying for every user by default.
-      screenReaderMode: boolean;
       reportInitialSize(size: { width: number; height: number }): void;
       preferences: {
         onOpen(callback: (prefs: Preferences) => void): void;

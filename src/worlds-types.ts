@@ -9,7 +9,7 @@ export type TriState = "inherit" | "on" | "off";
 // Worlds dialog's Global pane, alongside the World/Character overrides it's
 // the fallback for.
 export interface GlobalSettings {
-  // Wrap long server lines at word boundaries for display (see word-wrap.ts).
+  // Wrap long server lines at word boundaries for display.
   wordWrap: boolean;
   // Echo typed commands back into the scrollback (in cyan).
   echoCommands: boolean;

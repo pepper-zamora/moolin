@@ -14,10 +14,9 @@ export interface ScrollbackReplay {
   // or reset numbered at or below it is already reflected here (see
   // TerminalWindow).
   seq: number;
-  // Resolved at connect time (see ConnectionManager.getState); carried here
-  // too so the renderer's very first replay is correctly wrapped regardless
-  // of which of its two independent startup IPC calls resolves first.
-  wordWrap: boolean;
+  // Whether the connection is in Pueblo mode at the end of the buffer, so a
+  // replay that no longer holds the server's greeting still reads the tags.
+  pueblo: boolean;
 }
 
 function byteLength(data: TerminalChunk): number {
@@ -45,9 +44,9 @@ export class ScrollbackBuffer {
   // One entry per line feed currently in the buffer, in order: the time that
   // line arrived, or null if unknown. Adding an entry per line feed on append
   // and dropping a dropped chunk's worth off the front keeps it aligned with
-  // exactly the line feeds a replay will feed to xterm — whose onLineFeed
-  // fires once for each (see line-feeds.ts) and never on wrap, so the
-  // renderer can consume these in lockstep to re-stamp each line.
+  // exactly the line feeds a replay will feed the scrollback, which makes one
+  // line break for each (see line-feeds.ts) and none on wrap, so the renderer
+  // can consume these in lockstep to re-stamp each line.
   private lineTimes: Array<number | null> = [];
 
   constructor(private readonly maxBytes: number) {}

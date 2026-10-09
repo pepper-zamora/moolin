@@ -186,7 +186,7 @@ export class TerminalWindow {
       chunks: this.scrollback.snapshot(),
       times: this.scrollback.snapshotTimes(),
       seq: this.seq,
-      wordWrap: this.connection.getState().wordWrap,
+      pueblo: this.connection.isPueblo(),
     };
   }
 }

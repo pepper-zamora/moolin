@@ -31,6 +31,9 @@ const ROOT = path.join(import.meta.dirname, "..");
 const packagedApp = process.env.MOOLIN_SMOKE_APP && path.resolve(process.env.MOOLIN_SMOKE_APP);
 const electron = createRequire(import.meta.url)("electron");
 const TIMEOUT_MS = 10000;
+// Focus returns to the input area this long after a click in the scrollback,
+// the time the system allows for it to become a double click (see renderer.ts).
+const FOCUS_RETURN_MS = 650;
 
 if (packagedApp && !fs.existsSync(packagedApp)) {
   console.error(`smoke: no app at ${packagedApp}`);
@@ -85,7 +88,7 @@ if (process.platform === "linux") {
 
 // A server that greets each connection and records what it's sent. Also
 // keeps the latest socket around so a check can push arbitrary data to the
-// client on demand (see the word-wrap check below).
+// client on demand (see the copy checks below).
 let received = "";
 let latestSocket = null;
 const server = net.createServer((socket) => {
@@ -166,7 +169,7 @@ class Page {
   // A point inside the scrollback, `dx` pixels in from its left edge.
   async scrollbackPoint(dx = 20) {
     return this.evaluate(
-      `(() => { const r = document.querySelector("#terminal .xterm-screen").getBoundingClientRect(); return { x: r.x + ${dx}, y: r.y + 10 }; })()`,
+      `(() => { const r = document.querySelector("#terminal").getBoundingClientRect(); return { x: r.x + ${dx}, y: r.y + 10 }; })()`,
     );
   }
 
@@ -174,11 +177,13 @@ class Page {
     await this.call("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount });
   }
 
-  async clickScrollback() {
+  // `settle` waits for focus to come back to the input area, which is put
+  // there once the time for a double click has passed (or at the first key).
+  async clickScrollback(settle = true) {
     const point = await this.scrollbackPoint();
     await this.mouse("mousePressed", point);
     await this.mouse("mouseReleased", point);
-    await sleep(150); // focus is put right after the event that moved it
+    if (settle) await sleep(FOCUS_RETURN_MS);
   }
 
   async dragInScrollback() {
@@ -186,7 +191,7 @@ class Page {
     await this.mouse("mousePressed", from);
     for (let i = 1; i <= 5; i++) await this.mouse("mouseMoved", { x: from.x + i * 15, y: from.y });
     await this.mouse("mouseReleased", { x: from.x + 75, y: from.y });
-    await sleep(150);
+    await sleep(FOCUS_RETURN_MS);
   }
 
   async doubleClickScrollback() {
@@ -198,100 +203,98 @@ class Page {
     await sleep(150);
   }
 
-  // The on-screen rect of one currently-visible row (0 = top of viewport),
-  // via xterm's accessibility tree — a hidden, full-size DOM mirror of the
-  // rendered rows it maintains for screen readers (one real <div> per
-  // viewport row, kept in sync with rendering regardless of which renderer,
-  // canvas/WebGL/DOM, is actually drawing the visible terminal). Reading
-  // real rendered text and real screen coordinates from it, rather than
-  // reaching into xterm's internal buffer API, keeps this a true black-box
-  // "drive it like a user would" check.
-  async rowRect(viewportRow) {
-    return this.evaluate(
-      `document.querySelectorAll("#terminal .xterm-accessibility-tree > div")[${viewportRow}]?.getBoundingClientRect().toJSON()`,
-    );
+  // The scrollback's lines as the page has them: one element per line the
+  // server sent, however many rows it wraps to.
+  async lineTexts() {
+    return this.evaluate(`Array.from(document.querySelectorAll("#terminal .line"), (line) => line.textContent)`);
   }
 
-  async allRowTexts() {
-    return this.evaluate(
-      `Array.from(document.querySelectorAll("#terminal .xterm-accessibility-tree > div")).map((d) => d.textContent)`,
-    );
+  // How many line elements the scrollback holds.
+  async lineCount() {
+    return this.evaluate(`document.querySelectorAll("#terminal .line").length`);
   }
 
-  async rowText(viewportRow) {
-    return (await this.allRowTexts())[viewportRow] ?? "";
+  // The screen position of character `offset` of the newest line starting
+  // with `prefix` (null if there is none): its top-left corner plus a pixel
+  // when `edge` is "left", and the middle of its box when "middle". A drag
+  // that starts at one character's left edge and ends at another's selects
+  // exactly the characters between them. Offsets past the end of the text
+  // give the right edge of the last character.
+  async textPoint(prefix, offset, edge = "left") {
+    return this.evaluate(`(() => {
+      const prefix = ${JSON.stringify(prefix)};
+      const offset = ${offset};
+      const line = Array.from(document.querySelectorAll("#terminal .line")).reverse().find((l) => l.textContent.startsWith(prefix));
+      if (!line) return null;
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      let seen = 0;
+      let last = null;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        last = node;
+        if (offset < seen + node.length) {
+          const range = document.createRange();
+          range.setStart(node, offset - seen);
+          range.setEnd(node, offset - seen + 1);
+          const box = range.getBoundingClientRect();
+          return { x: ${edge === "middle" ? "box.x + box.width / 2" : "box.x + 1"}, y: box.y + box.height / 2 };
+        }
+        seen += node.length;
+      }
+      if (!last) return null;
+      const range = document.createRange();
+      range.setStart(last, last.length - 1);
+      range.setEnd(last, last.length);
+      const box = range.getBoundingClientRect();
+      return { x: box.right - 1, y: box.y + box.height / 2 };
+    })()`);
   }
 
-  // The viewport row index (0 = top) of the first currently-visible row whose
-  // text starts with `prefix`, or -1 if none does.
-  async findVisibleRow(prefix) {
-    return (await this.allRowTexts()).findIndex((t) => t.startsWith(prefix));
-  }
-
-  // A point at (row, col) in screen pixels, using the full terminal screen's
-  // rect (not just one row's, which is only as wide as its own text) so a
-  // column past a short row's rendered content still resolves to a real
-  // on-screen x; the row's own rect still supplies y, since accessibility
-  // rows don't all share the screen rect's full height.
-  async cellPoint(row, col, cols) {
-    const rowRect = await this.rowRect(row);
-    const screenRect = await this.evaluate(
-      `document.querySelector("#terminal .xterm-screen").getBoundingClientRect().toJSON()`,
-    );
-    const cellWidth = screenRect.width / cols;
-    return { x: screenRect.x + col * cellWidth + cellWidth / 2, y: rowRect.y + rowRect.height / 2 };
-  }
-
-  // Drags a selection spanning `length` characters starting at column
-  // `startCol` of viewport row `startRow`, wrapping to subsequent rows past
-  // `cols` columns — the same linear-range semantics as xterm's own
-  // term.select(col, row, length), driven here via real mouse events instead
-  // of that internal API. `cols` comes from the status bar's own #screen-size
-  // text (real rendered UI, not an internal reached into for the test).
-  async dragSelectRange(startRow, startCol, length, cols) {
-    const startPoint = await this.cellPoint(startRow, startCol, cols);
-    const endIndex = startCol + length;
-    const endRow = startRow + Math.floor(endIndex / cols);
-    const endCol = endIndex % cols;
-    const endPoint = await this.cellPoint(endRow, endCol, cols);
-    await this.mouse("mousePressed", startPoint);
-    const steps = Math.max(5, (endRow - startRow + 1) * 5);
-    for (let i = 1; i <= steps; i++) {
-      await this.mouse("mouseMoved", {
-        x: startPoint.x + ((endPoint.x - startPoint.x) * i) / steps,
-        y: startPoint.y + ((endPoint.y - startPoint.y) * i) / steps,
-      });
-      await sleep(10);
-    }
-    await this.mouse("mouseReleased", endPoint);
-    await sleep(150);
-  }
-
-  // Drags from just inside the scrollback's top-left corner to just inside
-  // its bottom-right, selecting every row currently visible — used instead
-  // of Select All (Ctrl+A), which only ever reaches the renderer through a
-  // real Electron menu click, not reproducible over CDP alone. Many small
-  // mousemove steps, not a single jump to the end point: xterm's selection
-  // tracking extends row by row as the mouse crosses each one, so a coarse
-  // drag (too few intermediate points) can under-select past wherever the
-  // last step happened to land.
-  async selectAllVisible() {
-    const rect = await this.evaluate(
-      `(() => { const r = document.querySelector("#terminal .xterm-screen").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`,
-    );
-    const from = { x: rect.x + 2, y: rect.y + 2 };
-    const to = { x: rect.x + rect.width - 2, y: rect.y + rect.height - 2 };
-    const steps = 30;
+  // Drags a selection from one point to another with real mouse events, in
+  // many small steps with a frame between them, as a hand would.
+  async dragSelect(from, to) {
     await this.mouse("mousePressed", from);
+    const steps = 20;
     for (let i = 1; i <= steps; i++) {
       await this.mouse("mouseMoved", {
         x: from.x + ((to.x - from.x) * i) / steps,
         y: from.y + ((to.y - from.y) * i) / steps,
       });
-      await sleep(10); // a real frame between steps, not just rapid-fire events
+      await sleep(10);
     }
     await this.mouse("mouseReleased", to);
     await sleep(150);
+  }
+
+  // Selects characters [start, end) of the newest line starting with `prefix`.
+  async selectText(prefix, start, end) {
+    const from = await this.textPoint(prefix, start);
+    const to = await this.textPoint(prefix, end);
+    if (!from || !to) throw new Error(`couldn't find a line starting with ${JSON.stringify(prefix)}`);
+    await this.dragSelect(from, to);
+  }
+
+  // Selects from character `start` of one line to character `end` of another.
+  async selectAcross(fromPrefix, start, toPrefix, end) {
+    const from = await this.textPoint(fromPrefix, start);
+    const to = await this.textPoint(toPrefix, end);
+    if (!from || !to) throw new Error("couldn't find both lines");
+    await this.dragSelect(from, to);
+  }
+
+  // Clicks `count` times in a row at a point (2 selects a word, 3 a line).
+  async clickAt(point, count) {
+    for (let clickCount = 1; clickCount <= count; clickCount++) {
+      await this.mouse("mousePressed", point, clickCount);
+      await this.mouse("mouseReleased", point, clickCount);
+    }
+    await sleep(150);
+  }
+
+  // What Ctrl+C put on the clipboard.
+  async copy() {
+    await this.key("c", "KeyC", 67, 2 /* Ctrl */);
+    await sleep(150);
+    return this.evaluate("window.moolin.clipboard.readText()");
   }
 
   async key(key, code, keyCode, modifiers = 0) {
@@ -300,9 +303,16 @@ class Page {
     }
   }
 
-  // Types `text` wherever focus is, then presses Enter.
+  // Types `text` wherever focus is, then presses Enter. Each character goes
+  // down as a real key press does, a keydown then the character, since the
+  // page may act on the keydown (the first one after a click in the
+  // scrollback is what moves focus to the input area).
   async typeLine(text) {
-    for (const char of text) await this.call("Input.dispatchKeyEvent", { type: "char", text: char });
+    for (const char of text) {
+      await this.call("Input.dispatchKeyEvent", { type: "rawKeyDown", key: char, text: char });
+      await this.call("Input.dispatchKeyEvent", { type: "char", text: char });
+      await this.call("Input.dispatchKeyEvent", { type: "keyUp", key: char });
+    }
     await this.key("Enter", "Enter", 13);
   }
 
@@ -344,11 +354,7 @@ async function typingReachesServer(page, text) {
 
 const pages = [];
 try {
-  // --screen-reader-mode enables xterm's accessibility tree (a hidden DOM
-  // mirror of rendered rows — see src/global.d.ts), which the word-wrap copy
-  // checks below use to read rendered text and real screen coordinates
-  // without reaching into xterm's internal buffer/selection API.
-  launch("--remote-debugging-port=0", "--screen-reader-mode");
+  launch("--remote-debugging-port=0");
   // Chromium writes the port it picked into the profile folder.
   const portFile = path.join(userDataDir, "DevToolsActivePort");
   devtoolsPort = await waitFor("the app to start", () =>
@@ -364,11 +370,11 @@ try {
   console.log("smoke: connected window");
   await check("connects to a world", async () => {
     await main.evaluate(
-      // wordWrap is forced on here (rather than just for its own check,
-      // below) so that check can reuse this same connection instead of
-      // opening a second window mid-run — word wrap only affects how
-      // server output is displayed, so it doesn't interfere with any of
-      // the other checks that share this connection.
+      // wordWrap is forced on here (rather than just for its own checks,
+      // below) so they can reuse this same connection instead of opening a
+      // second window mid-run — word wrap only affects how server output is
+      // displayed, so it doesn't interfere with any of the other checks that
+      // share this connection.
       `window.moolin.connect(${JSON.stringify({
         id: "smoke",
         name: "Smoke Test",
@@ -403,192 +409,132 @@ try {
     await typingReachesServer(main, "after drag");
   });
 
+  await check("typing straight after clicking the scrollback reaches the input area", async () => {
+    await main.clickScrollback(false);
+    await typingReachesServer(main, "straight after click");
+  });
+
   await check("double-clicking the scrollback leaves typing in the input area", async () => {
     await main.doubleClickScrollback();
     expectEqual(await main.activeElement(), "input-area", "focus after the double-click");
     await typingReachesServer(main, "after double-click");
   });
 
-  // The concrete regression tests for word wrap's copy guarantee: a line
-  // from the server must copy back out as EXACTLY the line it sent — not
-  // just "no inserted newline" (xterm's own isWrapped row-joining already
-  // gave us that for free), but no extra whitespace either. Word wrap pads a
-  // row with spaces to trigger xterm's own wrap at a word boundary (see
-  // word-wrap.ts); getWrapAwareSelection (src/renderer.ts) is what keeps
-  // those padding spaces out of a copy by substituting the original raw line
-  // instead of xterm's padded display text — but ONLY when the selection
-  // itself actually crosses a wrap boundary; a selection confined to one
-  // visual row (even one that's part of a longer wrapped paragraph, e.g.
-  // double-clicking a single word) must still copy precisely, not the whole
-  // paragraph. The line below is built long enough (several "words" with no
-  // real line anywhere near this wide) to wrap at least twice on any
-  // reasonable window width, so all of these cases are actually exercised.
-  //
-  // Selection is driven via real mouse events against xterm's accessibility
-  // tree (a hidden DOM mirror of the rendered rows — see Page#rowRect),
-  // never by reaching into xterm's internal buffer/selection API, so this
-  // stays a true "drive it like a user would" check.
-  const cols = Number((await main.evaluate("document.getElementById('screen-size').textContent")).split("x")[0]);
-  let wrapRow;
+  // Copying from the scrollback gives exactly the text selected, however the
+  // lines wrap on screen. The long line below is built long enough (many
+  // "words", far wider than any window) to wrap at least twice, so a
+  // selection can start on one row and end on another.
   const longLine = Array.from({ length: 15 }, (_, i) => `wordNumber${i}IsDeliberatelyLong`).join(" ");
+  const cols = Number((await main.evaluate("document.getElementById('screen-size').textContent")).split("x")[0]);
   await check("a word-wrapped long line copies back as exactly one line, with no padding", async () => {
     if (!latestSocket) throw new Error("no server socket to write the long line to");
     if (cols >= longLine.length) throw new Error(`test window too wide (cols=${cols}) for this line to wrap`);
     latestSocket.write(`${longLine}\r\n`);
-    // xterm's accessibility tree (see Page#rowRect) lags noticeably behind
-    // actual rendering -- 300ms (enough for the write/wrap itself) isn't
-    // enough for its own text mirror to catch up, confirmed empirically.
-    await sleep(1500);
-
-    wrapRow = await main.findVisibleRow("wordNumber0");
-    if (wrapRow < 0) {
-      throw new Error(`couldn't find the long line in the viewport; rows were ${JSON.stringify(await main.allRowTexts())}`);
-    }
-
-    await main.dragSelectRange(wrapRow, 0, longLine.length, cols);
-    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
-    await sleep(150);
-    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
-    expectEqual(clipboard, longLine, "clipboard after copying the whole wrapped line");
+    await waitFor("the long line", async () => (await main.lineTexts()).includes(longLine), 3000);
+    await main.selectText("wordNumber0", 0, longLine.length);
+    expectEqual(await main.copy(), longLine, "clipboard after copying the whole wrapped line");
   });
 
-  // The user-visible tradeoff behind the fix above, made explicit (see
-  // CHANGELOG.md): since a selection that crosses a wrap boundary
-  // substitutes the whole ORIGINAL line rather than splicing a sub-range out
-  // of it, selecting only part of a wrapped paragraph — as long as that part
-  // still straddles the actual wrap point — copies that paragraph's whole
-  // original line, never a truncated or padded fragment of it. The range
-  // below deliberately straddles the exact column where word wrap pads: 5
-  // characters before the row ends, 5 into the next one.
-  await check("a selection crossing the wrap point still copies the whole original line", async () => {
-    await main.dragSelectRange(wrapRow, cols - 5, 10, cols);
-    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
-    await sleep(150);
-    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
-    expectEqual(clipboard, longLine, "clipboard after copying across the wrap point");
+  await check("a selection crossing a wrap point copies exactly the selected text", async () => {
+    await main.selectText("wordNumber0", cols - 10, cols + 10);
+    expectEqual(await main.copy(), longLine.slice(cols - 10, cols + 10), "clipboard after copying across a wrap");
   });
 
-  // The flip side, and the reason the fix above has to check what the
-  // SELECTION spans, not just what paragraph it's part of: a selection
-  // confined to one visual row of a wrapped paragraph — nowhere near the
-  // wrap point — never touches any padding, so it must still copy exactly
-  // the selected text, not the whole paragraph.
-  await check("a selection confined to one row of a wrapped paragraph copies precisely, not the whole paragraph", async () => {
-    await main.dragSelectRange(wrapRow, 0, 10, cols); // "wordNumber" — well short of the wrap point
-    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
-    await sleep(150);
-    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
-    expectEqual(clipboard, longLine.slice(0, 10), "clipboard after a single-row selection within a wrapped paragraph");
+  await check("a selection confined to one row of a wrapped paragraph copies precisely", async () => {
+    await main.selectText("wordNumber0", 0, 10); // "wordNumber"
+    expectEqual(await main.copy(), longLine.slice(0, 10), "clipboard after a single-row selection");
   });
 
-  // The real-world version of the same case: double-clicking a word inside a
-  // wrapped paragraph must copy just that word. Word wrap guarantees a word
-  // is never itself split across the wrap (that's its whole purpose), so
-  // this is always a single-row selection — double-clicking the second word
-  // ("wordNumber1IsDeliberatelyLong", comfortably within the first visual
-  // row) must never pull in the rest of the paragraph.
   await check("double-clicking a word inside a wrapped paragraph copies just that word", async () => {
-    const rowText = await main.rowText(wrapRow);
-    const wordCol = rowText.indexOf("wordNumber1");
-    if (wordCol < 0) throw new Error(`"wordNumber1" not found on the wrapped line's first row: ${JSON.stringify(rowText)}`);
-    const point = await main.cellPoint(wrapRow, wordCol + 5, cols); // well inside the word, not at its edge
-    for (const clickCount of [1, 2]) {
-      await main.mouse("mousePressed", point, clickCount);
-      await main.mouse("mouseReleased", point, clickCount);
-    }
-    await sleep(150);
-    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
-    await sleep(150);
-    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
-    expectEqual(clipboard, "wordNumber1IsDeliberatelyLong", "clipboard after double-clicking a word mid-paragraph");
+    const point = await main.textPoint("wordNumber0", longLine.indexOf("wordNumber1") + 5, "middle");
+    await main.clickAt(point, 2);
+    expectEqual(await main.copy(), "wordNumber1IsDeliberatelyLong", "clipboard after double-clicking a word");
   });
 
-  // The third standard selection gesture (after drag and double-click-word):
-  // triple-click to select a whole line. xterm treats a word-wrapped
-  // paragraph's chained isWrapped rows as one "line" for this purpose, so
-  // triple-clicking anywhere in it selects the whole paragraph in one
-  // gesture — the most natural way a real user would select "this one line
-  // of chat" to copy it, and worth its own check alongside the manual
-  // full-paragraph drag above.
-  await check("triple-clicking a wrapped paragraph selects and copies the whole original line", async () => {
-    const point = await main.cellPoint(wrapRow, 5, cols);
-    for (const clickCount of [1, 2, 3]) {
-      await main.mouse("mousePressed", point, clickCount);
-      await main.mouse("mouseReleased", point, clickCount);
-    }
-    await sleep(150);
-    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
-    await sleep(150);
-    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
-    expectEqual(clipboard, longLine, "clipboard after triple-clicking the wrapped paragraph");
+  // The third standard gesture: triple-click selects a whole line, and a
+  // wrapped one is still one line.
+  await check("triple-clicking a wrapped paragraph copies the whole line", async () => {
+    await main.clickAt(await main.textPoint("wordNumber0", 5, "middle"), 3);
+    expectEqual(await main.copy(), longLine, "clipboard after triple-clicking the wrapped paragraph");
   });
 
-  // Regression guard: an ordinary short line (never wrapped) must still copy
-  // exactly the selected substring, unaffected by the wrap-aware path above.
-  await check("a partial selection on a short, non-wrapped line is still copied precisely", async () => {
+  await check("a partial selection on a short line is copied precisely", async () => {
     if (!latestSocket) throw new Error("no server socket to write the short line to");
     latestSocket.write("short line\r\n");
-    await sleep(1500); // see the accessibility-tree lag note above
-    const shortRow = await main.findVisibleRow("short line");
-    if (shortRow < 0) throw new Error("couldn't find the short line in the viewport");
-    await main.dragSelectRange(shortRow, 0, 5, cols); // "short"
-    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
-    await sleep(150);
-    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
-    expectEqual(clipboard, "short", "clipboard after copying part of an unwrapped line");
+    await waitFor("the short line", async () => (await main.lineTexts()).includes("short line"), 3000);
+    await main.selectText("short line", 0, 5);
+    expectEqual(await main.copy(), "short", "clipboard after copying part of a short line");
   });
 
-  // Ordinary multi-line selection across separate (non-wrapped) lines must
-  // still behave exactly like xterm's own default: the first and last lines
-  // contribute only their selected portion, joined by "\n" — none of them
-  // individually wrap, so getWrapAwareSelection's whole-paragraph
-  // substitution never triggers here; this only exercises its single-row
-  // extraction branch, once per touched line.
-  await check("a selection spanning parts of two separate lines copies just the selected part of each", async () => {
+  // A selection across separate lines takes the selected part of the first and
+  // last, and every middle line whole, joined by newlines.
+  await check("a selection spanning parts of two lines copies just the selected part of each", async () => {
     if (!latestSocket) throw new Error("no server socket to write to");
-    latestSocket.write("alpha bravo charlie\r\n");
-    latestSocket.write("delta echo foxtrot\r\n");
-    await sleep(1500); // see the accessibility-tree lag note above
-    const rowA = await main.findVisibleRow("alpha bravo");
-    if (rowA < 0) throw new Error("couldn't find the first line in the viewport");
-
-    // From column 6 of the first line ("bravo charlie", skipping "alpha ")
-    // to column 5 of the next ("delta") — neither line's full text.
-    await main.dragSelectRange(rowA, 6, cols + (5 - 6), cols);
-    await main.key("c", "KeyC", 67, 2 /* Ctrl */);
-    await sleep(150);
-    const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
-    expectEqual(clipboard, "bravo charlie\ndelta", "clipboard after spanning two partially-selected lines");
+    latestSocket.write("alpha bravo charlie\r\ndelta echo foxtrot\r\n");
+    await waitFor("both lines", async () => (await main.lineTexts()).includes("delta echo foxtrot"), 3000);
+    await main.selectAcross("alpha bravo", 6, "delta echo", 5); // "bravo charlie" .. "delta"
+    expectEqual(await main.copy(), "bravo charlie\ndelta", "clipboard after spanning two partial lines");
   });
 
-  // Same shape, but with one COMPLETE line in between: that middle line must
-  // come through in full (the ordinary "middle lines of a selection are
-  // whole" rule xterm already applies), while the first and last still only
-  // contribute their selected portion.
-  await check(
-    "a selection spanning two partial lines with a complete line between them copies all three correctly",
-    async () => {
-      if (!latestSocket) throw new Error("no server socket to write to");
-      latestSocket.write("golf hotel india\r\n");
-      latestSocket.write("juliet kilo lima\r\n");
-      latestSocket.write("mike november oscar\r\n");
-      await sleep(1500); // see the accessibility-tree lag note above
-      const rowFirst = await main.findVisibleRow("golf hotel");
-      if (rowFirst < 0) throw new Error("couldn't find the first line in the viewport");
+  await check("a selection spanning two partial lines with a whole line between copies all three", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    latestSocket.write("golf hotel india\r\njuliet kilo lima\r\nmike november oscar\r\n");
+    await waitFor("all three lines", async () => (await main.lineTexts()).includes("mike november oscar"), 3000);
+    await main.selectAcross("golf hotel", 5, "mike november", 6);
+    expectEqual(await main.copy(), "hotel india\njuliet kilo lima\nmike n", "clipboard after spanning three lines");
+  });
 
-      // From column 5 of the first line ("hotel india", skipping "golf ")
-      // through the whole second line, to column 6 of the third ("mike n").
-      await main.dragSelectRange(rowFirst, 5, 2 * cols + (6 - 5), cols);
-      await main.key("c", "KeyC", 67, 2 /* Ctrl */);
-      await sleep(150);
-      const clipboard = await main.evaluate("window.moolin.clipboard.readText()");
-      expectEqual(
-        clipboard,
-        "hotel india\njuliet kilo lima\nmike n",
-        "clipboard after spanning two partial lines with a full line between them",
-      );
-    },
-  );
+  // A web address in the output shows where it goes in the status bar's left
+  // area while the pointer is over it, and the connection status returns when
+  // it leaves.
+  await check("hovering a web address shows it in the status bar, and leaving restores the status", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    latestSocket.write("docs at https://example.com/page now\r\n");
+    await waitFor("the address", async () => (await main.lineTexts()).includes("docs at https://example.com/page now"), 3000);
+    const status = () => main.evaluate("document.getElementById('status-text').textContent");
+    const before = await status();
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...(await main.textPoint("docs at", 12, "middle")) });
+    await waitFor("the address in the status bar", async () => (await status()) === "https://example.com/page", 2000);
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...(await main.textPoint("docs at", 0, "middle")) });
+    await waitFor("the status to return", async () => (await status()) === before, 2000);
+  });
+
+  // Ctrl+L scrolls everything so far out of view with blank lines, once.
+  await check("Clear Screen moves earlier output out of view, and a second press adds nothing", async () => {
+    await main.key("l", "KeyL", 76, 2 /* Ctrl */);
+    await sleep(300);
+    const visibleText = () =>
+      main.evaluate(`Array.from(document.querySelectorAll("#terminal .line"))
+        .filter((l) => { const r = l.getBoundingClientRect(); const t = document.getElementById("terminal").getBoundingClientRect(); return r.bottom > t.top && r.top < t.bottom; })
+        .map((l) => l.textContent).join("")`);
+    expectEqual(await visibleText(), "", "text left in view after clearing");
+    const count = await main.lineCount();
+    await main.key("l", "KeyL", 76, 2 /* Ctrl */);
+    await sleep(300);
+    expectEqual(await main.lineCount(), count, "lines after a second clear");
+    latestSocket?.write("after the clear\r\n");
+    await waitFor("new output after clearing", async () => (await visibleText()).includes("after the clear"), 3000);
+  });
+
+  // A Pueblo world announces itself; Moolin answers, and from then on its
+  // links can be hovered (the status bar says what they send) and clicked.
+  await check("a Pueblo greeting is answered, and its links show their command and send it", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    received = "";
+    latestSocket.write('This world is Pueblo 1.0 Enhanced.\r\nExits: <a xch_cmd="north|n">north</a><br>\r\n');
+    await waitFor("the Pueblo reply", () => received.includes("PUEBLOCLIENT 2.01\r\n"), 3000);
+    await waitFor("the link", () => main.evaluate("!!document.querySelector('#terminal .link')"), 3000);
+    const status = () => main.evaluate("document.getElementById('status-text').textContent");
+    const before = await status();
+    const point = await main.textPoint("Exits:", 8, "middle");
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+    await waitFor("the link's command in the status bar", async () => (await status()) === "Send: north | n", 2000);
+    received = "";
+    await main.clickAt(point, 1);
+    await waitFor("the command", () => received === "north\r\n", 2000);
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...(await main.textPoint("Exits:", 0, "middle")) });
+    await waitFor("the status to return", async () => (await status()) === before, 2000);
+  });
 
   // Launching again opens a second window in the running instance; it starts
   // disconnected, and (usually) takes focus from the first.
@@ -625,16 +571,13 @@ try {
 
   // Electron doesn't run menu shortcuts for keys sent over DevTools, so this
   // checks their precondition instead: a shortcut only fires if the page
-  // doesn't cancel the key. xterm would (it turns Ctrl+letter into a control
-  // character), so this puts focus in its text box, the worst case, and
-  // presses Ctrl+O there in the same task, before focus can be reclaimed.
+  // doesn't cancel the key. The key is sent to the scrollback itself, where a
+  // click leaves focus.
   await check("the scrollback never swallows menu shortcuts like Ctrl+O", async () => {
     for (const page of [main, second]) {
       const cancelled = await page.evaluate(`(() => {
-        document.querySelector(".xterm-helper-textarea").focus();
         const event = new KeyboardEvent("keydown", { key: "o", code: "KeyO", ctrlKey: true, bubbles: true, cancelable: true });
-        Object.defineProperty(event, "keyCode", { get: () => 79 }); // what xterm reads
-        document.activeElement.dispatchEvent(event);
+        document.getElementById("terminal").dispatchEvent(event);
         return event.defaultPrevented;
       })()`);
       expectEqual(cancelled, false, "Ctrl+O cancelled");

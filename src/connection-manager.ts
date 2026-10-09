@@ -1,3 +1,4 @@
+import { GreetingDetector } from "./pueblo";
 import { TelnetSession, type TlsInfo } from "./telnet";
 import type { ConnectTarget } from "./worlds-types";
 import { expandLoginTemplate, isConnectable, targetLabel, worldLabel } from "./world-utils";
@@ -59,6 +60,10 @@ export interface ConnectionManagerHandlers {
   onDisconnected: () => void;
 }
 
+// What Pueblo clients send on seeing the server's greeting (see pueblo.ts); a
+// Pueblo world waits for it before sending its tags.
+export const PUEBLO_CLIENT_REPLY = "PUEBLOCLIENT 2.01\r\n";
+
 const yellow = (text: string): string => `\x1b[33m[${text}]\x1b[0m\r\n`;
 const green = (text: string): string => `\x1b[32m[${text}]\x1b[0m\r\n`;
 const red = (text: string): string => `\x1b[31m[${text}]\x1b[0m\r\n`;
@@ -75,6 +80,12 @@ export class ConnectionManager {
   private connected = false;
   private tlsInfo: TlsInfo | null = null;
   private resolved: ResolvedSettings | null = null;
+  // Whether the server has greeted this connection as a Pueblo world. Kept
+  // after the connection ends, until the next one begins, so the scrollback
+  // that holds its tags is still read that way.
+  private pueblo = false;
+  private readonly greeting = new GreetingDetector();
+  private greetingDecoder = new TextDecoder();
   // The window's current size, applied to each new session so NAWS reports
   // it from the start rather than the 80x24 default.
   private cols = 80;
@@ -107,6 +118,13 @@ export class ConnectionManager {
     return this.resolved?.echoCommands ?? true;
   }
 
+  // Whether the server has greeted this connection as a Pueblo world, and
+  // Moolin answered it (see ScrollbackReplay.pueblo for why the renderer
+  // needs to know).
+  isPueblo(): boolean {
+    return this.pueblo;
+  }
+
   // Whether the telnet session is fully established (not just "a connect
   // attempt is in flight") — used to decide whether typed input can be sent.
   isConnected(): boolean {
@@ -132,6 +150,9 @@ export class ConnectionManager {
     this.connected = false;
     this.tlsInfo = null;
     this.resolved = resolved;
+    this.pueblo = false;
+    this.greeting.reset();
+    this.greetingDecoder = new TextDecoder();
     const host = world.host.trim();
     const port = world.port;
     this.log("info", "connecting to", `${host}:${port}`, `(${label})`, world.tls ? "over TLS" : "");
@@ -157,6 +178,7 @@ export class ConnectionManager {
         onData: (data) => {
           if (this.session !== session) return;
           this.handlers.onData(data);
+          this.watchForPuebloGreeting(session, data);
         },
         onDisconnect: (reason, certificateRejected) => {
           if (this.session !== session) return;
@@ -195,6 +217,17 @@ export class ConnectionManager {
     session.resize(this.cols, this.rows);
     session.connect({ host, port, tls: world.tls, tlsAllowUntrusted: world.tlsAllowUntrusted });
     this.handlers.onStateChange();
+  }
+
+  // Answers a Pueblo greeting, once. Neither the reply nor its effect goes
+  // through the scrollback or the log: it is the client's half of the greeting,
+  // not something typed.
+  private watchForPuebloGreeting(session: TelnetSession, data: Uint8Array): void {
+    if (this.pueblo) return;
+    if (this.greeting.feed(this.greetingDecoder.decode(data, { stream: true })) < 0) return;
+    this.pueblo = true;
+    this.log("debug", "Pueblo greeting seen; answering");
+    session.sendRaw(PUEBLO_CLIENT_REPLY);
   }
 
   disconnect(): void {

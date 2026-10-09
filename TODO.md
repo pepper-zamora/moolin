@@ -7,28 +7,80 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
 
 ## App
 
-- **Word-wrap's resize scroll position is only approximate.** When a window
-  resizes while word-wrap is on, `reflowForResize()` (src/renderer.ts)
-  restores scroll position as a proportion of the buffer (`viewportY /
-  length` before, scaled by the new `length` after) rather than anchoring to
-  the exact logical line that was on screen — reflowing at a new width
-  changes how many visual rows each logical line takes, so an exact anchor
-  would need per-logical-line marker tracking through the redraw. This was a
-  deliberate v1 scoping call, not an oversight, but it needs a hard look
-  before it's accepted as the long-term answer: give it real usage (does the
-  approximation drift noticeably with a large scrollback or lots of
-  wrapped lines?) and decide whether it's good enough or needs the
-  marker-based exact version.
-- **Word-wrap-safe copy assumes ordinary (linear) selection.** xterm.js also
-  has an Alt+drag "column/block select" mode (rectangular, not line-wrapping
-  aware), with no public API to detect it from `getSelectionPosition()`'s
-  result, and no documented, cross-platform option to disable it
-  (`macOptionClickForcesSelection` only affects macOS). `getWrapAwareSelection()`
-  (src/renderer.ts) doesn't special-case it, so Alt+drag-selecting across a
-  word-wrapped paragraph may copy more text than the rectangle visually
-  highlighted (that paragraph's whole original line, not just the selected
-  columns). Narrow, rare-gesture limitation — never wrong/corrupted output,
-  just more than expected — accepted rather than engineered around.
+- **Decide whether to honour a Pueblo server's clear.** `<xch_page
+  clear=text>` adds a screenful of blank lines (as Ctrl+L does), once
+  something follows it (`LineStream`, `src/line-stream.ts`). Penultimate
+  Destination (PennMUSH) sends `</xch_mudtext><img xch_mode=purehtml><xch_page
+  clear=text>` at the end of every login burst, right after the room
+  description (seen in its session log at 09:42:17 and 09:49:05, in the same
+  burst as the login text), so the room scrolls out of view as soon as the
+  reply to your first command arrives. A first version honoured the clear at
+  once and scrolled the room away during login, which is how this was found;
+  deferring it only delays the same loss. Options: ignore server clears
+  entirely (history is scrollable anyway, Ctrl+L stays your own clear, and
+  `--log-level=debug` still notes them); ignore them by default with a
+  Global/World/Character Inherit/On/Off setting like word wrap; or keep it
+  as is. Other clients mostly ignore `xch_page` clears, which argues for the
+  first. Whichever is chosen, `README.md`, `PROTOCOLS.md` and
+  `CHANGELOG.md` describe the current behaviour.
+- **Endless scroll: page older history into the scrollback from main.** The
+  scrollback keeps the newest 20,000 lines as page elements (`SCROLLBACK_LINES`
+  in `src/renderer.ts`); anything older is gone from the window even though
+  the main process still has it. Paging it back in would let the user scroll
+  through far more without paying for it in page elements. Not urgent: the
+  bounded scrollback is already cheap. Measured in Electron on macOS, a
+  40,000-line replay (reload, world switch) takes about 250 ms with only the
+  newest 20,000 drawn, a 30,000-line flood about 260 ms including layout,
+  steady output no measurable work beyond the frame, and scrolling back
+  through 20,000 lines about 8 ms a frame. Two things tried and rejected:
+  `content-visibility: auto` on the lines was about five times *slower*
+  (57 ms against 10 ms a frame with steady output, 41 ms against 8 ms a
+  scrolled frame), because pinning to the bottom and the gutter's `offsetTop`
+  reads keep forcing layout of the skipped content; and drawing a long replay
+  in slices across frames isn't needed (lines about to be trimmed are never
+  drawn). Do this only if people want deep history.
+
+  The data is already in main: `ScrollbackBuffer` (`src/scrollback-buffer.ts`)
+  records every line a window receives, in memory, whether or not the session
+  log file is being written (the file is skipped when another window owns it),
+  and the log file with its `.times` sidecar (`src/session-log.ts`) is a
+  colder tier behind it when this window owns it. Today the buffer is capped
+  at 2 MiB (`MAX_SCROLLBACK_BYTES`, `src/terminal-window.ts`) and the
+  renderer replays all of it. The design:
+
+  - The renderer holds a window of recent lines (live data plus the initial
+    replay). Older lines are fetched on demand as the user scrolls toward the
+    top, prepended with the scroll position compensated (`overflow-anchor`, or
+    `scrollTop` plus the added height), and dropped from the far end when
+    scrolling back down. Pages rather than per-line virtualization: wrapping
+    makes line heights variable, so fixed-height virtual lists don't work, and
+    pages avoid estimating heights. The scrollbar then reflects the loaded
+    window, as in a chat app, not the whole history; jumping to an arbitrary
+    old position is out of scope.
+  - Give `ScrollbackBuffer` a monotonically increasing absolute position
+    (bytes trimmed so far plus the offset), raise its cap well above what the
+    renderer draws (raw text is far cheaper than page elements), and add IPC
+    (`ipc-channels.ts`, `preload.ts`, `main.ts`): `getHistoryPage(beforePosition,
+    maxBytes)` returning `{ bytes, times, nextPosition | null }`, with the
+    initial replay carrying its own start position. Pages are strictly older
+    than the replay, so `LiveReplay`'s sequence de-duplication is unaffected.
+  - Page backward by bytes and cut forward to the first line feed (LF never
+    occurs inside UTF-8 or an escape sequence, the same argument as
+    `ScrollbackBuffer.trim`), counting line feeds with `countLineFeeds` and
+    taking the matching times by counting from the end. Past the memory cap,
+    read from the file tail the same way (the sidecar's fixed-width records
+    make a line's time an O(1) lookup from the end).
+  - The seam is `LineStream` (`src/line-stream.ts`): lines already carry a
+    `time` and a stable `id`. Add a `loadOlder(): Promise<Page | null>` source
+    and a `prepend` on `LineBuilder` that doesn't touch the open line.
+
+  Caveats: the SGR state at a page start is unknown going backward, so older
+  pages start in the default style (wrong only for a colour opened on a
+  previous line and never reset). Find and select-all only cover loaded
+  lines, unless search moves to main, which would also find all history.
+  Main's memory grows with the raised cap. Check whether the log file is
+  size-capped or rotated, and note `session-log.ts`'s reads are synchronous,
+  so page reads should be small and async.
 - **A dead connection isn't detected after the Mac sleeps and wakes.**
   Reported on macOS: suspending (lid close / sleep) and later waking leaves
   the window showing "Connected" with no error, but the underlying telnet
@@ -74,17 +126,11 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
   to the role's item; Electron accelerators have no Globe/fn modifier, so
   it can't be bound directly.
 
-- **`--screen-reader-mode` is internal/undocumented, but could be a real
-  feature.** Added so `scripts/smoke.mjs` could read rendered text and
-  coordinates via xterm's own accessibility tree (a hidden DOM mirror of
-  visible rows) instead of reaching into xterm's internal buffer API — see
-  `src/global.d.ts`'s `screenReaderMode` field. It genuinely enables basic
-  NVDA/VoiceOver support (xterm.js's own feature, not something built here),
-  currently off by default and unmentioned in README's command-line options
-  table. Worth deciding deliberately whether to document and ship it as a
-  real, user-facing flag (there's a real cost: a DOM node per visible row,
-  kept in sync on every render) rather than leaving it as a test-only side
-  effect.
+- **Screen readers are untested with the new scrollback.** It is ordinary
+  page content (a `div` per line) rather than a canvas, so a screen reader can
+  read it, but nothing marks it as a live log (`role="log"`, `aria-live`),
+  and a busy MUD would make announcing every new line noisy. Try NVDA and
+  VoiceOver and decide deliberately what, if anything, to announce.
 
 ## Testing
 
