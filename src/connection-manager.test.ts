@@ -401,12 +401,13 @@ async function quietServer(): Promise<{
   server: net.Server;
   port: number;
   received: () => string;
-  speak: (text: string) => void;
+  speak: (text: string) => Promise<void>;
 }> {
   const chunks: Buffer[] = [];
-  let client: net.Socket | null = null;
+  let accepted: (socket: net.Socket) => void = () => {};
+  const client = new Promise<net.Socket>((resolve) => (accepted = resolve));
   const server = net.createServer((socket) => {
-    client = socket;
+    accepted(socket);
     socket.on("data", (chunk) => chunks.push(chunk));
     socket.on("error", () => {});
   });
@@ -415,7 +416,10 @@ async function quietServer(): Promise<{
     server,
     port: (server.address() as net.AddressInfo).port,
     received: () => Buffer.concat(chunks).toString("utf8"),
-    speak: (text) => client?.write(text),
+    // The client sees the connection before the server has accepted it.
+    speak: async (text) => {
+      (await client).write(text);
+    },
   };
 }
 
@@ -429,7 +433,7 @@ test("auto-login waits for the server to say something first", { timeout: TEST_T
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.equal(received(), "", "nothing is sent to a server that hasn't spoken");
     assert.equal(manager.isGreetingOpen(), true);
-    speak("Welcome!\r\n");
+    await speak("Welcome!\r\n");
     await waitUntil(() => received().length > 0);
     assert.equal(received(), 'co "Cowpernica" hunter2\r');
     assert.equal(manager.isGreetingOpen(), false);
@@ -449,7 +453,7 @@ test("a greeting in the welcome is answered before an auto-login, which then clo
   try {
     manager.connect({ world, character: cowpernica });
     await connected;
-    speak("This world is Pueblo 1.0 Enhanced.\r\n");
+    await speak("This world is Pueblo 1.0 Enhanced.\r\n");
     await waitUntil(() => received().includes("hunter2"));
     assert.equal(received(), `${PUEBLO_CLIENT_REPLY}co "Cowpernica" hunter2\r`);
     assert.equal(manager.isPueblo(), true);
@@ -466,9 +470,9 @@ test("the words said after an auto-login are not a greeting", { timeout: TEST_TI
   try {
     manager.connect({ world, character: cowpernica });
     await connected;
-    speak("Welcome!\r\n");
+    await speak("Welcome!\r\n");
     await waitUntil(() => received().includes("hunter2"));
-    speak('Mallory says, "This world is Pueblo"\r\n');
+    await speak('Mallory says, "This world is Pueblo"\r\n');
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.equal(received(), 'co "Cowpernica" hunter2\r');
     assert.equal(manager.isPueblo(), false);
@@ -491,7 +495,7 @@ test("the words said after a typed line are not a greeting, but a greeting befor
     assert.equal(manager.isGreetingOpen(), false);
     manager.sendLine("again");
     assert.equal(events.filter((e) => e === "greeting-closed").length, 1, "closing is reported once");
-    speak("This world is Pueblo\r\n");
+    await speak("This world is Pueblo\r\n");
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.equal(received(), "look\r\nagain\r\n");
     assert.equal(manager.isPueblo(), false);

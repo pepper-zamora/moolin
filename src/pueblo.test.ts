@@ -166,6 +166,14 @@ test("tags that aren't acted on are reported once each, by name", () => {
   ]);
 });
 
+test("the tag names remembered for reporting are bounded", () => {
+  const notes: string[] = [];
+  const parser = new PuebloParser((message) => notes.push(message));
+  parser.setEnabled(true);
+  for (let i = 0; i < 1000; i++) parser.parse(`<xch_made_up${i}>x`);
+  assert.ok(notes.length <= 200, `${notes.length} notes`);
+});
+
 test("a server's own xch_ tags are known, whatever follows the prefix", () => {
   assert.deepEqual(enabled().parse("<xch_mudtext><xch_whatever>x"), [text("x")]);
 });

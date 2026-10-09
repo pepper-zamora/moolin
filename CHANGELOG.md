@@ -89,6 +89,9 @@ renames that section to the new version and date.
   Before, the sleep cut the connection off silently, and the window looked
   live after waking until a line sent failed with an error like `read
   EADDRNOTAVAIL`.
+- A server can no longer make Moolin hold memory without end with a control
+  sequence that never finishes, endless distinct colours, or endless made-up
+  Pueblo tag names; each is now capped.
 - Keyboard shortcuts now use Cmd instead of Ctrl on macOS, matching that
   platform's convention.
 

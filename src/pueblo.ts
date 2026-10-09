@@ -107,6 +107,9 @@ const PARTIAL_TAG = /<\/?[a-z][^<>\r\n]*$/i;
 const ATTRIBUTE = /([\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
 // A tag that has not closed after this much is text, not a tag.
 const MAX_TAG_LENGTH = 4096;
+// Only so many tag names are reported through `onNote`: a server can make up
+// names (anything starting "xch_" counts as a tag), and each is remembered.
+const MAX_NOTED = 200;
 
 function attributes(source: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -136,7 +139,7 @@ export class PuebloParser {
   constructor(private readonly onNote: (message: string) => void = () => {}) {}
 
   private note(name: string, message: string): void {
-    if (this.noted.has(name)) return;
+    if (this.noted.has(name) || this.noted.size >= MAX_NOTED) return;
     this.noted.add(name);
     this.onNote(message);
   }
