@@ -315,10 +315,10 @@ function buildMenu(terminal: TerminalWindow): void {
     },
     {
       // Not the built-in "editMenu" role: its items rely on Chromium's
-      // native edit commands against the focused DOM selection, which don't
-      // usually in the input area rather than the scrollback (for
-      // Cut/Copy/Paste), and whose native undo stack is unusable here anyway
-      // (see input-undo.ts). Every item below carries a display-only
+      // native edit commands against the focused DOM selection, which is
+      // usually in the input area rather than the scrollback (so Cut/Copy/Paste
+      // would miss a scrollback selection), and whose native undo stack is
+      // unusable here anyway (see input-undo.ts). Every item below carries a display-only
       // accelerator (`registerAccelerator: false`): the shortcut text shows
       // up for discoverability, matching the Worlds/View menus, but the key
       // itself is never actually bound here — that would intercept it
@@ -391,9 +391,10 @@ function buildMenu(terminal: TerminalWindow): void {
     {
       label: "&View",
       // Not the built-in "viewMenu" role: it bundles Zoom In/Out/Reset as a
-      // CSS page zoom, which breaks the WebGL-rendered scrollback (canvas
-      // vs. CSS-scaled mismatch). These items instead resize the terminal's
-      // actual font size, handled renderer-side via "terminal:zoom".
+      // CSS page zoom, which would scale the scrollbar and leave the columns
+      // and rows the server was told out of step with what is shown. These
+      // items instead resize the terminal's actual font size, handled
+      // renderer-side via "terminal:zoom".
       submenu: [
         { role: "reload", label: "&Reload" },
         { role: "forceReload", label: "&Force Reload" },

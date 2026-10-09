@@ -98,7 +98,7 @@ contextBridge.exposeInMainWorld("moolin", {
       callback(font),
     );
   },
-  // The font/size a freshly opened window's Terminal should construct with,
+  // The font/size a freshly opened window's scrollback should start with,
   // read from argv (see parseFontArgs) so it's available before the first
   // paint rather than arriving a tick late over IPC.
   initialFont: parseFontArgs(process.argv),
