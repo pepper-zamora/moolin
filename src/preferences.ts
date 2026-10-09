@@ -16,6 +16,12 @@ export interface Preferences {
   // The default font and size new windows' terminals start with (see fonts.ts).
   fontId: string;
   fontSize: number;
+  // Whether to offer to set up encryption (a key phrase or file) when it is
+  // off; "never" once the user has said not to ask again, or turned it off.
+  encryptionPrompt: "ask" | "never";
+  // Where the key file is, if one is used, so Moolin can unlock with it
+  // without asking while it is there. Only the path is kept.
+  keyFilePath: string | null;
 }
 
 const DEFAULTS: Preferences = {
@@ -23,6 +29,8 @@ const DEFAULTS: Preferences = {
   checkForUpdates: true,
   fontId: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
+  encryptionPrompt: "ask",
+  keyFilePath: null,
 };
 
 export function preferencesPath(configDir: string): string {
@@ -43,6 +51,14 @@ function sanitize(record: Record<string, unknown>, fallback: Preferences): Prefe
       typeof record.fontSize === "number" && Number.isFinite(record.fontSize)
         ? clampFontSize(record.fontSize)
         : fallback.fontSize,
+    encryptionPrompt:
+      record.encryptionPrompt === "ask" || record.encryptionPrompt === "never"
+        ? record.encryptionPrompt
+        : fallback.encryptionPrompt,
+    keyFilePath:
+      record.keyFilePath === null || (typeof record.keyFilePath === "string" && record.keyFilePath.length <= 4096)
+        ? (record.keyFilePath as string | null)
+        : fallback.keyFilePath,
   };
 }
 

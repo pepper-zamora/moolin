@@ -12,6 +12,8 @@ import {
   parseInputText,
   parseLogCall,
   parseMenuItems,
+  parseSecurityDecline,
+  parseSecurityRequest,
   parseSize,
 } from "./ipc-validate";
 
@@ -105,4 +107,31 @@ test("the remaining messages are checked field by field", () => {
   assert.equal(parseConnectRequest("x"), null);
   assert.equal(parseClipboardText("copy"), "copy");
   assert.equal(parseClipboardText(["copy"]), null);
+});
+
+test("a security request is a phrase of a sane length, or a key file to be chosen by main", () => {
+  assert.deepEqual(parseSecurityRequest({ source: "phrase", phrase: "open sesame" }), {
+    source: "phrase",
+    phrase: "open sesame",
+  });
+  assert.deepEqual(
+    parseSecurityRequest({ source: "file", path: "/etc/passwd" }),
+    { source: "file" },
+    "no path from the page",
+  );
+  for (const bad of [
+    null,
+    "phrase",
+    {},
+    { source: "phrase" },
+    { source: "phrase", phrase: "" },
+    { source: "phrase", phrase: 5 },
+    { source: "phrase", phrase: "x".repeat(1025) },
+    { source: "key", phrase: "x" },
+  ]) {
+    assert.equal(parseSecurityRequest(bad), null, JSON.stringify(bad));
+  }
+  assert.equal(parseSecurityDecline({ never: true }), true);
+  assert.equal(parseSecurityDecline({ never: "yes" }), null);
+  assert.equal(parseSecurityDecline(undefined), null);
 });
