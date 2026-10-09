@@ -81,18 +81,18 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
   Main's memory grows with the raised cap. Check whether the log file is
   size-capped or rotated, and note `session-log.ts`'s reads are synchronous,
   so page reads should be small and async.
-- **A dead connection isn't detected after the Mac sleeps and wakes.**
-  Reported on macOS: suspending (lid close / sleep) and later waking leaves
-  the window showing "Connected" with no error, but the underlying telnet
-  socket is actually dead — the server saw the network vanish and presumably
-  closed its end, but the client's TCP socket never got a FIN/RST to notice,
-  so typing and sending produces no error and nothing ever comes back. Needs
-  investigation in `connection-manager.ts`'s socket handling: likely wants
-  TCP keepalive (`socket.setKeepAlive`) so a truly-dead connection surfaces a
-  `close`/`error` event in reasonable time, and/or hooking Electron's
-  `powerMonitor` `"resume"` event to proactively probe or re-check the
-  connection right after a sleep/wake cycle, rather than waiting on TCP's own
-  (sometimes very slow, or silent) failure detection.
+- **A connection that dies without the computer sleeping isn't noticed.**
+  Going to sleep is now handled: Electron's `powerMonitor` `"suspend"` event
+  closes every window's connection properly and says why (see
+  `ConnectionManager.disconnectForSleep`). Losing the network any other way —
+  Wi-Fi dropping, a VPN changing, the server's host vanishing — still leaves a
+  window that looks "Connected" until a line is sent and fails with something
+  like `read EADDRNOTAVAIL`, because the socket never gets a FIN or RST to
+  notice. Probably wants TCP keepalive (`socket.setKeepAlive` in
+  `telnet.ts`) so a dead connection surfaces a `close` or `error` event in
+  reasonable time, and maybe a check on `powerMonitor`'s `"resume"` and
+  `"unlock-screen"` for sleeps that give no `"suspend"` (a crash, a forced
+  power-off, a lid closed on a dying battery).
 - **The View menu shows "Toggle Full Screen" twice on macOS (upstream
   Electron bug).** One row with fn+F (the Globe key), one with Ctrl+Cmd+F.
   This is [electron/electron#52821](https://github.com/electron/electron/issues/52821),

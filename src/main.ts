@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, shell } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, powerMonitor, shell } from "electron";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
@@ -659,6 +659,15 @@ if (isPrimaryInstance) {
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) newTerminalWindow();
+    });
+
+    // A sleeping computer cuts every connection off without telling anyone;
+    // on waking, a window would still look connected and only fail on the next
+    // line sent. Closing them properly as it goes to sleep, with a message,
+    // leaves the windows saying what happened.
+    powerMonitor.on("suspend", () => {
+      log("info", "main", "the computer is going to sleep; disconnecting every window");
+      for (const terminal of windowManager.all()) terminal.connection.disconnectForSleep();
     });
   });
 

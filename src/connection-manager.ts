@@ -84,6 +84,9 @@ export class ConnectionManager {
   // after the connection ends, until the next one begins, so the scrollback
   // that holds its tags is still read that way.
   private pueblo = false;
+  // Why this side is ending the connection, for the status line, until the
+  // session reports it ended.
+  private disconnectReason: string | null = null;
   private readonly greeting = new GreetingDetector();
   private greetingDecoder = new TextDecoder();
   // The window's current size, applied to each new session so NAWS reports
@@ -182,6 +185,8 @@ export class ConnectionManager {
         },
         onDisconnect: (reason, certificateRejected) => {
           if (this.session !== session) return;
+          const ourReason = this.disconnectReason;
+          this.disconnectReason = null;
           this.log(reason ? "error" : "info", reason ? `connection error: ${reason}` : "disconnected");
           this.session = null;
           this.target = null;
@@ -189,7 +194,11 @@ export class ConnectionManager {
           this.tlsInfo = null;
           this.resolved = null;
           this.handlers.onStateChange();
-          this.handlers.onMessage(reason ? red(`connection error: ${reason}`) : yellow("disconnected"));
+          this.handlers.onMessage(
+            reason
+              ? red(`connection error: ${reason}`)
+              : yellow(ourReason ? `disconnected: ${ourReason}` : "disconnected"),
+          );
           if (certificateRejected) {
             this.handlers.onMessage(
               yellow(`to connect anyway, turn on "Accept untrusted certificates" for ${worldLabel(world)}`),
@@ -230,8 +239,21 @@ export class ConnectionManager {
     session.sendRaw(PUEBLO_CLIENT_REPLY);
   }
 
-  disconnect(): void {
-    this.session?.disconnect();
+  // Ends the connection. `reason` is shown in the status line ("disconnected:
+  // the computer is going to sleep"); `graceful` closes it properly, telling
+  // the server, rather than dropping it.
+  disconnect(reason?: string, graceful = false): void {
+    if (!this.session) return;
+    this.disconnectReason = reason ?? null;
+    if (reason) this.log("info", "ending the connection:", reason);
+    this.session.disconnect(graceful);
+  }
+
+  // The computer is about to sleep, which will cut the connection off with no
+  // notice to either side: say goodbye now, while the network is still up,
+  // rather than leave a window that looks live but isn't.
+  disconnectForSleep(): void {
+    this.disconnect("the computer is going to sleep", true);
   }
 
   sendLine(text: string): { echoed: boolean } {
