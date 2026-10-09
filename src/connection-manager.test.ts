@@ -423,7 +423,7 @@ async function quietServer(): Promise<{
   };
 }
 
-test("auto-login waits for the server to say something first", { timeout: TEST_TIMEOUT_MS }, async () => {
+test("auto-login waits for the server to send a whole line first", { timeout: TEST_TIMEOUT_MS }, async () => {
   const { server, port, received, speak } = await quietServer();
   const world = { ...newWorld("w"), host: "127.0.0.1", port, characters: [cowpernica] };
   const { manager, events, connected } = managerWithLog();
@@ -433,7 +433,11 @@ test("auto-login waits for the server to say something first", { timeout: TEST_T
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.equal(received(), "", "nothing is sent to a server that hasn't spoken");
     assert.equal(manager.isGreetingOpen(), true);
-    await speak("Welcome!\r\n");
+    await speak("login:");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(received(), "", "nor to one that has only sent part of a line");
+    assert.equal(manager.isGreetingOpen(), true);
+    await speak(" Welcome!\r\n");
     await waitUntil(() => received().length > 0);
     assert.equal(received(), 'co "Cowpernica" hunter2\r');
     assert.equal(manager.isGreetingOpen(), false);
@@ -536,5 +540,27 @@ test("a status line built from a certificate error can't carry an escape sequenc
   for (const message of messages) {
     // Only Moolin's own colour codes are left: ESC [ digits m.
     assert.equal(message.replace(/\x1b\[\d+m/g, "").includes("\x1b"), false, JSON.stringify(message));
+  }
+});
+
+test("a greeting split across two reads is still answered before the auto-login", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port, received, speak } = await quietServer();
+  const world = { ...newWorld("w"), host: "127.0.0.1", port, characters: [cowpernica] };
+  const { manager, connected } = managerWithLog();
+  try {
+    manager.connect({ world, character: cowpernica });
+    await connected;
+    await speak("Welcome. This wor");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(received(), "", "the login waits for the end of the line");
+    await speak("ld is Pueblo 1.0 Enhanced.\r\n");
+    await waitUntil(() => received().includes("hunter2"));
+    assert.equal(received(), `${PUEBLO_CLIENT_REPLY}co "Cowpernica" hunter2\r`);
+    assert.equal(manager.isPueblo(), true);
+  } finally {
+    manager.disconnect();
+    server.close();
   }
 });

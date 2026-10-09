@@ -69,8 +69,8 @@ renames that section to the new version and date.
   first line is sent to the server (typed, or the auto-login). Before, anyone
   on a world could say the words later and turn their text into links that
   ran commands when clicked. To keep Pueblo working with auto-login, the
-  login is now held until the server has sent something; a server that sends
-  nothing until it is spoken to no longer gets the login.
+  login is now held until the server has sent a whole line; a server that
+  sends none until it is spoken to no longer gets the login.
 
 ### Removed
 

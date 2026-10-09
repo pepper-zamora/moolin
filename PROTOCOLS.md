@@ -192,8 +192,9 @@ is sent to the server, whether you typed it or it is the auto-login. Anyone
 on a world can make it say those words later, and were that taken for the
 greeting, they could turn their text into links that run commands as you when
 clicked. For the same reason a world's auto-login is held until the server has
-sent something, so its welcome (and any greeting in it) is seen first; a
-server that sends nothing until it is spoken to never gets the login.
+sent a whole line, so its welcome (and any greeting in it, even one a network
+read cut in two) is seen first; a server that sends no line until it is spoken
+to never gets the login.
 
 - `<a xch_cmd="look|inventory">text</a>` and `<send>look</send>` (or
   `<send href="look">`) make the text a link that sends a command when

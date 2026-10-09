@@ -104,8 +104,10 @@ export class ConnectionManager {
   // spoken, while a player could say the same words later and, were it taken
   // for a greeting, turn their text into links that run commands when clicked.
   private greetingOpen = false;
-  // The auto-login, held until the server has sent something (see connect).
+  // The auto-login, held until the server has sent a whole line (see connect).
   private pendingLogin: string | null = null;
+  // Whether the server has sent a line feed yet on this connection.
+  private sawLineFeed = false;
   private readonly greeting = new GreetingDetector();
   private greetingDecoder = new TextDecoder();
   // The window's current size, applied to each new session so NAWS reports
@@ -186,6 +188,7 @@ export class ConnectionManager {
     this.pueblo = false;
     this.greetingOpen = true;
     this.pendingLogin = null;
+    this.sawLineFeed = false;
     this.greeting.reset();
     this.greetingDecoder = new TextDecoder();
     const host = world.host.trim();
@@ -205,9 +208,11 @@ export class ConnectionManager {
           this.handlers.onConnected(target);
           this.handlers.onStateChange();
           this.handlers.onMessage(green(`connected to ${label}${secure ? ", securely (TLS)" : ""}`));
-          // Held until the server speaks first, so its greeting is seen before
-          // anything is sent (see greetingOpen). A server that says nothing
-          // until it is spoken to never gets the login.
+          // Held until the server has sent a whole line, so its greeting is seen
+          // before anything is sent (see greetingOpen): a network read can end
+          // in the middle of the greeting, and the login closes the window for
+          // it. A server that sends no line until it is spoken to never gets
+          // the login.
           if (character && world.autoLogin) {
             this.pendingLogin = expandLoginTemplate(world.loginTemplate, character.name, character.password);
           }
@@ -216,7 +221,8 @@ export class ConnectionManager {
           if (this.session !== session) return;
           this.handlers.onData(data);
           this.watchForPuebloGreeting(session, data);
-          if (this.pendingLogin !== null) {
+          if (data.includes(0x0a)) this.sawLineFeed = true;
+          if (this.pendingLogin !== null && this.sawLineFeed) {
             this.log("debug", "sending auto-login for", label);
             const login = this.pendingLogin;
             this.pendingLogin = null;
