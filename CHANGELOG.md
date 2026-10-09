@@ -72,6 +72,11 @@ renames that section to the new version and date.
 
 ### Fixed
 
+- Putting the computer to sleep now closes every connection properly and
+  prints "[disconnected: the computer is going to sleep]" in its window.
+  Before, the sleep cut the connection off silently, and the window looked
+  live after waking until a line sent failed with an error like `read
+  EADDRNOTAVAIL`.
 - Keyboard shortcuts now use Cmd instead of Ctrl on macOS, matching that
   platform's convention.
 

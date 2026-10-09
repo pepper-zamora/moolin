@@ -328,3 +328,65 @@ test("Pueblo mode outlives the connection, and the next connection starts withou
     plain.server.close();
   }
 });
+
+test("disconnecting for sleep ends the connection with a message saying why", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const { server, port } = await recordingServer();
+  const { manager, messages, events, connected } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null });
+    await connected;
+    manager.disconnectForSleep();
+    assert.equal(manager.getState().status, "disconnected");
+    assert.equal(manager.isActive(), false);
+    assert.equal(events.filter((event) => event === "disconnected").length, 1);
+    assert.match(messages[messages.length - 1], /\[disconnected: the computer is going to sleep\]/);
+  } finally {
+    manager.disconnect();
+    server.close();
+  }
+});
+
+test("the server sees a graceful close when the computer goes to sleep", { timeout: TEST_TIMEOUT_MS }, async () => {
+  let ended = false;
+  const server = net.createServer((socket) => {
+    socket.on("end", () => (ended = true));
+    socket.on("error", () => {});
+    socket.resume(); // 'end' is only seen by a socket that is being read
+    socket.write("hi\r\n");
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const { manager, connected } = managerWithLog();
+  try {
+    manager.connect({
+      world: { ...newWorld("w"), host: "127.0.0.1", port: (server.address() as net.AddressInfo).port },
+      character: null,
+    });
+    await connected;
+    manager.disconnectForSleep();
+    await waitUntil(() => ended);
+  } finally {
+    server.close();
+  }
+});
+
+test("an ordinary disconnect keeps the plain message, and disconnecting with nothing connected does nothing", {
+  timeout: TEST_TIMEOUT_MS,
+}, async () => {
+  const idle = managerWithLog();
+  idle.manager.disconnect("no reason to speak of");
+  idle.manager.disconnectForSleep();
+  assert.deepEqual(idle.events, []);
+
+  const { server, port } = await recordingServer();
+  const { manager, messages, connected } = managerWithLog();
+  try {
+    manager.connect({ world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null });
+    await connected;
+    manager.disconnect();
+    assert.match(messages[messages.length - 1], /\[disconnected\]/);
+  } finally {
+    server.close();
+  }
+});

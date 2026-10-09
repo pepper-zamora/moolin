@@ -436,8 +436,14 @@ export class TelnetSession {
   // a caller can rely on the disconnect having been handled, e.g. a window
   // that's closing logs it before giving up its log. The socket's own close
   // event then finds nothing left to tear down.
-  disconnect(): void {
-    (this.socket ?? this.pendingSocket)?.destroy();
+  //
+  // `graceful` says goodbye to the server first (a TLS close notice, then FIN)
+  // and lets the socket finish closing in the background, instead of dropping
+  // it: for a connection about to be cut off by the machine going to sleep.
+  disconnect(graceful = false): void {
+    const socket = this.socket ?? this.pendingSocket;
+    if (graceful) socket?.destroySoon();
+    else socket?.destroy();
     this.teardown();
   }
 }
