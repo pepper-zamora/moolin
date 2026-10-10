@@ -79,6 +79,9 @@ renames that section to the new version and date.
 
 ### Fixed
 
+- `npm start` from a snap-packaged VS Code or VSCodium's integrated terminal
+  no longer crashes on a Wayland desktop: it undoes the snap's GTK and
+  data-directory overrides before launching Electron.
 - Select All (Cmd/Ctrl+A) now selects the input line, so what's in it can be
   typed over, unless something is selected in the scrollback, when it selects
   the whole scrollback. Before, it always took the scrollback. Clicking into

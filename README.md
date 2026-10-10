@@ -163,7 +163,9 @@ sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 
 `npm start` runs `scripts/start.js`, which clears `ELECTRON_RUN_AS_NODE`
 (set by VS Code's integrated terminal, where it would make Electron behave as
-plain Node).
+plain Node). From a snap-packaged VS Code or VSCodium's terminal it also undoes
+the snap's GTK and data-directory overrides, which otherwise crash Electron's
+native Wayland window on startup.
 
 To launch from a desktop menu on Linux, build once with `npm run build`, then
 copy `moolin.desktop` to `~/.local/share/applications/`. Its paths point at
