@@ -45,7 +45,9 @@ export interface SecurityPageState extends SecurityInfo {
 }
 
 // Which form of the encryption dialog main asks the page to open.
-export type SecurityDialogMode = "offer" | "unlock" | "manage";
+// "offer" is the automatic first-run question (with "Not now" and "don't ask
+// again"); "setup" is the same form asked for from the menu.
+export type SecurityDialogMode = "offer" | "setup" | "unlock" | "manage";
 
 const fail = (error: string): Outcome => ({ ok: false, error });
 

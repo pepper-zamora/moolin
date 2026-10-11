@@ -257,9 +257,17 @@ async function confirmDisconnect(terminal: TerminalWindow): Promise<void> {
 // reuses the dialog's own create logic rather than main owning a duplicate
 // worlds list; the dialog finishes loading the list before creating.
 function openWorldsDialog(terminal: TerminalWindow, createNew: boolean): void {
+  if (!requireUnlocked(terminal)) return;
   log("debug", "main", "opening worlds dialog, createNew =", createNew);
   terminal.window.focus();
   terminal.send(IpcChannels.worldsOpen, { createNew });
+}
+
+// Worlds > Encryption…: unlock when locked, manage when on, set up when off.
+function openEncryption(terminal: TerminalWindow): void {
+  terminal.window.focus();
+  const state = security.state();
+  terminal.send(IpcChannels.securityOpen, state === "locked" ? "unlock" : state === "unlocked" ? "manage" : "setup");
 }
 
 function openPreferences(terminal: TerminalWindow): void {
@@ -341,6 +349,7 @@ function buildMenu(terminal: TerminalWindow): void {
         ...(mruItems.length > 0 ? ([{ type: "separator" }, ...mruItems] as Electron.MenuItemConstructorOptions[]) : []),
         { type: "separator" },
         { label: "&Preferences…", accelerator: "CmdOrCtrl+,", click: () => openPreferences(terminal) },
+        { label: "&Encryption…", click: () => openEncryption(terminal) },
         { type: "separator" },
         { role: "quit", label: "&Quit" },
       ],

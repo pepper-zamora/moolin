@@ -468,6 +468,24 @@ html, body {
   cursor: default;
 }
 
+#encryption-status {
+  display: flex;
+  cursor: pointer;
+}
+
+#encryption-status svg {
+  fill: none;
+  stroke: #b8b8b8;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#encryption-status[data-state="locked"] svg {
+  stroke: #e5a50a;
+  fill: rgba(229, 165, 10, 0.25);
+}
+
 /* Fill and mark per state; the mark (check, ?, x) carries the meaning for
    anyone who can't tell the colors apart. */
 .security-icon[data-security="trusted"] { --shield: #3fb950; }
@@ -955,4 +973,65 @@ html, body {
   white-space: pre;
   line-height: 1.4;
   opacity: 0.9;
+}
+
+/* Encryption dialog */
+
+#encryption-dialog {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.enc-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.enc-layout h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.enc-layout p,
+.enc-layout ul {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.enc-layout label:not(.check) {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.enc-note {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+#enc-manage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+#enc-error {
+  color: #f85149;
+}
+
+#enc-warnings {
+  padding-left: 18px;
+  color: #e5a50a;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.enc-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
 }
