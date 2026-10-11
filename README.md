@@ -366,7 +366,7 @@ off and you haven't said otherwise) it offers to. Choosing **Not now** with
 always there to set it up later.
 
 **Turning it on.** Enter a key phrase (twice), or choose a **key file**: any
-file at all, which stands in for a phrase by its contents. Moolin makes a
+file at all, of any size, which stands in for a phrase by a hash of its contents. Moolin makes a
 random data key, seals your passwords with it, converts every existing log
 (this can take a while with a lot of them, and needs every window
 disconnected), and keeps the data key itself only wrapped by your phrase or

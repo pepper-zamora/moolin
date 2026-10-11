@@ -4,6 +4,7 @@
 // instead of re-encrypting every log. Built on node:crypto alone: scrypt to
 // turn a phrase into a wrapping key, AES-256-GCM for everything sealed.
 import * as crypto from "node:crypto";
+import * as fs from "node:fs";
 
 export type KeySource = "phrase" | "file";
 
@@ -57,6 +58,18 @@ export function normalizePhrase(phrase: string): Buffer {
 // A key file's contents stand in for a phrase, whatever they are.
 export function secretFromFile(contents: Uint8Array): Buffer {
   return crypto.createHash("sha256").update(contents).digest();
+}
+
+// The same as secretFromFile for the file at `file`, read a piece at a time, so
+// a file of any size works without being held in memory.
+export function secretFromFilePath(file: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("sha256");
+    const stream = fs.createReadStream(file);
+    stream.on("data", (chunk) => hash.update(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(hash.digest()));
+  });
 }
 
 export function keyIdOf(dataKey: Buffer): string {

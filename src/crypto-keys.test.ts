@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   WrongKeyError,
   createEnvelope,
@@ -10,6 +13,7 @@ import {
   rewrapEnvelope,
   seal,
   secretFromFile,
+  secretFromFilePath,
   unlockEnvelope,
 } from "./crypto-keys";
 
@@ -133,4 +137,23 @@ test("an envelope with its wrapped key altered is a wrong key, not a crash", asy
     unlockEnvelope({ ...envelope, wrappedKey: bytes.toString("base64") }, normalizePhrase("x")),
     WrongKeyError,
   );
+});
+
+test("a key file is hashed the same whether it is read whole or in pieces, whatever its size", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-keyfile-"));
+  try {
+    const small = path.join(dir, "small");
+    fs.writeFileSync(small, Buffer.from([0, 1, 2, 255]));
+    assert.deepEqual(await secretFromFilePath(small), secretFromFile(Buffer.from([0, 1, 2, 255])));
+
+    // Bigger than a stream's read size and than any limit a key file would reasonably have.
+    const big = path.join(dir, "big");
+    const contents = Buffer.alloc(20 * 1024 * 1024, "moolin");
+    fs.writeFileSync(big, contents);
+    assert.deepEqual(await secretFromFilePath(big), secretFromFile(contents));
+
+    await assert.rejects(secretFromFilePath(path.join(dir, "missing")));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

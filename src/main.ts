@@ -28,7 +28,7 @@ import { DEFAULT_GLOBAL_SETTINGS, resolveTriState, targetLabel } from "./world-u
 import type { ResolvedSettings, WindowState } from "./connection-manager";
 import { checkForUpdate } from "./update-check";
 import { fontFamilyFor } from "./fonts";
-import { normalizePhrase, secretFromFile, type KeySource } from "./crypto-keys";
+import { normalizePhrase, secretFromFilePath, type KeySource } from "./crypto-keys";
 import { Security, type Outcome, type SecurityPageState } from "./security";
 import {
   parseSecurityDecline,
@@ -748,13 +748,12 @@ function broadcastSecurity(): void {
   rebuildAllMenus();
 }
 
-// Reads a key file, which stands in for a phrase whatever it holds.
-const MAX_KEY_FILE_BYTES = 16 * 1024 * 1024;
-function readKeyFile(file: string): { secret: Buffer } | { error: string } {
+// A key file stands in for a phrase whatever it holds, however big: what is used
+// is the hash of its contents, read a piece at a time.
+async function readKeyFile(file: string): Promise<{ secret: Buffer } | { error: string }> {
   try {
-    if (fs.statSync(file).size > MAX_KEY_FILE_BYTES) return { error: "That file is too big to be a key file" };
-    const contents = fs.readFileSync(file);
-    return contents.length === 0 ? { error: "That key file is empty" } : { secret: secretFromFile(contents) };
+    if (fs.statSync(file).size === 0) return { error: "That key file is empty" };
+    return { secret: await secretFromFilePath(file) };
   } catch (err) {
     return { error: `Could not read the key file: ${(err as Error).message}` };
   }
@@ -771,7 +770,7 @@ async function secretFor(
   const chosen = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
   const file = chosen.filePaths[0];
   if (chosen.canceled || !file) return null;
-  const read = readKeyFile(file);
+  const read = await readKeyFile(file);
   return "error" in read ? read : { secret: read.secret, source: "file", keyFile: file };
 }
 
@@ -867,7 +866,7 @@ if (isPrimaryInstance) {
   // file is there; otherwise the first window asks.
   async function unlockWithRememberedKeyFile(): Promise<void> {
     if (security.state() !== "locked" || !prefs.keyFilePath) return;
-    const read = readKeyFile(prefs.keyFilePath);
+    const read = await readKeyFile(prefs.keyFilePath);
     if ("error" in read) {
       log("info", "security", "the remembered key file can't be used:", read.error);
       return;
