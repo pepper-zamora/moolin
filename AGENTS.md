@@ -83,3 +83,11 @@ parser in `src/ipc-validate.ts` (with tests), and its handler in `src/main.ts`
 uses only what that returns. Server text is only ever put in the page with
 `textContent`, never as HTML. Files holding passwords or logs are written with
 the modes in `src/file-modes.ts`.
+
+Secrets (key phrases, key file contents, the data key) live only in the main
+process, in `src/security.ts` and `src/crypto-keys.ts`: they are never sent to
+the page, never logged (a malformed request is reported without its contents,
+see `ignoreBad` in `src/main.ts`), and a key file is chosen in a picker main
+shows, so the page never names a path. Anything new that writes a password or
+a log goes through the worlds file's and `log-format.ts`'s encrypt-or-plain
+paths, not around them.

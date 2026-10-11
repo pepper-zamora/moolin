@@ -42,6 +42,18 @@ renames that section to the new version and date.
   sent. `--log-level=debug` says what was dropped or cleared. See
   [PROTOCOLS.md](PROTOCOLS.md).
 
+- **Optional encryption of passwords and logs.** Moolin offers, the first
+  time it runs, to encrypt your characters' passwords and your session logs
+  with a key phrase or a key file (declining, even for good with "Don't ask me
+  again", leaves everything as before). Once on, it starts locked and asks for
+  the key; a key file's path is remembered so it can unlock itself while the
+  file is there. Worlds → Encryption… changes the phrase or file (instant,
+  nothing is re-encrypted) or stops using encryption, which converts
+  everything back to plain. The worlds file gets an `"encryption"` block and
+  `"passwordEncrypted"` fields, and logs are sealed record by record; both say
+  they are encrypted. There is no recovery from a lost key. See the README's
+  [Encryption](README.md#encryption).
+
 ### Changed
 
 - **The scrollback is rewritten**, no longer built on xterm.js: each server
