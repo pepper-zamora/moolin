@@ -1,3 +1,4 @@
+import { applyFontStyle, type FontStyle } from "./fonts";
 import type { ScrollbackView } from "./scrollback-view";
 
 // 12-hour, minute resolution, with a single-letter am/pm suffix: "9:05a",
@@ -97,9 +98,10 @@ export class TimestampGutter {
   }
 
   // Keeps the gutter's font matched to the scrollback's, so its cell height is.
-  setFont(fontFamily: string, fontSize: number): void {
+  setFont(fontFamily: string, fontSize: number, fontStyle: FontStyle): void {
     this.gutter.style.fontFamily = fontFamily;
     this.gutter.style.fontSize = `${fontSize}px`;
+    applyFontStyle(this.gutter, fontStyle);
     this.schedule();
   }
 

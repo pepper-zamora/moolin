@@ -10,6 +10,9 @@ const DEFAULTS = {
   checkForUpdates: true,
   fontId: "iosevka-moolin",
   fontSize: 14,
+  fontWeight: 400,
+  fontItalic: false,
+  fontWidth: "normal",
   encryptionPrompt: "ask",
   keyFilePath: null,
 };
@@ -37,6 +40,9 @@ test("writePreferences round-trips, creating the directory if needed", () => {
       checkForUpdates: false,
       fontId: "jetbrains-mono",
       fontSize: 18,
+      fontWeight: 500,
+      fontItalic: true,
+      fontWidth: "condensed" as const,
       encryptionPrompt: "never" as const,
       keyFilePath: "/keys/moolin.key",
     };
@@ -76,6 +82,18 @@ test("the encryption fields fall back individually when they are the wrong type 
     fs.writeFileSync(file, JSON.stringify({ encryptionPrompt: "never", keyFilePath: "x".repeat(5000) }));
     assert.deepEqual(readPreferences(file), { ...DEFAULTS, encryptionPrompt: "never" });
     fs.writeFileSync(file, JSON.stringify({ keyFilePath: null }));
+    assert.deepEqual(readPreferences(file), DEFAULTS);
+  });
+});
+
+test("readPreferences keeps a valid weight, slant and width, and drops ones it doesn't offer", () => {
+  withTempDir((dir) => {
+    const file = preferencesPath(dir);
+    fs.writeFileSync(file, JSON.stringify({ fontWeight: 300, fontItalic: true, fontWidth: "expanded" }));
+    assert.deepEqual(readPreferences(file), { ...DEFAULTS, fontWeight: 300, fontItalic: true, fontWidth: "expanded" });
+    fs.writeFileSync(file, JSON.stringify({ fontWeight: 450, fontItalic: "yes", fontWidth: "wide" }));
+    assert.deepEqual(readPreferences(file), DEFAULTS);
+    fs.writeFileSync(file, JSON.stringify({ fontWeight: "700" }));
     assert.deepEqual(readPreferences(file), DEFAULTS);
   });
 });

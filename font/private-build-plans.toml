@@ -45,10 +45,20 @@ exportGlyphNames = true
   [buildPlans.IosevkaMoolin.ligations]
   inherits = "dlig"
 
+[buildPlans.IosevkaMoolin.weights.Light]
+shape = 300
+menu = 300
+css = 300
+
 [buildPlans.IosevkaMoolin.weights.Regular]
 shape = 400
 menu = 400
 css = 400
+
+[buildPlans.IosevkaMoolin.weights.Medium]
+shape = 500
+menu = 500
+css = 500
 
 [buildPlans.IosevkaMoolin.weights.Bold]
 shape = 700

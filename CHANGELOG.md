@@ -12,8 +12,17 @@ renames that section to the new version and date.
 
 ### Added
 
+- Preferences can now choose the terminal font's weight (Light, Regular,
+  Medium, Bold), width (Condensed, Normal, Expanded) and Italic, applied to
+  the scrollback, the input line and the timestamps, and remembered. The
+  server's bold is drawn 300 heavier than the weight chosen. Iosevka Moolin
+  now bundles all 24 faces for this (about 40 MB more); other fonts use
+  their closest installed weight and keep their width.
+- The Preferences dialog's font size is now a slider that moves in the steps
+  Ctrl+= and Ctrl+- do (8 to 32, by 2), with the chosen size shown beside it.
+  It is remembered between sessions, as the size was before.
 - A Preferences dialog (Worlds → Preferences…, or Ctrl+,/Cmd+,), replacing
-  the placeholder: show timestamps, check for updates at startup, and the
+  the placeholder: check for updates at startup, show timestamps, and the
   terminal's default font and size, with a live sample of each curated font.
 - A freshly opened window now sizes itself to show 80x25 characters at its
   starting font, centered on screen, instead of a fixed size.
@@ -91,6 +100,11 @@ renames that section to the new version and date.
 
 ### Fixed
 
+- On macOS, closing the last window and then choosing Open World (Cmd+O) or
+  another Worlds menu item crashed the app with "Object has been destroyed":
+  the menu bar kept the closed window's menu. With no window open it now has
+  a Worlds menu (New World, Open World, Preferences, Encryption, Quit) whose
+  items open a new window first.
 - `npm start` from a snap-packaged VS Code or VSCodium's integrated terminal
   no longer crashes on a Wayland desktop: it undoes the snap's GTK and
   data-directory overrides before launching Electron.

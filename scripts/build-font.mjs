@@ -18,7 +18,14 @@ import * as path from "node:path";
 const ROOT = path.join(import.meta.dirname, "..");
 const FONT_DIR = path.join(ROOT, "font");
 const PLAN_NAME = "IosevkaMoolin";
-const FACES = ["Regular", "Bold", "Italic", "BoldItalic"];
+// Every width, weight and slope the plan builds. Iosevka names a face for its
+// width, weight and slope in that order, leaving out the Normal width and the
+// Regular weight, and calling the plain face "Regular".
+const FACES = ["", "Condensed", "Extended"].flatMap((width) =>
+  ["Light", "", "Medium", "Bold"].flatMap((weight) =>
+    ["", "Italic"].map((slope) => `${width}${weight}${slope}` || "Regular"),
+  ),
+);
 
 const iosevkaSrc = process.env.IOSEVKA_SRC ? path.resolve(process.env.IOSEVKA_SRC) : path.join(FONT_DIR, ".iosevka-src");
 
