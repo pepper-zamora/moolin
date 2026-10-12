@@ -91,6 +91,11 @@ renames that section to the new version and date.
 
 ### Fixed
 
+- On macOS, closing the last window and then choosing Open World (Cmd+O) or
+  another Worlds menu item crashed the app with "Object has been destroyed":
+  the menu bar kept the closed window's menu. With no window open it now has
+  a Worlds menu (New World, Open World, Preferences, Encryption, Quit) whose
+  items open a new window first.
 - `npm start` from a snap-packaged VS Code or VSCodium's integrated terminal
   no longer crashes on a Wayland desktop: it undoes the snap's GTK and
   data-directory overrides before launching Electron.
