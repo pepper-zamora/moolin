@@ -66,6 +66,15 @@ const worldsFile = path.join(sandbox, "worlds");
 fs.mkdirSync(configDir);
 fs.mkdirSync(documentsDir);
 
+// The first phase of the run is not interested in being offered encryption
+// (the encryption phase at the end starts from "ask" again).
+function writePreferences(prompt) {
+  const dir = process.platform === "linux" ? path.join(configDir, "Moolin") : configDir;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "preferences.json"), JSON.stringify({ encryptionPrompt: prompt }));
+}
+writePreferences("never");
+
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 // Where Electron actually resolves app.getPath("userData") to, given how
@@ -619,6 +628,156 @@ try {
       })()`);
       expectEqual(cancelled, false, "Ctrl+O cancelled");
     }
+  });
+
+  // --- Encryption: the offer, setting it up, locking, unlocking --------------
+  // The app is restarted for each, in the same sandbox, since lock and unlock
+  // are what happens when it starts. The phase-one connection above left a plain
+  // log behind, which setting up encryption must convert.
+  console.log("smoke: encryption");
+  const preferencesFile = path.join(userDataDir, "preferences.json");
+  const logFiles = () => {
+    const found = [];
+    const walk = (dir) => {
+      for (const entry of fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : []) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name === "moolin.log") found.push(full);
+      }
+    };
+    walk(path.join(documentsDir, "Moolin"));
+    return found;
+  };
+  const dialogOpen = (page) => page.evaluate("document.getElementById('encryption-dialog').open");
+  const text = (page, id) => page.evaluate(`document.getElementById(${JSON.stringify(id)}).textContent`);
+  const fill = (page, id, value) =>
+    page.evaluate(`(() => { const el = document.getElementById(${JSON.stringify(id)}); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+
+  async function restartApp() {
+    for (const page of pages.splice(0)) page.close();
+    for (const child of launched.splice(0)) {
+      try {
+        process.kill(-child.pid);
+      } catch {
+        // already gone
+      }
+    }
+    await sleep(1500);
+    fs.rmSync(path.join(userDataDir, "DevToolsActivePort"), { force: true });
+    launch("--remote-debugging-port=0");
+    devtoolsPort = await waitFor("the app to restart", () => {
+      const portFile = path.join(userDataDir, "DevToolsActivePort");
+      return fs.existsSync(portFile) ? Number(fs.readFileSync(portFile, "utf8").split("\n")[0]) : 0;
+    });
+    const [target] = await waitFor("a window after the restart", async () => {
+      const targets = await pageTargets().catch(() => []);
+      return targets.length > 0 && targets;
+    });
+    const page = await Page.attach(target);
+    pages.push(page);
+    return page;
+  }
+
+  writePreferences("ask");
+  let enc = await restartApp();
+
+  await check("a first run offers encryption, and Not now with Don't ask again is remembered", async () => {
+    await waitFor("the offer", () => dialogOpen(enc), 5000);
+    expectEqual((await text(enc, "enc-title")).startsWith("Encrypt your passwords"), true, "the offer's title");
+    await enc.evaluate("document.getElementById('enc-never').click(); document.getElementById('enc-cancel').click()");
+    await waitFor("the offer to close", async () => !(await dialogOpen(enc)), 3000);
+    await waitFor("the choice to be saved", () => fs.readFileSync(preferencesFile, "utf8").includes('"never"'), 3000);
+    await sleep(300);
+    expectEqual(await dialogOpen(enc), false, "no second offer");
+  });
+
+  writePreferences("ask");
+  enc = await restartApp();
+
+  await check("setting a key phrase encrypts the passwords and converts the existing log", async () => {
+    expectEqual(logFiles().length, 1, "logs before");
+    expectEqual(fs.readFileSync(logFiles()[0], "utf8").startsWith("MOOLIN-LOG 1 plain"), true, "the log before");
+    await waitFor("the offer", () => dialogOpen(enc), 5000);
+    await fill(enc, "enc-phrase", "smoke test key phrase");
+    await fill(enc, "enc-confirm", "a different phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the mismatch to be reported", async () => (await text(enc, "enc-error")).includes("don't match"), 3000);
+    expectEqual(await dialogOpen(enc), true, "still open after a mismatch");
+    await fill(enc, "enc-confirm", "smoke test key phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("encryption to finish", async () => !(await dialogOpen(enc)), 15000);
+
+    const worlds = JSON.parse(fs.readFileSync(worldsFile, "utf8"));
+    expectEqual(worlds.encryption?.version, 1, "the encryption block");
+    const character = worlds.worlds[0].characters[0];
+    expectEqual(typeof character.passwordEncrypted, "string", "the sealed password");
+    expectEqual("password" in character, false, "no plain password");
+    const log = fs.readFileSync(logFiles()[0], "utf8");
+    expectEqual(log.startsWith("MOOLIN-LOG 1 encrypted "), true, "the log's header");
+    expectEqual(log.includes("Welcome"), false, "no plain text in the log");
+    expectEqual(await enc.evaluate("!document.getElementById('encryption-status').hidden"), true, "the padlock");
+  });
+
+  enc = await restartApp();
+
+  await check("an encrypted install starts locked: connecting is refused, a wrong phrase is too, the right one unlocks", async () => {
+    await waitFor("the unlock dialog", () => dialogOpen(enc), 5000);
+    expectEqual(await text(enc, "enc-title"), "Unlock Moolin", "the dialog");
+    await enc.evaluate(`window.moolin.connect(${JSON.stringify({ id: "smoke", name: "Smoke Test", host: "127.0.0.1", port: serverPort, tls: false, tlsAllowUntrusted: false, autoLogin: false, loginTemplate: "", echoCommands: "on", wordWrap: "off", characters: [] })}, null)`);
+    await waitFor("the refusal", () => enc.evaluate("document.getElementById('terminal').textContent.includes('locked')"), 3000);
+
+    await fill(enc, "enc-unlock-phrase", "not the phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the wrong phrase to be refused", async () => (await text(enc, "enc-error")).includes("doesn't match"), 5000);
+    expectEqual(await dialogOpen(enc), true, "still locked");
+
+    await fill(enc, "enc-unlock-phrase", "smoke test key phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("unlocking", async () => !(await dialogOpen(enc)), 5000);
+    expectEqual(await enc.evaluate("document.getElementById('encryption-status').dataset.state"), "unlocked", "the padlock");
+    const loaded = await enc.evaluate("window.moolin.worlds.load().then((r) => r.worlds[0].characters[0].password)");
+    expectEqual(loaded, "guest", "the password, read back");
+  });
+
+  await check("a connection after unlocking is logged encrypted", async () => {
+    received = "";
+    await enc.evaluate(`window.moolin.connect(${JSON.stringify({ id: "smoke", name: "Smoke Test", host: "127.0.0.1", port: serverPort, tls: false, tlsAllowUntrusted: false, autoLogin: false, loginTemplate: "", echoCommands: "on", wordWrap: "off", characters: [] })}, null)`);
+    await waitFor("the status bar to say connected", async () =>
+      (await enc.evaluate("document.getElementById('status-text').textContent")).startsWith("Connected"),
+    );
+    await sleep(500);
+    const log = fs.readFileSync(logFiles()[0], "utf8");
+    expectEqual(log.startsWith("MOOLIN-LOG 1 encrypted "), true, "the header");
+    expectEqual(log.includes("Welcome"), false, "no plain text");
+    expectEqual(log.split("\n").length > 3, true, "records were appended");
+    // What the window shows is still the plain text.
+    expectEqual(await enc.evaluate("document.getElementById('terminal').textContent.includes('Welcome to the smoke test')"), true, "the scrollback");
+  });
+  await check("changing the key phrase keeps the data key: the old phrase stops working, the new one unlocks", async () => {
+    const keyIdOf = () => JSON.parse(fs.readFileSync(worldsFile, "utf8")).encryption.keyId;
+    const before = keyIdOf();
+    await enc.evaluate("document.getElementById('encryption-status').click()");
+    await waitFor("the manage view", async () => (await dialogOpen(enc)) && (await text(enc, "enc-title")) === "Encryption is on", 3000);
+    await enc.evaluate("document.getElementById('enc-change-btn').click()");
+    await waitFor("the change form", async () => (await text(enc, "enc-title")) === "Change the key phrase or file", 3000);
+    await fill(enc, "enc-phrase", "the second phrase");
+    await fill(enc, "enc-confirm", "the second phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the change to finish", async () => !(await dialogOpen(enc)), 15000);
+    expectEqual(keyIdOf(), before, "the same data key");
+    const character = JSON.parse(fs.readFileSync(worldsFile, "utf8")).worlds[0].characters[0];
+    expectEqual(typeof character.passwordEncrypted, "string", "still sealed");
+
+    enc = await restartApp();
+    await waitFor("the unlock dialog", () => dialogOpen(enc), 5000);
+    await fill(enc, "enc-unlock-phrase", "smoke test key phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the old phrase to be refused", async () => (await text(enc, "enc-error")).includes("doesn't match"), 5000);
+    await fill(enc, "enc-unlock-phrase", "the second phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("unlocking", async () => !(await dialogOpen(enc)), 5000);
+    const loaded = await enc.evaluate("window.moolin.worlds.load().then((r) => r.worlds[0].characters[0].password)");
+    expectEqual(loaded, "guest", "the password, read back");
   });
 } catch (error) {
   results.push({ name: "setup", ok: false });

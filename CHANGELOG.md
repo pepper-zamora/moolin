@@ -42,6 +42,18 @@ renames that section to the new version and date.
   sent. `--log-level=debug` says what was dropped or cleared. See
   [PROTOCOLS.md](PROTOCOLS.md).
 
+- **Optional encryption of passwords and logs.** Moolin offers, the first
+  time it runs, to encrypt your characters' passwords and your session logs
+  with a key phrase or a key file (declining, even for good with "Don't ask me
+  again", leaves everything as before). Once on, it starts locked and asks for
+  the key; a key file's path is remembered so it can unlock itself while the
+  file is there. Worlds → Encryption… changes the phrase or file (instant,
+  nothing is re-encrypted) or stops using encryption, which converts
+  everything back to plain. The worlds file gets an `"encryption"` block and
+  `"passwordEncrypted"` fields, and logs are sealed record by record; both say
+  they are encrypted. There is no recovery from a lost key. See the README's
+  [Encryption](README.md#encryption).
+
 ### Changed
 
 - **The scrollback is rewritten**, no longer built on xterm.js: each server
@@ -89,6 +101,13 @@ renames that section to the new version and date.
   Before, the sleep cut the connection off silently, and the window looked
   live after waking until a line sent failed with an error like `read
   EADDRNOTAVAIL`.
+- **Session logs have a new format.** Instead of the server's raw bytes plus a
+  `moolin.log.times` file of arrival times (and a `moolin.log.open` marker
+  while open), `moolin.log` is now one file: a first line saying what it is,
+  then one base64 record per write, each holding the bytes and the time of
+  each line feed in them. It is safe to `cat` whatever the server sent. A log
+  from an earlier version is converted the first time Moolin uses it, and an
+  older Moolin can't read the new format.
 - The worlds file, its backup, and session logs (and the folders made for
   them) are now readable by their owner alone on macOS and Linux, where they
   used the system default, usually readable by every user on the machine. A

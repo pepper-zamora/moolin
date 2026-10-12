@@ -260,22 +260,17 @@ currently discards or never negotiates:
     times alongside its chunks, so a renderer reload restores them; it
     trims whole lines, so its times stay aligned however the output was
     chunked. The
-    session log stays a plain byte stream; its times go in a sidecar,
-    `moolin.log.times`, holding one little-endian float64 (epoch ms; NaN
-    for no time) per line feed. On connect, the log tail's times are read
-    back from the sidecar's end (`readTimesTail` in `src/session-log.ts`).
-    Lines logged before the sidecar existed come back unstamped. Both files
-    are written synchronously so they're always on disk together. A crash
-    can still leave them disagreeing about the output written just before
-    it, so while the log is open a `moolin.log.open` marker records both
-    files' sizes when it was opened. One found on the next open means the
-    app died; the sidecar is then padded (with unknown times) or trimmed to
-    one record per line feed the log gained since, so the damage stays at
-    the end and can't shift older lines' times. Without a marker, a torn
-    final record is read as one unknown time and repaired before the next
-    append.
+    session log keeps each line feed's time inside its records (see
+    `src/log-format.ts`: a record is the bytes one write added, then one
+    little-endian float64 of epoch ms per line feed in them, NaN for no time),
+    so the times can't fall out of step with the bytes, and a crash can
+    only leave an unfinished last line, which is cut off before the next
+    append. On connect the tail's bytes and times are read back together.
+    A log from 0.1.x (raw bytes, with a `moolin.log.times` file beside it) is
+    converted when it is first used; lines logged before that file existed
+    come back unstamped.
   - **Not done.** There's no hover tooltip with the exact time, and no
-    seconds or configurable format. Neither the sidecar nor the log is
+    seconds or configurable format. The log is not
     pruned.
 - **Tab completion**: completing a partial word against recent scrollback
   output or command history (Blightmud; also common in Mudlet/MUSHclient).

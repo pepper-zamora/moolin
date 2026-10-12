@@ -63,4 +63,6 @@ export interface WorldsLoadResult {
   globalSettings: GlobalSettings;
   error?: string;
   warning?: string;
+  // The worlds file is encrypted and not unlocked: the list is empty.
+  locked?: boolean;
 }

@@ -52,4 +52,14 @@ export const IpcChannels = {
   clipboardReadText: "clipboard:readText",
   shellOpenExternal: "shell:openExternal",
   logEmit: "log:emit",
+  securityGetState: "security:getState",
+  securitySetup: "security:setup",
+  securityUnlock: "security:unlock",
+  securityChange: "security:change",
+  securityDisable: "security:disable",
+  securityDecline: "security:decline",
+  // main -> renderer: open the encryption dialog in a mode (offer, unlock, manage).
+  securityOpen: "security:open",
+  // main -> renderer: encryption was turned on or off, locked or unlocked.
+  securityStateChanged: "security:stateChanged",
 } as const;

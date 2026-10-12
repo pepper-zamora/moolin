@@ -7,6 +7,8 @@ import type { SelectAllTarget } from "./select-all";
 import { IpcChannels } from "./ipc-channels";
 import { parseFontArgs } from "./fonts";
 import type { Preferences } from "./preferences";
+import type { SecurityRequest } from "./ipc-validate";
+import type { Outcome, SecurityDialogMode, SecurityInfo, SecurityPageState } from "./security";
 
 // Preload runs in the renderer's process, but main.ts appends
 // "--log-level=..." to its argv (additionalArguments), so it can gate log
@@ -114,6 +116,20 @@ contextBridge.exposeInMainWorld("moolin", {
       ipcRenderer.on(IpcChannels.preferencesOpen, (_event, prefs: Preferences) => callback(prefs));
     },
     save: (partial: Partial<Preferences>): Promise<void> => ipcRenderer.invoke(IpcChannels.preferencesSave, partial),
+  },
+  security: {
+    getState: (): Promise<SecurityPageState> => ipcRenderer.invoke(IpcChannels.securityGetState),
+    setup: (request: SecurityRequest): Promise<Outcome> => ipcRenderer.invoke(IpcChannels.securitySetup, request),
+    unlock: (request: SecurityRequest): Promise<Outcome> => ipcRenderer.invoke(IpcChannels.securityUnlock, request),
+    change: (request: SecurityRequest): Promise<Outcome> => ipcRenderer.invoke(IpcChannels.securityChange, request),
+    disable: (): Promise<Outcome> => ipcRenderer.invoke(IpcChannels.securityDisable),
+    decline: (never: boolean): void => ipcRenderer.send(IpcChannels.securityDecline, { never }),
+    onOpen: (callback: (mode: SecurityDialogMode) => void): void => {
+      ipcRenderer.on(IpcChannels.securityOpen, (_event, mode: SecurityDialogMode) => callback(mode));
+    },
+    onStateChanged: (callback: (info: SecurityInfo) => void): void => {
+      ipcRenderer.on(IpcChannels.securityStateChanged, (_event, info: SecurityInfo) => callback(info));
+    },
   },
   reportUndoState: (canUndo: boolean, canRedo: boolean): void => {
     ipcRenderer.send(IpcChannels.terminalUndoStateChanged, canUndo, canRedo);

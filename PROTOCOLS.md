@@ -224,9 +224,9 @@ with its line.
 To see what Moolin made of a world's output, run it with
 `--log-level=debug`: it says when the greeting turned Pueblo on, once for
 each tag it dropped or showed as text, and each time a server clear was
-asked for and applied. The session log (`moolin.log`, with its `.times`
-sidecar) keeps the server's bytes exactly as they arrived, tags included, so
-a login can be replayed afterwards.
+asked for and applied. The session log (`moolin.log`) keeps the
+server's bytes exactly as they arrived, tags included (inside its base64
+records, see the README), so a login can be replayed afterwards.
 
 How it fits together:
 

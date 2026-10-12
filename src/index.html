@@ -53,6 +53,15 @@
             <path d="M3.8 3.8 L12.2 12.2" />
           </svg>
         </span>
+        <!-- Whether passwords and logs are encrypted: a padlock, amber while
+             locked (waiting for the key phrase or file), grey once unlocked.
+             Hidden when encryption is off. Click to unlock or manage it. -->
+        <span id="encryption-status" role="button" tabindex="-1" hidden>
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <rect x="3" y="7" width="10" height="7" rx="1.2" />
+            <path d="M5.2 7 V5 a2.8 2.8 0 0 1 5.6 0 V7" />
+          </svg>
+        </span>
         <!-- Connection security, far right: a shield whose color and mark
              (check / question mark / cross, so it never relies on color
              alone) give trusted TLS / untrusted certificate / plaintext.
@@ -185,6 +194,40 @@
         </label>
         <ul id="pref-font-list" role="radiogroup" aria-label="Font"></ul>
       </div>
+    </dialog>
+
+    <!-- Encryption of passwords and logs: the first-run offer, unlocking, and
+         managing it. One form whose parts are shown by encryption-dialog.ts. -->
+    <dialog id="encryption-dialog" class="app-dialog">
+      <form id="enc-form" class="enc-layout" autocomplete="off">
+        <h2 id="enc-title"></h2>
+        <p id="enc-intro"></p>
+        <div id="enc-new" hidden>
+          <label>Key phrase <input id="enc-phrase" type="password" autocomplete="off" spellcheck="false" /></label>
+          <label>Again <input id="enc-confirm" type="password" autocomplete="off" spellcheck="false" /></label>
+          <p id="enc-hint" class="enc-note">Use a long phrase: it is all that stands between your files and anyone who gets them.</p>
+        </div>
+        <div id="enc-unlock" hidden>
+          <label>Key phrase <input id="enc-unlock-phrase" type="password" autocomplete="off" spellcheck="false" /></label>
+        </div>
+        <div id="enc-file-row" hidden>
+          <button id="enc-file-btn" type="button">Use a key file…</button>
+        </div>
+        <div id="enc-manage" hidden>
+          <button id="enc-change-btn" type="button">Change key phrase or file…</button>
+          <button id="enc-stop-btn" type="button">Stop using encryption…</button>
+        </div>
+        <label id="enc-never-row" class="check" hidden>
+          <input id="enc-never" type="checkbox" /> Don't ask me again
+        </label>
+        <p id="enc-error" role="alert" hidden></p>
+        <ul id="enc-warnings" hidden></ul>
+        <p id="enc-working" role="status" hidden>Working… this can take a while if you have a lot of logs.</p>
+        <div class="enc-buttons">
+          <button id="enc-primary" type="submit" class="primary"></button>
+          <button id="enc-cancel" type="button"></button>
+        </div>
+      </form>
     </dialog>
 
     <script src="../dist/renderer.js"></script>

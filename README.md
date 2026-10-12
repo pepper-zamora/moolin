@@ -104,29 +104,32 @@ from source never check at startup.
   one with several commands to choose), and the status bar shows what a link
   will send or open while the pointer is on it. See
   [PROTOCOLS.md](PROTOCOLS.md#pueblo).
+- **Encryption (optional).** Moolin can encrypt your characters' passwords
+  and your session logs with a key phrase or a key file, which it offers the
+  first time it runs. Off by default; see [Encryption](#encryption).
 - **Persistent logs.** Everything a window shows, colors included, is appended
   to `~/Documents/Moolin/<world>/<character>/moolin.log` (just `<world>/` when
   connecting without a character). Each folder's name starts with 8
   characters of the world's or character's id, as in
   `3f2a9c1e.LambdaMOO/7b0d44aa.Cowpernica/`, so worlds with the same name (or
   names differing only in case) get folders of their own, and renaming a
-  world or character renames its folder to match. Folders from before the
-  ids were added are renamed the first time their world or character
-  connects. Connecting pre-populates the scrollback with the last 2 MiB of
-  the log. A log belongs to one window at a time: the first window to
-  connect to a world and character reads and writes it until it
-  disconnects (its last line is the "disconnected" one), and other windows
-  connected meanwhile don't log. The status bar shows which: a scroll beside
+  world or character renames its folder to match. Connecting pre-populates
+  the scrollback with the last 2 MiB of the log. A log belongs to one window
+  at a time: the first window to connect to a world and character reads and
+  writes it until it disconnects (its last line is the "disconnected" one),
+  and other windows connected meanwhile don't log. The status bar shows which: a scroll beside
   the security shield when the window is logging, a red "no" sign when
-  another window has the log. The log grows without bound for now, as does
-  the `moolin.log.times` file beside it (see timestamps, below); delete or
-  prune the two together. While a window has the log open there's also a
-  small `moolin.log.open` file beside it, which lets Moolin repair the
-  timestamps if it crashes.
+  another window has the log. The log grows without bound for now; delete or
+  prune it as a whole. It isn't plain text: its first line says what it is
+  (`MOOLIN-LOG 1 plain`), and every line after it is a base64 record holding
+  what was shown and when each line arrived, so a server that sends escape
+  sequences can't make a terminal act on them if you `cat` the log. A log
+  from 0.1.x (the raw bytes, with a `moolin.log.times` file beside it) is
+  converted the first time Moolin uses it.
 - **Line timestamps.** View > Show Timestamps adds a gutter showing when each
   line from the server arrived, with the date wherever the day changes. The
   times are display-only: they never appear in copied text or in the log,
-  and are kept in `moolin.log.times` so logged history keeps its times on
+  and are kept in the log so logged history keeps its times on
   reconnect. The last setting chosen is remembered for new windows (see
   [Preferences](#preferences)).
 - **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
@@ -340,7 +343,8 @@ the running instance's worlds file, whatever path is passed.
 If the file doesn't exist yet, Moolin creates it with one world already in
 it — LambdaMOO, with a Guest character — rather than starting empty.
 
-Character passwords are stored in this file **in plain text** (see
+Character passwords are stored in this file **in plain text**, unless you
+turn on [encryption](#encryption), which seals them (see also
 [What Moolin stores, and who can read it](#what-moolin-stores-and-who-can-read-it)).
 
 Writes are atomic (write to a temporary file, then rename), and each one
@@ -352,19 +356,86 @@ from hand-editing never costs you anything. If the backup can't be read
 either, the dialog says so and Moolin refuses to save at all. Malformed
 individual entries are skipped with a warning.
 
+### Encryption
+
+Moolin can encrypt the two things it keeps that are worth protecting: your
+characters' **passwords** (in the worlds file) and your **session logs**. It is
+off unless you turn it on, and the first time Moolin runs (or when it is
+off and you haven't said otherwise) it offers to. Choosing **Not now** with
+**Don't ask me again** ticked stops the offer; **Worlds → Encryption…** is
+always there to set it up later.
+
+**Turning it on.** Enter a key phrase (twice), or choose a **key file**: any
+file at all, of any size, which stands in for a phrase by a hash of its
+contents. Moolin makes a random data key, seals your passwords with it,
+converts every existing log (this can take a while with a lot of them, and
+needs every window disconnected), and keeps the data key itself only wrapped by your phrase or
+file. From then on new logs are written sealed too.
+
+**Unlocking.** Each time Moolin starts it is *locked*: it asks for the phrase
+or file before it shows your worlds or connects, and a padlock in the status
+bar shows the state (amber while locked). A key file's *path* (never its
+contents) is remembered in `preferences.json`, so while the file is in place,
+say on a USB stick, Moolin unlocks by itself, and asks when it isn't.
+
+**Changing it.** **Worlds → Encryption… → Change key phrase or file…** (or click
+the padlock) gives the same data key a new phrase or file. Nothing is
+re-encrypted, so it is instant, and the old phrase or file stops working.
+You can switch between a phrase and a file this way.
+
+**Stopping.** **Stop using encryption…** (after a confirmation) converts the
+logs and passwords back to plain and removes the lock. It won't offer
+encryption again.
+
+> **There is no recovery.** If you lose the key phrase or the key file, your
+> passwords and logs cannot be read again, by you or anyone: Moolin keeps
+> nothing that could unlock them. Keep the phrase somewhere safe (a password
+> manager), or the key file backed up.
+
+What it protects, and what it doesn't. It keeps your passwords and logs
+unreadable to anyone who gets at your files without the key: another user
+on the machine, a cloud sync of your Documents folder, a backup, a lost
+disk. It does **not** protect against software running as you while Moolin
+is unlocked, which could read the key from memory or the text from the
+window. The following are not encrypted, and stay visible: world and
+character names (the log folders are named after them), hosts and ports,
+the size and modification time of each log, and your preferences.
+
+**File formats.** Each tells you what it is, so nothing is mistaken for plain
+text:
+
+- The worlds file gains an `"encryption"` block (the key-derivation
+  settings, `"keySource"`, the wrapped data key, and a key id), and each
+  character's `"password"` becomes `"passwordEncrypted"`. A key phrase is
+  stretched with scrypt and the data key is wrapped with AES-256-GCM; a
+  password is sealed with that data key, bound to its character. `worlds.bak`
+  is kept in step, so it never holds a plain password after you turn
+  encryption on.
+- A session log (`moolin.log`) is one file whatever the mode: a first line
+  `MOOLIN-LOG 1 plain` or `MOOLIN-LOG 1 encrypted <key id>`, then one base64
+  record per line. In an encrypted log each record is sealed with the data key
+  (AES-256-GCM, with the first line as its context), so a record can't be
+  moved into another file. Either way the file is plain printable text, so
+  `cat`ing it never makes a terminal act on what a server sent.
+
+If you turn encryption on while a conversion is cut short (the app is
+stopped part-way), nothing is lost: each log says which mode it is in, and
+the next time you unlock, Moolin finishes converting the rest.
+
 ### What Moolin stores, and who can read it
 
 Moolin keeps two things on disk that you should treat as private:
 
 - **Passwords.** The worlds file, and its `worlds.bak` copy, hold every
-  character's password **in plain text**. Moolin doesn't encrypt them (it has
-  no master password or keychain support yet), so anyone who can read the
-  file can read them.
-- **Logs.** Each `moolin.log` holds everything a window showed: what the
+  character's password **in plain text** unless you turn on
+  [encryption](#encryption), which seals them.
+- **Logs.** Each `moolin.log` holds everything a window showed (readable only
+  with the key, if encryption is on): what the
   world sent you, private messages included, and the commands you typed, as
   Moolin echoed them. If you type a password into a command yourself
   (`connect Name secret`), the echo puts it in the log; turn off **Echo typed
-  commands** for that world, or use auto-login, which is never logged.
+  commands** for that world, or use auto-login, which is never logged. With
+  encryption on, the echo is sealed with the rest of the log.
 
 On macOS and Linux, Moolin writes these files readable by you alone (mode
 `600`, and `700` for the folders it creates), and tightens a file made by an
@@ -378,9 +449,10 @@ Beyond that, it's up to you:
   of a synced folder by passing the worlds file's path on the command line,
   or exclude the `Moolin` folder from the sync.
 - Backups of your home folder include them too.
-- A log holds the server's raw escape sequences. Open it in an editor or with
-  `less -R`; writing it straight to a terminal with `cat` makes the terminal
-  act on whatever the server sent.
+- A log is base64 text, so `cat`ing it is safe whatever the server sent. It
+  also isn't readable as it is; Moolin shows its tail when you reconnect. The
+  files `worlds.unreadable-<date>` that Moolin sets aside are copies of a
+  worlds file as it was, so they are as plain or as sealed as it was.
 - Without TLS, anything you send, an auto-login's password included, can be
   read by anyone on the network path. The shield in the status bar says which
   you have.
@@ -471,7 +543,10 @@ leaves a Moolin you have running and your logs alone), connects it to a
 local test server, and drives it over the Chrome DevTools Protocol:
 clicking, selecting, copying and typing, and checking where keyboard focus
 goes, that typed commands reach the server, what copying a wrapped or
-partial selection gives, Clear Screen, and a Pueblo world's links. Its windows appear on screen while it
+partial selection gives, Clear Screen, a Pueblo world's links, and the
+encryption flows (the first-run offer, turning it on, unlocking, logging
+encrypted and changing the key phrase). The key file picker and the stop
+confirmation are native dialogs it can't drive, so unit tests cover those. Its windows appear on screen while it
 runs (a few seconds), so it needs a real display; on headless Linux use
 `xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
 work but hasn't been tried. To check a packaged build instead, point
@@ -499,7 +574,13 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
 | `src/ipc-validate.ts`     | Checks on every message the window sends the main process (sizes, addresses, text, ...) |
 | `src/file-modes.ts`       | The owner-only permissions for the worlds file and session logs            |
-| `src/session-log.ts`      | Persistent per-world/character logs, their `.times` sidecar, and which window owns each |
+| `src/session-log.ts`      | Persistent per-world/character logs and which window owns each              |
+| `src/security.ts`         | Whether encryption is on, locked or unlocked; turning it on, off or changing the key |
+| `src/encryption-dialog.ts` | The dialog for the first-run offer, unlocking and managing encryption  |
+| `src/log-convert.ts`      | Converting every log to encrypted or plain, and finishing a stopped conversion |
+| `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting older logs |
+| `src/key-file.ts`         | Reading a key file, and unlocking with the one Moolin remembers            |
+| `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
 | `src/renderer.ts`         | The terminal window's page: wires the scrollback, gutter, input area, status bar and keys together |
