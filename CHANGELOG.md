@@ -100,6 +100,10 @@ renames that section to the new version and date.
 
 ### Fixed
 
+- A window that wasn't logging because another window had the same world's
+  log now starts logging when that window disconnects or closes, instead of
+  staying unlogged until it reconnects. It says "[logging resumed]" in its
+  scrollback, and the earlier output it showed isn't added to the log.
 - On macOS, closing the last window and then choosing Open World (Cmd+O) or
   another Worlds menu item crashed the app with "Object has been destroyed":
   the menu bar kept the closed window's menu. With no window open it now has

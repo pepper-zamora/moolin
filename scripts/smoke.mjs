@@ -630,6 +630,27 @@ try {
     }
   });
 
+  // The first window to connect to a world has its log; a second window
+  // connected to the same world doesn't log until the first lets go of it.
+  await check("a window that couldn't log starts when the window holding the log closes", async () => {
+    const logging = (page) => page.evaluate("document.getElementById('logging-status').dataset.logging");
+    await second.evaluate(
+      `window.moolin.connect(${JSON.stringify({ id: "smoke", name: "Smoke Test", host: "127.0.0.1", port: serverPort, tls: false, tlsAllowUntrusted: false, autoLogin: false, loginTemplate: "", echoCommands: "on", wordWrap: "off", characters: [] })}, null)`,
+    );
+    await waitFor("the second window to connect", async () =>
+      (await second.evaluate("document.getElementById('status-text').textContent")).startsWith("Connected"),
+    );
+    expectEqual(await logging(main), "on", "the first window logs");
+    expectEqual(await logging(second), "off", "the second doesn't");
+    await main.evaluate("window.close()");
+    await waitFor("logging to resume in the second window", async () => (await logging(second)) === "on", 5000);
+    expectEqual(
+      await second.evaluate("document.getElementById('terminal').textContent.includes('logging resumed')"),
+      true,
+      "the window says so",
+    );
+  });
+
   // --- Encryption: the offer, setting it up, locking, unlocking --------------
   // The app is restarted for each, in the same sandbox, since lock and unlock
   // are what happens when it starts. The phase-one connection above left a plain

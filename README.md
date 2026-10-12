@@ -117,9 +117,12 @@ from source never check at startup.
   the scrollback with the last 2 MiB of the log. A log belongs to one window
   at a time: the first window to connect to a world and character reads and
   writes it until it disconnects (its last line is the "disconnected" one),
-  and other windows connected meanwhile don't log. The status bar shows which: a scroll beside
-  the security shield when the window is logging, a red "no" sign when
-  another window has the log. The log grows without bound for now; delete or
+  and other windows connected meanwhile don't log. When the window holding
+  the log disconnects or closes, a window that was waiting for it (the
+  first, if several) takes it over and logs from then on, saying so in its
+  scrollback; what it showed while it wasn't logging isn't added. The status
+  bar shows which: a scroll beside the security shield when the window is
+  logging, a red "no" sign when another window has the log. The log grows without bound for now; delete or
   prune it as a whole. It isn't plain text: its first line says what it is
   (`MOOLIN-LOG 1 plain`), and every line after it is a numbered base64 record
   holding what was shown and when each line arrived, so a server that sends

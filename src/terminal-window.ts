@@ -69,7 +69,12 @@ export class TerminalWindow {
       },
     });
     const id = this.window.id;
-    this.sessionLog = new WindowLog(options.logs, options.logRoot);
+    this.sessionLog = new WindowLog(options.logs, options.logRoot, () => {
+      // Another window had the log and has let go of it: this one logs now.
+      if (this.window.isDestroyed()) return;
+      this.writeStatus("\x1b[33m[logging resumed: no other window is using this log]\x1b[0m\r\n");
+      this.send(IpcChannels.connectionState, this.getState());
+    });
 
     this.connection = new ConnectionManager(
       {

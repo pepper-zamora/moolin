@@ -201,6 +201,95 @@ test("a window's log is released on disconnect, so another window can take it", 
   b.release();
 });
 
+test("a window that could not log takes the log over when the window holding it lets go", () => {
+  const root = tempDir();
+  const registry = new SessionLogRegistry();
+  const world = { ...newWorld("w1"), name: "Moo" };
+  let resumed = 0;
+  const a = new WindowLog(registry, root);
+  const b = new WindowLog(registry, root, () => resumed++);
+
+  a.open(world, null, 1000);
+  b.open(world, null, 1000);
+  a.append("a1\n", 1);
+  b.append("b while a holds it\n", 2);
+  assert.equal(b.owned, false);
+  assert.equal(resumed, 0);
+
+  a.release();
+  assert.equal(b.owned, true, "b logs now");
+  assert.equal(resumed, 1);
+  b.append("b after\n", 3);
+  b.release();
+
+  const history = new WindowLog(registry, root).open(world, null, 1000);
+  assert.equal(
+    Buffer.from(history.bytes).toString(),
+    "a1\nb after\n",
+    "what b showed while not logging was not logged",
+  );
+});
+
+test("of several windows waiting for a log, the first to ask gets it, and the next gets it after", () => {
+  const root = tempDir();
+  const registry = new SessionLogRegistry();
+  const world = { ...newWorld("w1"), name: "Moo" };
+  const resumed: string[] = [];
+  const a = new WindowLog(registry, root);
+  const b = new WindowLog(registry, root, () => resumed.push("b"));
+  const c = new WindowLog(registry, root, () => resumed.push("c"));
+  a.open(world, null, 1000);
+  b.open(world, null, 1000);
+  c.open(world, null, 1000);
+
+  a.release();
+  assert.deepEqual([b.owned, c.owned], [true, false]);
+  b.release();
+  assert.deepEqual([b.owned, c.owned], [false, true]);
+  assert.deepEqual(resumed, ["b", "c"]);
+  c.release();
+});
+
+test("a window that disconnects or connects elsewhere stops waiting for the log", () => {
+  const root = tempDir();
+  const registry = new SessionLogRegistry();
+  const world = { ...newWorld("w1"), name: "Moo" };
+  const other = { ...newWorld("w2"), name: "Other" };
+  let resumed = 0;
+  const a = new WindowLog(registry, root);
+  const b = new WindowLog(registry, root, () => resumed++);
+  a.open(world, null, 1000);
+  b.open(world, null, 1000);
+  b.release(); // disconnected
+  a.release();
+  assert.equal(b.owned, false);
+
+  a.open(world, null, 1000);
+  b.open(world, null, 1000);
+  b.open(other, null, 1000); // connected to another world: it owns that log
+  a.release();
+  assert.equal(resumed, 0);
+  assert.equal(b.owned, true);
+  assert.match(b.file ?? "", /Other/, "and stays on the other world's log");
+  b.release();
+});
+
+test("a window waiting for a log stays unlogged if it cannot claim it when it is free", () => {
+  const root = tempDir();
+  let locked = false;
+  const registry = new SessionLogRegistry(undefined, () => (locked ? null : { kind: "plain" }));
+  const world = { ...newWorld("w1"), name: "Moo" };
+  let resumed = 0;
+  const a = new WindowLog(registry, root);
+  const b = new WindowLog(registry, root, () => resumed++);
+  a.open(world, null, 1000);
+  b.open(world, null, 1000);
+  locked = true;
+  a.release(); // b can't claim while locked, and must not throw
+  assert.equal(b.owned, false);
+  assert.equal(resumed, 0);
+});
+
 test("a log that stops on a disk error no longer counts as owned", () => {
   const root = tempDir();
   const world = { ...newWorld("w1"), name: "Moo" };
