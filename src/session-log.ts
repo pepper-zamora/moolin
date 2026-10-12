@@ -202,6 +202,9 @@ export class SessionLog {
 // log reads and writes it, so output isn't logged once per window.
 export class SessionLogRegistry {
   private readonly owned = new Set<string>();
+  // Windows that wanted a log another window held, in the order they asked,
+  // to be told when it is let go (see whenFree).
+  private readonly waiting = new Map<string, Array<() => void>>();
   private paused = false;
 
   // `modeNow` says how logs are written right now: plain, or encrypted with a
@@ -248,30 +251,90 @@ export class SessionLogRegistry {
     return new SessionLog(
       file,
       mode,
-      () => this.owned.delete(key),
+      () => {
+        this.owned.delete(key);
+        this.handOver(key);
+      },
       (error) => this.onError(file, error),
     );
+  }
+
+  // Calls `onFree` the next time the log `key` is let go by the window that
+  // holds it, for a window that found it held and so isn't logging. Only the
+  // first of several waiting gets the call: it is expected to claim the log
+  // (and to wait again if that fails). Returns a way to stop waiting.
+  whenFree(key: string, onFree: () => void): () => void {
+    const queue = this.waiting.get(key) ?? [];
+    queue.push(onFree);
+    this.waiting.set(key, queue);
+    return () => {
+      const index = queue.indexOf(onFree);
+      if (index !== -1) queue.splice(index, 1);
+      if (queue.length === 0 && this.waiting.get(key) === queue) this.waiting.delete(key);
+    };
+  }
+
+  private handOver(key: string): void {
+    const queue = this.waiting.get(key);
+    const next = queue?.shift();
+    if (queue?.length === 0) this.waiting.delete(key);
+    next?.();
   }
 }
 
 // The log one window writes to. A window claims its target's log as it
 // connects and releases it when the connection ends (or the window closes),
 // so another window can then take it over. A window that finds the log
-// already taken shows no history and logs nothing.
+// already taken shows no history and logs nothing, until the window holding it
+// lets go: then it takes the log over, and logs from that point on.
 export class WindowLog {
   private log: SessionLog | null = null;
+  private stopWaiting: (() => void) | null = null;
+  private target: { world: World; character: Character | null } | null = null;
 
+  // `onResumed` is called when a window that was not logging starts to.
   constructor(
     private readonly registry: SessionLogRegistry,
     private readonly root: string,
+    private readonly onResumed: () => void = () => {},
   ) {}
 
   // Releases any log held, then claims `world`/`character`'s. Returns up to
   // `maxBytes` of its history to show, or nothing if another window has it.
   open(world: World, character: Character | null, maxBytes: number): LogHistory {
     this.release();
-    this.log = this.registry.claim(logKeyFor(world, character), () => locateLogFile(this.root, world, character));
-    return this.log ? this.log.history(maxBytes) : { bytes: new Uint8Array(), times: [] };
+    this.target = { world, character };
+    this.log = this.claim();
+    if (this.log) return this.log.history(maxBytes);
+    this.wait();
+    return { bytes: new Uint8Array(), times: [] };
+  }
+
+  private claim(): SessionLog | null {
+    const { world, character } = this.target ?? {};
+    if (!world || character === undefined) return null;
+    return this.registry.claim(logKeyFor(world, character), () => locateLogFile(this.root, world, character));
+  }
+
+  // Waits for the window holding the log to let go of it.
+  private wait(): void {
+    const { world, character } = this.target ?? {};
+    if (!world || character === undefined) return;
+    this.stopWaiting = this.registry.whenFree(logKeyFor(world, character), () => {
+      this.stopWaiting = null;
+      let claimed: SessionLog | null = null;
+      try {
+        claimed = this.claim();
+      } catch {
+        return; // can't log now (locked, or encryption is changing): stay as it is
+      }
+      if (claimed) {
+        this.log = claimed;
+        this.onResumed();
+      } else {
+        this.wait(); // someone else got it first
+      }
+    });
   }
 
   // Whether this window holds a log (and so is writing to it).
@@ -289,6 +352,9 @@ export class WindowLog {
   }
 
   release(): void {
+    this.stopWaiting?.();
+    this.stopWaiting = null;
+    this.target = null;
     this.log?.close();
     this.log = null;
   }
