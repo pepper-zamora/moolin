@@ -194,6 +194,18 @@
           <input id="pref-font-size" type="range" min="8" max="32" step="2" />
           <output id="pref-font-size-value" for="pref-font-size"></output>
         </label>
+        <div class="font-style-row">
+          <label>
+            Weight
+            <select id="pref-font-weight"></select>
+          </label>
+          <label>
+            Width
+            <select id="pref-font-width"></select>
+          </label>
+          <label class="check"><input id="pref-font-italic" type="checkbox" /> Italic</label>
+        </div>
+        <p id="pref-font-style-note" class="enc-note" hidden></p>
         <ul id="pref-font-list" role="radiogroup" aria-label="Font"></ul>
       </div>
     </dialog>

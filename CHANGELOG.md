@@ -12,6 +12,12 @@ renames that section to the new version and date.
 
 ### Added
 
+- Preferences can now choose the terminal font's weight (Light, Regular,
+  Medium, Bold), width (Condensed, Normal, Expanded) and Italic, applied to
+  the scrollback, the input line and the timestamps, and remembered. The
+  server's bold is drawn 300 heavier than the weight chosen. Iosevka Moolin
+  now bundles all 24 faces for this (about 40 MB more); other fonts use
+  their closest installed weight and keep their width.
 - The Preferences dialog's font size is now a slider that moves in the steps
   Ctrl+= and Ctrl+- do (8 to 32, by 2), with the chosen size shown beside it.
   It is remembered between sessions, as the size was before.

@@ -27,7 +27,7 @@ import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-
 import { DEFAULT_GLOBAL_SETTINGS, resolveTriState, targetLabel } from "./world-utils";
 import type { ResolvedSettings, WindowState } from "./connection-manager";
 import { checkForUpdate } from "./update-check";
-import { fontFamilyFor } from "./fonts";
+import { type FontStyle, fontFamilyFor } from "./fonts";
 import { normalizePhrase, type KeySource } from "./crypto-keys";
 import { readKeyFile, unlockWithKeyFile } from "./key-file";
 import { Security, type Outcome, type SecurityPageState } from "./security";
@@ -75,7 +75,19 @@ configureLogger(logLevel);
 // per window (not a fixed array) since the font prefs it carries can change
 // at runtime via the Preferences dialog.
 function rendererArgs(): string[] {
-  return [`--log-level=${logLevel}`, `--font-id=${prefs.fontId}`, `--font-size=${prefs.fontSize}`];
+  return [
+    `--log-level=${logLevel}`,
+    `--font-id=${prefs.fontId}`,
+    `--font-size=${prefs.fontSize}`,
+    `--font-weight=${prefs.fontWeight}`,
+    `--font-italic=${prefs.fontItalic}`,
+    `--font-width=${prefs.fontWidth}`,
+  ];
+}
+
+// The weight, slant and width saved in the preferences.
+function fontStyleOf(p: Preferences): FontStyle {
+  return { weight: p.fontWeight, italic: p.fontItalic, width: p.fontWidth };
 }
 
 const worldsPath = resolveWorldsPath(getCliWorldsArg());
@@ -664,7 +676,7 @@ ipcMain.on(IpcChannels.terminalInitialSize, (event, rawSize: unknown) => {
 // The Preferences dialog's changes save and apply immediately: showTimestamps
 // is this window's own per-window state (same as the View menu's checkbox),
 // while checkForUpdates and the font/size also become the default for new
-// windows; the font change additionally re-renders this window's terminal.
+// windows; a font change additionally re-renders this window's terminal.
 ipcMain.handle(IpcChannels.preferencesSave, (event, rawPartial: unknown) => {
   if (!terminalFor(event)) return;
   if (typeof rawPartial !== "object" || rawPartial === null) return ignoreBad(IpcChannels.preferencesSave, rawPartial);
@@ -674,6 +686,9 @@ ipcMain.handle(IpcChannels.preferencesSave, (event, rawPartial: unknown) => {
   prefs.checkForUpdates = merged.checkForUpdates;
   prefs.fontId = merged.fontId;
   prefs.fontSize = merged.fontSize;
+  prefs.fontWeight = merged.fontWeight;
+  prefs.fontItalic = merged.fontItalic;
+  prefs.fontWidth = merged.fontWidth;
   writePreferences(prefsPath, prefs);
   const terminal = terminalFor(event);
   if (terminal) {
@@ -682,8 +697,13 @@ ipcMain.handle(IpcChannels.preferencesSave, (event, rawPartial: unknown) => {
       terminal.send(IpcChannels.terminalToggleTimestamps, terminal.showTimestamps);
       buildMenu(terminal); // keep the View menu's checkbox in sync
     }
-    if (partial.fontId !== undefined || partial.fontSize !== undefined) {
-      terminal.send(IpcChannels.terminalSetFont, { fontFamily: fontFamilyFor(prefs.fontId), fontSize: prefs.fontSize });
+    const fontChanged = ["fontId", "fontSize", "fontWeight", "fontItalic", "fontWidth"].some((key) => key in partial);
+    if (fontChanged) {
+      terminal.send(IpcChannels.terminalSetFont, {
+        fontFamily: fontFamilyFor(prefs.fontId),
+        fontSize: prefs.fontSize,
+        fontStyle: fontStyleOf(prefs),
+      });
     }
   }
 });
