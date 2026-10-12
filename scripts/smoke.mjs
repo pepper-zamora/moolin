@@ -802,6 +802,23 @@ try {
     await waitFor("unlocking", async () => !(await dialogOpen(enc)), 5000);
     await waitFor("the other window's form to close", async () => !(await dialogOpen(other)), 3000);
   });
+
+  console.log("smoke: preferences");
+  await check("the font size slider moves in zoom's steps, applies to the window and is remembered", async () => {
+    const slider = "document.getElementById('pref-font-size')";
+    const attrs = await enc.evaluate(`[${slider}.min, ${slider}.max, ${slider}.step, ${slider}.type].join()`);
+    expectEqual(attrs, "8,32,2,range", "the slider's range");
+    await enc.evaluate("document.getElementById('preferences-dialog').showModal()");
+    await enc.evaluate(`${slider}.value = "20"; ${slider}.dispatchEvent(new Event("input", { bubbles: true }))`);
+    expectEqual(await text(enc, "pref-font-size-value"), "20 px", "the readout follows the slider");
+    await enc.evaluate(`${slider}.dispatchEvent(new Event("change", { bubbles: true }))`);
+    await waitFor("the size to be saved", () => JSON.parse(fs.readFileSync(preferencesFile, "utf8")).fontSize === 20, 3000);
+    await waitFor("the terminal to use it", async () =>
+      (await enc.evaluate("getComputedStyle(document.getElementById('input-area')).fontSize")) === "20px",
+    );
+    enc = await restartApp();
+    expectEqual(await enc.evaluate("window.moolin.initialFont.fontSize"), 20, "the size after a restart");
+  });
 } catch (error) {
   results.push({ name: "setup", ok: false });
   console.log(`  FAIL  setup: ${error.message}`);

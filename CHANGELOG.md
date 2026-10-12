@@ -12,6 +12,9 @@ renames that section to the new version and date.
 
 ### Added
 
+- The Preferences dialog's font size is now a slider that moves in the steps
+  Ctrl+= and Ctrl+- do (8 to 32, by 2), with the chosen size shown beside it.
+  It is remembered between sessions, as the size was before.
 - A Preferences dialog (Worlds → Preferences…, or Ctrl+,/Cmd+,), replacing
   the placeholder: show timestamps, check for updates at startup, and the
   terminal's default font and size, with a live sample of each curated font.

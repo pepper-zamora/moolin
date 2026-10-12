@@ -475,7 +475,8 @@ Beyond that, it's up to you:
 
 Worlds → Preferences… (Ctrl+,, Cmd+, on macOS) opens a dialog for app-wide settings: whether to show
 timestamps, whether to check for updates at startup, and the terminal's
-default font and size. The default is Iosevka Moolin, a custom build of
+default font and size (a slider that moves in the steps Ctrl+= and Ctrl+-
+do). The default is Iosevka Moolin, a custom build of
 [Iosevka](https://typeof.net/Iosevka/) bundled with the app (see
 [`npm run build:font`](#commands)), so there's a deliberately-chosen
 monospace font out of the box rather than whatever happens to be installed.
@@ -557,8 +558,8 @@ leaves a Moolin you have running and your logs alone), connects it to a
 local test server, and drives it over the Chrome DevTools Protocol:
 clicking, selecting, copying and typing, and checking where keyboard focus
 goes, that typed commands reach the server, what copying a wrapped or
-partial selection gives, Clear Screen, a Pueblo world's links, and the
-encryption flows (the first-run offer, turning it on, unlocking, logging
+partial selection gives, Clear Screen, a Pueblo world's links, the
+Preferences font size slider, and the encryption flows (the first-run offer, turning it on, unlocking, logging
 encrypted, changing the key phrase, the phrase length limit, and unlocking in
 one window while another waits). The key file picker and the stop
 confirmation are native dialogs it can't drive, so unit tests cover those.

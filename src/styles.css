@@ -927,8 +927,19 @@ html, body {
   overflow: hidden; /* only the font list scrolls */
 }
 
+.font-size-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 #pref-font-size {
-  width: 64px;
+  flex: 1;
+}
+
+#pref-font-size-value {
+  min-width: 4ch;
+  text-align: right;
 }
 
 #pref-font-list {

@@ -3,7 +3,7 @@
 // saves (and, for showTimestamps and the font, applies to this window) as
 // soon as it's committed, the same as the Worlds dialog's fields.
 import type { Preferences } from "./preferences";
-import { MONOSPACE_FONTS, FONT_SAMPLE_LINES, MIN_FONT_SIZE, clampFontSize } from "./fonts";
+import { MONOSPACE_FONTS, FONT_SAMPLE_LINES, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
 
 function element<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -15,6 +15,11 @@ const dialog = element<HTMLDialogElement>("preferences-dialog");
 const timestampsInput = element<HTMLInputElement>("pref-show-timestamps");
 const updatesInput = element<HTMLInputElement>("pref-check-updates");
 const fontSizeInput = element<HTMLInputElement>("pref-font-size");
+const fontSizeValue = element<HTMLOutputElement>("pref-font-size-value");
+// The slider moves in the steps Ctrl+= and Ctrl+- do, over the same range.
+fontSizeInput.min = String(MIN_FONT_SIZE);
+fontSizeInput.max = String(MAX_FONT_SIZE);
+fontSizeInput.step = String(FONT_SIZE_STEP);
 const fontList = element<HTMLUListElement>("pref-font-list");
 
 // One radio + live sample per curated font, built once up front; a later
@@ -60,13 +65,14 @@ function selectedFontId(): string {
 
 function applySampleSize(size: number): void {
   for (const sample of sampleEls) sample.style.fontSize = `${size}px`;
+  fontSizeValue.value = `${size} px`;
 }
 
 function populate(prefs: Preferences): void {
   timestampsInput.checked = prefs.showTimestamps;
   updatesInput.checked = prefs.checkForUpdates;
   fontSizeInput.value = String(prefs.fontSize);
-  applySampleSize(prefs.fontSize);
+  applySampleSize(Number(fontSizeInput.value)); // as the slider snapped it to a step
   const radio = fontList.querySelector<HTMLInputElement>(`input[value="${prefs.fontId}"]`);
   if (radio) radio.checked = true;
 }
@@ -78,15 +84,12 @@ function save(partial: Partial<Preferences>): void {
 timestampsInput.addEventListener("change", () => save({ showTimestamps: timestampsInput.checked }));
 updatesInput.addEventListener("change", () => save({ checkForUpdates: updatesInput.checked }));
 
-// Live-updates every sample as the number input changes, but only saves (and
-// so only applies to this window's terminal) once the value is committed.
-fontSizeInput.addEventListener("input", () => {
-  const size = Number(fontSizeInput.value);
-  if (Number.isFinite(size)) applySampleSize(size);
-});
+// Live-updates every sample as the slider moves, but only saves (and so only
+// applies to this window's terminal, and to later windows) once it is let go
+// (or, from the keyboard, after each step).
+fontSizeInput.addEventListener("input", () => applySampleSize(Number(fontSizeInput.value)));
 fontSizeInput.addEventListener("change", () => {
-  const size = clampFontSize(Number(fontSizeInput.value) || MIN_FONT_SIZE);
-  fontSizeInput.value = String(size);
+  const size = Number(fontSizeInput.value);
   applySampleSize(size);
   save({ fontSize: size });
 });
