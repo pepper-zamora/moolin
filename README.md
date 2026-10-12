@@ -578,6 +578,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/encryption-dialog.ts` | The dialog for the first-run offer, unlocking and managing encryption  |
 | `src/log-convert.ts`      | Converting every log to encrypted or plain, and finishing a stopped conversion |
 | `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting older logs |
+| `src/key-file.ts`         | Reading a key file, and unlocking with the one Moolin remembers            |
 | `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |

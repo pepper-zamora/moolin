@@ -28,7 +28,8 @@ import { DEFAULT_GLOBAL_SETTINGS, resolveTriState, targetLabel } from "./world-u
 import type { ResolvedSettings, WindowState } from "./connection-manager";
 import { checkForUpdate } from "./update-check";
 import { fontFamilyFor } from "./fonts";
-import { normalizePhrase, secretFromFilePath, type KeySource } from "./crypto-keys";
+import { normalizePhrase, type KeySource } from "./crypto-keys";
+import { readKeyFile, unlockWithKeyFile } from "./key-file";
 import { Security, type Outcome, type SecurityPageState } from "./security";
 import {
   parseSecurityDecline,
@@ -748,17 +749,6 @@ function broadcastSecurity(): void {
   rebuildAllMenus();
 }
 
-// A key file stands in for a phrase whatever it holds, however big: what is used
-// is the hash of its contents, read a piece at a time.
-async function readKeyFile(file: string): Promise<{ secret: Buffer } | { error: string }> {
-  try {
-    if (fs.statSync(file).size === 0) return { error: "That key file is empty" };
-    return { secret: await secretFromFilePath(file) };
-  } catch (err) {
-    return { error: `Could not read the key file: ${(err as Error).message}` };
-  }
-}
-
 // The secret a request stands for: the phrase typed, or the file the user picks
 // (the page never names a path). null when the picker was cancelled.
 async function secretFor(
@@ -862,26 +852,10 @@ if (isPrimaryInstance) {
     newTerminalWindow();
   });
 
-  // With a key file remembered, an encrypted install unlocks itself while the
-  // file is there; otherwise the first window asks.
-  async function unlockWithRememberedKeyFile(): Promise<void> {
-    if (security.state() !== "locked" || !prefs.keyFilePath) return;
-    const read = await readKeyFile(prefs.keyFilePath);
-    if ("error" in read) {
-      log("info", "security", "the remembered key file can't be used:", read.error);
-      return;
-    }
-    const outcome = await security.unlock(read.secret);
-    log(
-      "info",
-      "security",
-      outcome.ok ? "unlocked with the remembered key file" : `key file refused: ${outcome.error}`,
-    );
-  }
-
   app.whenReady().then(async () => {
     log("debug", "main", "app ready");
-    await unlockWithRememberedKeyFile();
+    const unlocked = await unlockWithKeyFile(security, prefs.keyFilePath);
+    if (unlocked) log("info", "security", unlocked);
     newTerminalWindow();
 
     // Only in packaged builds: running from source shouldn't prompt about
