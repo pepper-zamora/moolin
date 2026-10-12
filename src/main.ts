@@ -157,6 +157,47 @@ function newTerminalWindow(near?: TerminalWindow): TerminalWindow {
   return terminal;
 }
 
+// On macOS the app stays running with no window open, and the menu bar keeps
+// the last window's menu, whose items act on that (destroyed) window. With no
+// window, this menu takes its place: what it offers opens a new window first,
+// and does its thing once that has loaded.
+function setNoWindowMenu(): void {
+  const inNewWindow =
+    (action: (terminal: TerminalWindow) => void): (() => void) =>
+    () => {
+      const terminal = newTerminalWindow();
+      terminal.window.webContents.once("did-finish-load", () => action(terminal));
+    };
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "&Worlds",
+        submenu: [
+          {
+            label: "&New World…",
+            accelerator: "CmdOrCtrl+N",
+            click: inNewWindow((terminal) => openWorldsDialog(terminal, true)),
+          },
+          {
+            label: "&Open World…",
+            accelerator: "CmdOrCtrl+O",
+            click: inNewWindow((terminal) => openWorldsDialog(terminal, false)),
+          },
+          { type: "separator" },
+          {
+            label: "&Preferences…",
+            accelerator: "CmdOrCtrl+,",
+            click: inNewWindow((terminal) => openPreferences(terminal)),
+          },
+          { label: "&Encryption…", click: inNewWindow((terminal) => openEncryption(terminal)) },
+          { type: "separator" },
+          { role: "quit", label: "&Quit" },
+        ],
+      },
+    ]),
+  );
+}
+
 function rebuildAllMenus(): void {
   for (const terminal of windowManager.all()) buildMenu(terminal);
 }
@@ -903,5 +944,6 @@ if (isPrimaryInstance) {
 
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
+    else setNoWindowMenu();
   });
 }
