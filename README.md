@@ -113,11 +113,11 @@ from source never check at startup.
   characters of the world's or character's id, as in
   `3f2a9c1e.LambdaMOO/7b0d44aa.Cowpernica/`, so worlds with the same name (or
   names differing only in case) get folders of their own, and renaming a
-  world or character renames its folder to match. Connecting pre-populates the scrollback with the last 2 MiB of
-  the log. A log belongs to one window at a time: the first window to
-  connect to a world and character reads and writes it until it
-  disconnects (its last line is the "disconnected" one), and other windows
-  connected meanwhile don't log. The status bar shows which: a scroll beside
+  world or character renames its folder to match. Connecting pre-populates
+  the scrollback with the last 2 MiB of the log. A log belongs to one window
+  at a time: the first window to connect to a world and character reads and
+  writes it until it disconnects (its last line is the "disconnected" one),
+  and other windows connected meanwhile don't log. The status bar shows which: a scroll beside
   the security shield when the window is logging, a red "no" sign when
   another window has the log. The log grows without bound for now; delete or
   prune it as a whole. It isn't plain text: its first line says what it is
@@ -366,10 +366,10 @@ off and you haven't said otherwise) it offers to. Choosing **Not now** with
 always there to set it up later.
 
 **Turning it on.** Enter a key phrase (twice), or choose a **key file**: any
-file at all, of any size, which stands in for a phrase by a hash of its contents. Moolin makes a
-random data key, seals your passwords with it, converts every existing log
-(this can take a while with a lot of them, and needs every window
-disconnected), and keeps the data key itself only wrapped by your phrase or
+file at all, of any size, which stands in for a phrase by a hash of its
+contents. Moolin makes a random data key, seals your passwords with it,
+converts every existing log (this can take a while with a lot of them, and
+needs every window disconnected), and keeps the data key itself only wrapped by your phrase or
 file. From then on new logs are written sealed too.
 
 **Unlocking.** Each time Moolin starts it is *locked*: it asks for the phrase
@@ -398,7 +398,7 @@ on the machine, a cloud sync of your Documents folder, a backup, a lost
 disk. It does **not** protect against software running as you while Moolin
 is unlocked, which could read the key from memory or the text from the
 window. The following are not encrypted, and stay visible: world and
-character names, hosts and ports (the log folders are named after them),
+character names (the log folders are named after them), hosts and ports,
 the size and modification time of each log, and your preferences.
 
 **File formats.** Each tells you what it is, so nothing is mistaken for plain
@@ -543,7 +543,9 @@ leaves a Moolin you have running and your logs alone), connects it to a
 local test server, and drives it over the Chrome DevTools Protocol:
 clicking, selecting, copying and typing, and checking where keyboard focus
 goes, that typed commands reach the server, what copying a wrapped or
-partial selection gives, Clear Screen, and a Pueblo world's links. Its windows appear on screen while it
+partial selection gives, Clear Screen, a Pueblo world's links, and the
+encryption flows (the first-run offer, turning it on, unlocking and logging
+encrypted). Its windows appear on screen while it
 runs (a few seconds), so it needs a real display; on headless Linux use
 `xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
 work but hasn't been tried. To check a packaged build instead, point

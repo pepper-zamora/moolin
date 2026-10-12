@@ -270,7 +270,7 @@ currently discards or never negotiates:
     converted when it is first used; lines logged before that file existed
     come back unstamped.
   - **Not done.** There's no hover tooltip with the exact time, and no
-    seconds or configurable format. Neither the sidecar nor the log is
+    seconds or configurable format. The log is not
     pruned.
 - **Tab completion**: completing a partial word against recent scrollback
   output or command history (Blightmud; also common in Mudlet/MUSHclient).
