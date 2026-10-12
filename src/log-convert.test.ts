@@ -5,8 +5,14 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createEnvelope, normalizePhrase } from "./crypto-keys";
 import { convertAllLogs, findLogs } from "./log-convert";
-import { PLAIN, inspectLog, readLogHistory, formatOf, type LogMode } from "./log-format";
+import { PLAIN, inspectLog, matchesMode, readLogHistory, type LogFormat, type LogMode } from "./log-format";
 import { SessionLogRegistry } from "./session-log";
+
+// Whether `file` is a log in `mode`.
+const isInMode = (file: string, mode: LogMode): boolean => {
+  const found = inspectLog(file);
+  return typeof found === "object" && matchesMode(found as LogFormat, mode);
+};
 
 const CHEAP = { N: 1 << 14, r: 8, p: 1 };
 const text = (history: { bytes: Uint8Array }): string => Buffer.from(history.bytes).toString();
@@ -61,7 +67,7 @@ test("every log is converted to encrypted and back, and what each held comes bac
     [2, 3],
     [3, 3],
   ]);
-  for (const file of files) assert.deepEqual(inspectLog(file), formatOf(mode));
+  for (const file of files) assert.ok(isInMode(file, mode));
   assert.equal(text(readLogHistory(files[1], mode, 1000)), "log 1\r\n");
 
   const again = await convertAllLogs(root, mode, null, registry);
@@ -81,12 +87,12 @@ test("a conversion that was stopped part-way is finished by running it again", a
   // As if the app was stopped after the first log, mid-way through the second.
   await convertAllLogs(path.dirname(files[0]), mode, null, registry);
   fs.writeFileSync(`${files[1]}.convert-123`, "half a temporary fil");
-  assert.deepEqual(inspectLog(files[0]), formatOf(mode));
+  assert.ok(isInMode(files[0], mode));
   assert.deepEqual(inspectLog(files[2]), { kind: "plain" });
 
   const summary = await convertAllLogs(root, mode, null, registry);
   assert.equal(summary.failed.length, 0);
-  for (const file of files) assert.deepEqual(inspectLog(file), formatOf(mode));
+  for (const file of files) assert.ok(isInMode(file, mode));
   assert.deepEqual(fs.readdirSync(path.dirname(files[1])).sort(), ["moolin.log"], "the stray file is gone");
   for (const [i, file] of files.entries()) assert.equal(text(readLogHistory(file, mode, 1000)), `log ${i}\r\n`);
 });

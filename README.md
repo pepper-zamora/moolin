@@ -121,11 +121,11 @@ from source never check at startup.
   the security shield when the window is logging, a red "no" sign when
   another window has the log. The log grows without bound for now; delete or
   prune it as a whole. It isn't plain text: its first line says what it is
-  (`MOOLIN-LOG 1 plain`), and every line after it is a base64 record holding
-  what was shown and when each line arrived, so a server that sends escape
-  sequences can't make a terminal act on them if you `cat` the log. A log
-  from 0.1.x (the raw bytes, with a `moolin.log.times` file beside it) is
-  converted the first time Moolin uses it.
+  (`MOOLIN-LOG 1 plain`), and every line after it is a numbered base64 record
+  holding what was shown and when each line arrived, so a server that sends
+  escape sequences can't make a terminal act on them if you `cat` the log. A
+  file named `moolin.log` that doesn't start that way isn't touched: Moolin
+  reports that it isn't logging rather than write to it.
 - **Line timestamps.** View > Show Timestamps adds a gutter showing when each
   line from the server arrived, with the date wherever the day changes. The
   times are display-only: they never appear in copied text or in the log,
@@ -365,8 +365,9 @@ off and you haven't said otherwise) it offers to. Choosing **Not now** with
 **Don't ask me again** ticked stops the offer; **Worlds → Encryption…** is
 always there to set it up later.
 
-**Turning it on.** Enter a key phrase (twice), or choose a **key file**: any
-file at all, of any size, which stands in for a phrase by a hash of its
+**Turning it on.** Enter a key phrase (twice; up to 1024
+characters, and the box says so when it is full), or choose a **key file**:
+any file at all, of any size, which stands in for a phrase by a hash of its
 contents. Moolin makes a random data key, seals your passwords with it,
 converts every existing log (this can take a while with a lot of them, and
 needs every window disconnected), and keeps the data key itself only wrapped by your phrase or
@@ -380,8 +381,11 @@ say on a USB stick, Moolin unlocks by itself, and asks when it isn't.
 
 **Changing it.** **Worlds → Encryption… → Change key phrase or file…** (or click
 the padlock) gives the same data key a new phrase or file. Nothing is
-re-encrypted, so it is instant, and the old phrase or file stops working.
-You can switch between a phrase and a file this way.
+re-encrypted, so it is instant, and the old phrase or file stops working on
+your files as they are now. The data key itself is not replaced, so a copy of
+the worlds file or a log from before the change (a backup, a sync's history)
+still opens with the old phrase or file. You can switch between a phrase and
+a file this way.
 
 **Stopping.** **Stop using encryption…** (after a confirmation) converts the
 logs and passwords back to plain and removes the lock. It won't offer
@@ -399,7 +403,8 @@ disk. It does **not** protect against software running as you while Moolin
 is unlocked, which could read the key from memory or the text from the
 window. The following are not encrypted, and stay visible: world and
 character names (the log folders are named after them), hosts and ports,
-the size and modification time of each log, and your preferences.
+the size, record lengths, record numbers and modification time of each log,
+and your preferences.
 
 **File formats.** Each tells you what it is, so nothing is mistaken for plain
 text:
@@ -412,15 +417,22 @@ text:
   is kept in step, so it never holds a plain password after you turn
   encryption on.
 - A session log (`moolin.log`) is one file whatever the mode: a first line
-  `MOOLIN-LOG 1 plain` or `MOOLIN-LOG 1 encrypted <key id>`, then one base64
-  record per line. In an encrypted log each record is sealed with the data key
-  (AES-256-GCM, with the first line as its context), so a record can't be
-  moved into another file. Either way the file is plain printable text, so
-  `cat`ing it never makes a terminal act on what a server sent.
+  `MOOLIN-LOG 1 plain` or `MOOLIN-LOG 1 encrypted <key id> <file id>` (the
+  file id is random), then one record per line: a number (0, 1, 2…) and
+  base64. In an encrypted log each record is sealed with the data key
+  (AES-256-GCM, with a fresh random nonce, and the first line and the
+  record's number as its context). A record moved into another log, repeated
+  or put out of order doesn't open in its new place, and is left out when the
+  log is read. Deleting records, or cutting off the end of a log, can't be
+  detected. Either way the file is plain printable text, so `cat`ing it never
+  makes a terminal act on what a server sent.
 
 If you turn encryption on while a conversion is cut short (the app is
 stopped part-way), nothing is lost: each log says which mode it is in, and
-the next time you unlock, Moolin finishes converting the rest.
+the next time you unlock, Moolin finishes converting the rest. If a log
+can't be converted back when you stop using encryption (damaged, or sealed
+with some other key), encryption is left on and the dialog names the log:
+turning it off would otherwise throw away the only key that opens it.
 
 ### What Moolin stores, and who can read it
 
@@ -545,10 +557,11 @@ clicking, selecting, copying and typing, and checking where keyboard focus
 goes, that typed commands reach the server, what copying a wrapped or
 partial selection gives, Clear Screen, a Pueblo world's links, and the
 encryption flows (the first-run offer, turning it on, unlocking, logging
-encrypted and changing the key phrase). The key file picker and the stop
-confirmation are native dialogs it can't drive, so unit tests cover those. Its windows appear on screen while it
-runs (a few seconds), so it needs a real display; on headless Linux use
-`xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
+encrypted, changing the key phrase, the phrase length limit, and unlocking in
+one window while another waits). The key file picker and the stop
+confirmation are native dialogs it can't drive, so unit tests cover those.
+Its windows appear on screen while it runs (a few seconds), so it needs a real
+display; on headless Linux use `xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
 work but hasn't been tried. To check a packaged build instead, point
 `MOOLIN_SMOKE_APP` at its executable, e.g.
 `MOOLIN_SMOKE_APP=release/linux-unpacked/moolin node scripts/smoke.mjs`
@@ -575,10 +588,11 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/ipc-validate.ts`     | Checks on every message the window sends the main process (sizes, addresses, text, ...) |
 | `src/file-modes.ts`       | The owner-only permissions for the worlds file and session logs            |
 | `src/session-log.ts`      | Persistent per-world/character logs and which window owns each              |
+| `src/security-limits.ts`  | The longest key phrase, shared by the dialog and the check on what it sends |
 | `src/security.ts`         | Whether encryption is on, locked or unlocked; turning it on, off or changing the key |
 | `src/encryption-dialog.ts` | The dialog for the first-run offer, unlocking and managing encryption  |
 | `src/log-convert.ts`      | Converting every log to encrypted or plain, and finishing a stopped conversion |
-| `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting older logs |
+| `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting between modes |
 | `src/key-file.ts`         | Reading a key file, and unlocking with the one Moolin remembers            |
 | `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |

@@ -5,18 +5,19 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createEnvelope, normalizePhrase } from "./crypto-keys";
 import {
-  LEGACY_TIMES_SUFFIX,
   PLAIN,
   WrongLogKeyError,
   convertLog,
   decodeRecord,
   encodeRecord,
-  formatOf,
   headerFor,
   inspectLog,
+  matchesMode,
+  newHeader,
   parseHeader,
   prepareForAppend,
   readLogHistory,
+  type LogFormat,
   type LogMode,
 } from "./log-format";
 import { SessionLogRegistry } from "./session-log";
@@ -41,16 +42,30 @@ function writeLog(file: string, mode: LogMode, appends: Array<[string | Uint8Arr
   log.close();
 }
 
+// Whether `file` is a log in `mode`.
+const isInMode = (file: string, mode: LogMode): boolean => {
+  const found = inspectLog(file);
+  return typeof found === "object" && matchesMode(found as LogFormat, mode);
+};
+
 const text = (history: { bytes: Uint8Array }): string => Buffer.from(history.bytes).toString();
 
 test("headers say what the file is, and nothing else is a header", () => {
   assert.equal(headerFor({ kind: "plain" }), "MOOLIN-LOG 1 plain");
   assert.deepEqual(parseHeader("MOOLIN-LOG 1 plain"), { kind: "plain" });
-  assert.deepEqual(parseHeader("MOOLIN-LOG 1 encrypted 0123456789abcdef"), {
+  assert.deepEqual(parseHeader("MOOLIN-LOG 1 encrypted 0123456789abcdef fedcba9876543210"), {
     kind: "encrypted",
     keyId: "0123456789abcdef",
+    fileId: "fedcba9876543210",
   });
-  for (const bad of ["", "MOOLIN-LOG 2 plain", "MOOLIN-LOG 1 encrypted xyz", "MOOLIN-LOG 1 plain ", "hello"]) {
+  for (const bad of [
+    "",
+    "MOOLIN-LOG 2 plain",
+    "MOOLIN-LOG 1 encrypted xyz",
+    "MOOLIN-LOG 1 encrypted 0123456789abcdef",
+    "MOOLIN-LOG 1 plain ",
+    "hello",
+  ]) {
     assert.equal(parseHeader(bad), null, bad);
   }
 });
@@ -59,28 +74,34 @@ test("a record reads back, with its times, in both modes", async () => {
   const data = Buffer.from("one\r\ntwo\r\n\x1b[31mred");
   const times = [1000, null];
   for (const mode of [PLAIN, await encryptedMode()]) {
-    const header = headerFor(formatOf(mode));
-    const line = encodeRecord(mode, header, data, times);
+    const header = newHeader(mode);
+    const line = encodeRecord(mode, header, 7, data, times);
     assert.ok(line.endsWith("\n") && line.indexOf("\n") === line.length - 1, "one line");
     const record = decodeRecord(line.trimEnd(), mode, header);
+    assert.equal(record.seq, 7);
     assert.equal(record.data.toString(), data.toString());
     assert.deepEqual(record.times, times);
   }
 });
 
-test("an encrypted record shows nothing of what it holds, and can't be moved or altered", async () => {
+test("an encrypted record shows nothing of what it holds, and can't be altered or taken elsewhere", async () => {
   const mode = await encryptedMode();
   const other = await encryptedMode("y");
-  const header = headerFor(formatOf(mode));
-  const line = encodeRecord(mode, header, Buffer.from("hunter2 is my password\n"), [1]).trimEnd();
-  assert.equal(Buffer.from(line, "base64").includes(Buffer.from("hunter2")), false);
+  const header = newHeader(mode);
+  const line = encodeRecord(mode, header, 3, Buffer.from("hunter2 is my password\n"), [1]).trimEnd();
+  const [seq, base64] = line.split(" ");
+  assert.equal(Buffer.from(base64, "base64").includes(Buffer.from("hunter2")), false);
   assert.throws(() => decodeRecord(line, other, header), "another key");
-  assert.throws(() => decodeRecord(line, mode, headerFor(formatOf(other))), "another file's header");
+  assert.throws(() => decodeRecord(line, mode, newHeader(mode)), "another log under the same key");
+  assert.throws(() => decodeRecord(line, mode, header.replace("encrypted", "plain")), "another header");
   assert.throws(() => decodeRecord(line, PLAIN, "MOOLIN-LOG 1 plain"), "another mode");
-  const bytes = Buffer.from(line, "base64");
+  assert.throws(() => decodeRecord(`4 ${base64}`, mode, header), "another place in the log");
+  assert.equal(seq, "3");
+  const bytes = Buffer.from(base64, "base64");
   bytes[20] ^= 1;
-  assert.throws(() => decodeRecord(bytes.toString("base64"), mode, header), "an altered byte");
+  assert.throws(() => decodeRecord(`3 ${bytes.toString("base64")}`, mode, header), "an altered byte");
   assert.throws(() => decodeRecord("not base64!", PLAIN, "h"));
+  assert.throws(() => decodeRecord(base64, PLAIN, "h"), "no number");
 });
 
 test("a log is printable text however hostile the server's output, in both modes", async () => {
@@ -169,11 +190,77 @@ test("a damaged record in the middle is skipped, not fatal", () => {
 });
 
 test("a half-written header is as good as no file", () => {
-  const file = tempFile();
-  fs.writeFileSync(file, "MOOLIN-LO");
-  assert.equal(inspectLog(file), "empty");
-  prepareForAppend(file, PLAIN);
-  assert.equal(fs.readFileSync(file, "utf8"), "MOOLIN-LOG 1 plain\n");
+  for (const torn of [
+    "M",
+    "MOOLIN-LO",
+    "MOOLIN-LOG 1 pla",
+    "MOOLIN-LOG 1 encrypted 0123",
+    "MOOLIN-LOG 1 encrypted 0123456789abcdef f",
+  ]) {
+    const file = tempFile();
+    fs.writeFileSync(file, torn);
+    assert.equal(inspectLog(file), "empty", torn);
+    prepareForAppend(file, PLAIN);
+    assert.equal(fs.readFileSync(file, "utf8"), "MOOLIN-LOG 1 plain\n");
+  }
+});
+
+test("a file that is not a log is never overwritten, written to or converted", async () => {
+  const mode = await encryptedMode();
+  for (const content of [
+    "MOOLIN-LOG 1 foo",
+    "notes\nmore notes\n",
+    "MOOLIN-LOG 1 plain extra\n",
+    "MOOLIN-LOG 1 plain".padEnd(200, "x"),
+  ]) {
+    const file = tempFile();
+    fs.writeFileSync(file, content);
+    assert.equal(inspectLog(file), "foreign", content);
+    assert.throws(() => prepareForAppend(file, PLAIN), /not a Moolin log/);
+    assert.throws(() => readLogHistory(file, PLAIN, 100), /not a Moolin log/);
+    assert.throws(() => convertLog(file, mode, null), /not a Moolin log/);
+    assert.equal(fs.readFileSync(file, "utf8"), content, "left as it was");
+  }
+});
+
+test("records taken from another log, repeated or put out of order are not shown", async () => {
+  const mode = await encryptedMode();
+  const a = tempFile();
+  const b = tempFile();
+  writeLog(a, mode, [
+    ["a1\r\n", 1],
+    ["a2\r\n", 2],
+    ["a3\r\n", 3],
+  ]);
+  writeLog(b, mode, [
+    ["b1\r\n", 1],
+    ["b2\r\n", 2],
+  ]);
+  const linesOf = (file: string): string[] => fs.readFileSync(file, "utf8").split("\n");
+  const [headerA, a1, a2, a3] = linesOf(a);
+  const [, b1, b2] = linesOf(b);
+
+  fs.writeFileSync(a, [headerA, a1, b1, a2, a2, a3, ""].join("\n"));
+  assert.equal(text(readLogHistory(a, mode, 1000)), "a1\r\na2\r\na3\r\n", "another log's record and a repeat");
+  fs.writeFileSync(a, [headerA, a1, a3, a2, b2, ""].join("\n"));
+  assert.equal(text(readLogHistory(a, mode, 1000)), "a1\r\na3\r\n", "an earlier record after a later one");
+});
+
+test("appending carries on the numbering, also after a damaged or unfinished last record", async () => {
+  for (const mode of [PLAIN, await encryptedMode()]) {
+    const file = tempFile();
+    writeLog(file, mode, [
+      ["one\r\n", 1],
+      ["two\r\n", 2],
+    ]);
+    assert.equal(prepareForAppend(file, mode).nextSeq, 2);
+    fs.appendFileSync(file, "2 AAAA");
+    assert.equal(prepareForAppend(file, mode).nextSeq, 2, "the unfinished line is cut off");
+    fs.appendFileSync(file, "###damaged###\n");
+    assert.equal(prepareForAppend(file, mode).nextSeq, 2, "a damaged last line is not a number");
+    writeLog(file, mode, [["three\r\n", 3]]);
+    assert.equal(text(readLogHistory(file, mode, 1000)), "one\r\ntwo\r\nthree\r\n");
+  }
 });
 
 test("a log in the other mode, or for another key, is refused rather than read wrongly", async () => {
@@ -200,7 +287,7 @@ test("converting to encrypted and back gives exactly the same bytes and times", 
   const before = readLogHistory(file, PLAIN, 10_000_000);
 
   assert.equal(convertLog(file, mode, null), true);
-  assert.deepEqual(inspectLog(file), formatOf(mode));
+  assert.ok(isInMode(file, mode));
   assert.equal(fs.readFileSync(file, "utf8").includes("colour"), false);
   const sealed = readLogHistory(file, mode, 10_000_000);
   assert.equal(text(sealed), text(before));
@@ -225,57 +312,13 @@ test("a conversion that can't read the log leaves it untouched", async () => {
   assert.deepEqual(fs.readdirSync(path.dirname(file)), ["moolin.log"]);
 });
 
-test("a log from before this format is converted, with the times from its file of times", async () => {
-  for (const mode of [PLAIN, await encryptedMode()]) {
-    const file = tempFile();
-    fs.writeFileSync(file, "one\r\ntwo\r\nthree\r\n\x1b[31mred\x1b[0m");
-    // Times for the last two line feeds only: the first has none.
-    const times = Buffer.alloc(16);
-    times.writeDoubleLE(2000, 0);
-    times.writeDoubleLE(3000, 8);
-    fs.writeFileSync(file + LEGACY_TIMES_SUFFIX, times);
-    fs.writeFileSync(`${file}.open`, "{}");
-
-    assert.equal(inspectLog(file), "legacy");
-    assert.equal(convertLog(file, mode, null), true);
-    const history = readLogHistory(file, mode, 1000);
-    assert.equal(text(history), "one\r\ntwo\r\nthree\r\n\x1b[31mred\x1b[0m");
-    assert.deepEqual(history.times, [null, 2000, 3000]);
-    assert.deepEqual(fs.readdirSync(path.dirname(file)), ["moolin.log"], "its sidecar files are gone");
-  }
-});
-
-test("a legacy log with no file of times, or an empty one, converts too", () => {
-  const file = tempFile();
-  fs.writeFileSync(file, "a\nb\n");
-  convertLog(file, PLAIN, null);
-  assert.deepEqual(readLogHistory(file, PLAIN, 100).times, [null, null]);
-  const empty = tempFile();
-  fs.writeFileSync(empty, "");
-  convertLog(empty, PLAIN, null);
-  assert.equal(fs.readFileSync(empty, "utf8"), "MOOLIN-LOG 1 plain\n");
-});
-
-test("a large legacy log converts in pieces, losing nothing", () => {
-  const file = tempFile();
-  const lines = Array.from({ length: 120000 }, (_, i) => `legacy line ${i}\r\n`);
-  fs.writeFileSync(file, lines.join(""));
-  const times = Buffer.alloc(8 * lines.length);
-  for (let i = 0; i < lines.length; i++) times.writeDoubleLE(i, i * 8);
-  fs.writeFileSync(file + LEGACY_TIMES_SUFFIX, times);
-  convertLog(file, PLAIN, null);
-  const history = readLogHistory(file, PLAIN, 100_000_000);
-  assert.equal(text(history), lines.join(""));
-  assert.equal(history.times.length, lines.length);
-  assert.equal(history.times[0], 0);
-  assert.equal(history.times[119999], 119999);
-});
-
-test("a session log converts an older log when it is first used, and keeps appending to it", () => {
+test("a session log reports a file that is not a log, and leaves it alone", () => {
   const file = tempFile();
   fs.writeFileSync(file, "before\r\n");
-  writeLog(file, PLAIN, [["after\r\n", 5]]);
-  const history = readLogHistory(file, PLAIN, 1000);
-  assert.equal(text(history), "before\r\nafter\r\n");
-  assert.deepEqual(history.times, [null, 5]);
+  const registry = new SessionLogRegistry(undefined, () => PLAIN);
+  const log = registry.claim("k", () => file);
+  assert.ok(log);
+  log.append("after\r\n", 5);
+  assert.equal(log.isOpen, false, "logging stopped");
+  assert.equal(fs.readFileSync(file, "utf8"), "before\r\n");
 });

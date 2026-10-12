@@ -48,20 +48,22 @@ const ENVELOPE_AAD = Buffer.from("moolin key envelope v1");
 // own parameters are used, within the bounds below, so they can be raised later.
 export const DEFAULT_KDF = { N: 1 << 15, r: 8, p: 1 } as const;
 const MIN_N = 1 << 14;
-const MAX_N = 1 << 20;
+const MAX_R = 32;
+const MAX_P = 16;
+// What a read envelope's parameters may ask of this machine: scrypt needs about
+// 128 * N * r bytes, which must fit in what crypto.scrypt is allowed (with room
+// to spare), and N * r * p bounds the time (the default is 2^18, about 0.1 s).
 const SCRYPT_MAXMEM = 512 * 1024 * 1024;
+const MAX_KDF_MEMORY = SCRYPT_MAXMEM / 2;
+const MAX_KDF_WORK = 1 << 24;
 
 export function normalizePhrase(phrase: string): Buffer {
   return Buffer.from(phrase.normalize("NFC"), "utf8");
 }
 
-// A key file's contents stand in for a phrase, whatever they are.
-export function secretFromFile(contents: Uint8Array): Buffer {
-  return crypto.createHash("sha256").update(contents).digest();
-}
-
-// The same as secretFromFile for the file at `file`, read a piece at a time, so
-// a file of any size works without being held in memory.
+// A key file's contents stand in for a phrase, whatever they are: what is used
+// is the SHA-256 of the file at `file`, read a piece at a time so a file of any
+// size works without being held in memory.
 export function secretFromFilePath(file: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const hash = crypto.createHash("sha256");
@@ -167,8 +169,9 @@ function isBase64Of(value: unknown, bytes?: number): value is string {
 }
 
 // Checks an envelope read from a file, which may have been edited or damaged.
-// Its scrypt cost is bounded, so a hostile file can't make unlocking hang or
-// run out of memory.
+// Its scrypt cost is bounded (see MAX_KDF_MEMORY and MAX_KDF_WORK), so a hostile
+// file can't make unlocking hang or run out of memory, and everything accepted
+// is something unlocking can run.
 export function parseEnvelope(value: unknown): KeyEnvelope | null {
   if (typeof value !== "object" || value === null) return null;
   const { version, kdf, keySource, wrappedKey, keyId } = value as Record<string, unknown>;
@@ -178,8 +181,9 @@ export function parseEnvelope(value: unknown): KeyEnvelope | null {
   if (typeof kdf !== "object" || kdf === null) return null;
   const { name, N, r, p, salt } = kdf as Record<string, unknown>;
   if (name !== "scrypt" || !isBase64Of(salt, SALT_BYTES)) return null;
-  if (typeof N !== "number" || !Number.isInteger(N) || N < MIN_N || N > MAX_N || (N & (N - 1)) !== 0) return null;
-  if (typeof r !== "number" || !Number.isInteger(r) || r < 1 || r > 32) return null;
-  if (typeof p !== "number" || !Number.isInteger(p) || p < 1 || p > 16) return null;
+  if (typeof N !== "number" || !Number.isInteger(N) || N < MIN_N || (N & (N - 1)) !== 0) return null;
+  if (typeof r !== "number" || !Number.isInteger(r) || r < 1 || r > MAX_R) return null;
+  if (typeof p !== "number" || !Number.isInteger(p) || p < 1 || p > MAX_P) return null;
+  if (128 * N * r > MAX_KDF_MEMORY || N * r * p > MAX_KDF_WORK) return null;
   return { version: 1, kdf: { name: "scrypt", N, r, p, salt }, keySource, wrappedKey, keyId };
 }

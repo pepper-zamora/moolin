@@ -152,16 +152,19 @@ export class TerminalWindow {
   // (see getState).
   private startLog(target: ConnectTarget): void {
     let history: LogHistory = { bytes: new Uint8Array(), times: [] };
+    let unavailable: string | null = null;
     try {
       history = this.sessionLog.open(target.world, target.character, MAX_SCROLLBACK_BYTES);
     } catch (error) {
       // Couldn't find or rename its folder; connect anyway, without a log.
-      log("error", "main", `window ${this.window.id} log unavailable:`, (error as Error).message);
+      unavailable = (error as Error).message;
+      log("error", "main", `window ${this.window.id} log unavailable:`, unavailable);
     }
     log("debug", "main", `window ${this.window.id} log`, this.sessionLog.file ?? "owned by another window");
     this.scrollback.reset(history.bytes.length > 0 ? [history.bytes] : [], history.times);
     this.seq++;
     this.send(IpcChannels.terminalReset, this.getScrollback());
+    if (unavailable) this.writeStatus(`\x1b[33m[not logging: ${unavailable}]\x1b[0m\r\n`);
   }
 
   // Server output, timestamped with its arrival time (the only lines that get
