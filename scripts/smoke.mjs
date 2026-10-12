@@ -779,6 +779,29 @@ try {
     const loaded = await enc.evaluate("window.moolin.worlds.load().then((r) => r.worlds[0].characters[0].password)");
     expectEqual(loaded, "guest", "the password, read back");
   });
+  await check("a phrase field stops at the limit and says so, and unlocking in one window closes another's unlock form", async () => {
+    enc = await restartApp();
+    await waitFor("the unlock dialog", () => dialogOpen(enc), 5000);
+    expectEqual(await enc.evaluate("document.getElementById('enc-unlock-phrase').maxLength"), 1024, "the field's limit");
+    await fill(enc, "enc-unlock-phrase", "x".repeat(1024));
+    await waitFor("the limit to be mentioned", async () => (await text(enc, "enc-error")).includes("as long as"), 3000);
+    await fill(enc, "enc-unlock-phrase", "x".repeat(10));
+    await waitFor("the notice to clear", async () => (await text(enc, "enc-error")) === "", 3000);
+
+    const firstId = (await pageTargets())[0].id;
+    launch();
+    const otherTarget = await waitFor("another window", async () =>
+      (await pageTargets()).find((target) => target.id !== firstId),
+    );
+    const other = await Page.attach(otherTarget);
+    pages.push(other);
+    await waitFor("its unlock dialog", () => dialogOpen(other), 5000);
+
+    await fill(enc, "enc-unlock-phrase", "the second phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("unlocking", async () => !(await dialogOpen(enc)), 5000);
+    await waitFor("the other window's form to close", async () => !(await dialogOpen(other)), 3000);
+  });
 } catch (error) {
   results.push({ name: "setup", ok: false });
   console.log(`  FAIL  setup: ${error.message}`);

@@ -266,9 +266,6 @@ currently discards or never negotiates:
     so the times can't fall out of step with the bytes, and a crash can
     only leave an unfinished last line, which is cut off before the next
     append. On connect the tail's bytes and times are read back together.
-    A log from 0.1.x (raw bytes, with a `moolin.log.times` file beside it) is
-    converted when it is first used; lines logged before that file existed
-    come back unstamped.
   - **Not done.** There's no hover tooltip with the exact time, and no
     seconds or configurable format. The log is not
     pruned.

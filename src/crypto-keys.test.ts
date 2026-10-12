@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -12,10 +13,12 @@ import {
   parseEnvelope,
   rewrapEnvelope,
   seal,
-  secretFromFile,
   secretFromFilePath,
   unlockEnvelope,
 } from "./crypto-keys";
+
+// What a key file with these contents stands in for: their SHA-256.
+const fileSecret = (contents: string | Uint8Array): Buffer => crypto.createHash("sha256").update(contents).digest();
 
 // The smallest cost the parser accepts, so these tests don't each wait a tenth of a second.
 const CHEAP = { N: 1 << 14, r: 8, p: 1 };
@@ -37,19 +40,19 @@ test("a phrase is the same however its accents were typed", async () => {
 
 test("a key file unlocks by its contents, whatever they are", async () => {
   const file = Buffer.from([0, 1, 2, 255, 254, 10, 13]);
-  const { envelope, dataKey } = await createEnvelope(secretFromFile(file), "file", CHEAP);
+  const { envelope, dataKey } = await createEnvelope(fileSecret(file), "file", CHEAP);
   assert.equal(envelope.keySource, "file");
-  assert.deepEqual(await unlockEnvelope(envelope, secretFromFile(Buffer.from(file))), dataKey);
-  await assert.rejects(unlockEnvelope(envelope, secretFromFile(Buffer.from([0, 1, 2]))), WrongKeyError);
+  assert.deepEqual(await unlockEnvelope(envelope, fileSecret(file)), dataKey);
+  await assert.rejects(unlockEnvelope(envelope, fileSecret(Buffer.from([0, 1, 2]))), WrongKeyError);
 });
 
 test("re-wrapping keeps the data key, under a new phrase and a fresh salt", async () => {
   const first = await createEnvelope(normalizePhrase("one"), "phrase", CHEAP);
   const sealed = seal(first.dataKey, Buffer.from("secret"), aad);
-  const second = await rewrapEnvelope(first.dataKey, secretFromFile(Buffer.from("a file")), "file", CHEAP);
+  const second = await rewrapEnvelope(first.dataKey, fileSecret(Buffer.from("a file")), "file", CHEAP);
   assert.notEqual(second.kdf.salt, first.envelope.kdf.salt);
   assert.equal(second.keyId, first.envelope.keyId);
-  const dataKey = await unlockEnvelope(second, secretFromFile(Buffer.from("a file")));
+  const dataKey = await unlockEnvelope(second, fileSecret(Buffer.from("a file")));
   assert.equal(open(dataKey, sealed, aad).toString(), "secret", "what was sealed before still opens");
   await assert.rejects(unlockEnvelope(second, normalizePhrase("one")), WrongKeyError);
 });
@@ -67,6 +70,20 @@ test("sealed data opens only with its key and its context, and shows no pattern"
   assert.throws(() => open(dataKey, sealed.subarray(0, 10), aad), "so is a short value");
   assert.notDeepEqual(seal(dataKey, Buffer.from("hunter2"), aad), sealed, "each seal uses a fresh nonce");
   assert.equal(sealed.includes(Buffer.from("hunter2")), false);
+});
+
+test("an envelope's cost must be something unlocking can run: within memory and time", async () => {
+  const { envelope } = await createEnvelope(normalizePhrase("x"), "phrase", CHEAP);
+  const withCost = (kdf: { N: number; r: number; p: number }): unknown =>
+    parseEnvelope({ ...envelope, kdf: { ...envelope.kdf, ...kdf } });
+  assert.ok(withCost({ N: 1 << 15, r: 8, p: 1 }), "the default");
+  assert.ok(withCost({ N: 1 << 18, r: 8, p: 1 }), "a much dearer one, 256 MiB");
+  assert.equal(withCost({ N: 1 << 20, r: 8, p: 1 }), null, "1 GiB of memory");
+  assert.equal(withCost({ N: 1 << 19, r: 32, p: 1 }), null, "2 GiB of memory");
+  assert.equal(withCost({ N: 1 << 16, r: 32, p: 16 }), null, "far too slow");
+  // Everything accepted can be run by crypto.scrypt.
+  const accepted = withCost({ N: 1 << 18, r: 8, p: 1 }) as typeof envelope;
+  await assert.rejects(unlockEnvelope(accepted, normalizePhrase("x")), WrongKeyError, "wrong key, not a limit error");
 });
 
 test("an envelope is read back only if it is well formed and its cost is sane", async () => {
@@ -139,18 +156,18 @@ test("an envelope with its wrapped key altered is a wrong key, not a crash", asy
   );
 });
 
-test("a key file is hashed the same whether it is read whole or in pieces, whatever its size", async () => {
+test("a key file stands in by the SHA-256 of its contents, read in pieces, whatever its size", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-keyfile-"));
   try {
     const small = path.join(dir, "small");
     fs.writeFileSync(small, Buffer.from([0, 1, 2, 255]));
-    assert.deepEqual(await secretFromFilePath(small), secretFromFile(Buffer.from([0, 1, 2, 255])));
+    assert.deepEqual(await secretFromFilePath(small), fileSecret(Buffer.from([0, 1, 2, 255])));
 
     // Bigger than a stream's read size and than any limit a key file would reasonably have.
     const big = path.join(dir, "big");
     const contents = Buffer.alloc(20 * 1024 * 1024, "moolin");
     fs.writeFileSync(big, contents);
-    assert.deepEqual(await secretFromFilePath(big), secretFromFile(contents));
+    assert.deepEqual(await secretFromFilePath(big), fileSecret(contents));
 
     await assert.rejects(secretFromFilePath(path.join(dir, "missing")));
   } finally {

@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./file-modes";
 import { countLineFeeds } from "./line-feeds";
-import { PLAIN, convertLog, encodeRecord, formatOf, headerFor, prepareForAppend, readLogHistory } from "./log-format";
+import { PLAIN, convertLog, encodeRecord, prepareForAppend, readLogHistory } from "./log-format";
 import type { LogHistory, LogMode } from "./log-format";
 import type { Character, World } from "./worlds-types";
 import { characterLabel, worldLabel } from "./world-utils";
@@ -90,8 +90,7 @@ function writeAll(fd: number, bytes: Uint8Array): void {
   while (written < bytes.length) written += fs.writeSync(fd, bytes, written);
 }
 
-// Opens a file for appending, readable by its owner alone. A log written by an
-// earlier version is tightened too.
+// Opens a file for appending, readable by its owner alone.
 function openPrivate(file: string): number {
   const fd = fs.openSync(file, "a", PRIVATE_FILE_MODE);
   try {
@@ -114,16 +113,16 @@ export class SessionLog {
   // Whether the file has been brought to this log's mode and mended after a
   // crash (see prepare).
   private prepared = false;
-  private readonly header: string;
+  // The file's header and the next record's number, known once prepared.
+  private header = "";
+  private nextSeq = 0;
 
   constructor(
     readonly file: string,
     private readonly mode: LogMode,
     private readonly release: () => void,
     private readonly onError: (error: Error) => void,
-  ) {
-    this.header = headerFor(formatOf(mode));
-  }
+  ) {}
 
   // What the log already holds, plus each line's arrival time, for
   // pre-populating the scrollback. Call before the first append. Empty if the
@@ -152,7 +151,8 @@ export class SessionLog {
         this.fd = openPrivate(this.file);
       }
       const times = new Array<number | null>(countLineFeeds(bytes)).fill(time);
-      writeAll(this.fd, Buffer.from(encodeRecord(this.mode, this.header, bytes, times), "latin1"));
+      writeAll(this.fd, Buffer.from(encodeRecord(this.mode, this.header, this.nextSeq, bytes, times), "latin1"));
+      this.nextSeq++;
     } catch (error) {
       this.fail(error as Error);
     }
@@ -178,14 +178,14 @@ export class SessionLog {
     return !this.closed;
   }
 
-  // Before the log is first read or appended to: creates its folder, brings an
-  // older log (or one in the other mode) to this mode, and cuts off a last
-  // line a crash left unfinished.
+  // Before the log is first read or appended to: creates its folder, brings a
+  // log in the other mode to this mode, and cuts off a last line a crash left
+  // unfinished.
   private prepare(): void {
     if (this.prepared) return;
     fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: PRIVATE_DIR_MODE });
     convertLog(this.file, this.mode, this.mode.kind === "encrypted" ? this.mode.dataKey : null);
-    prepareForAppend(this.file, this.mode);
+    ({ header: this.header, nextSeq: this.nextSeq } = prepareForAppend(this.file, this.mode));
     this.prepared = true;
   }
 
@@ -202,6 +202,7 @@ export class SessionLog {
 // log reads and writes it, so output isn't logged once per window.
 export class SessionLogRegistry {
   private readonly owned = new Set<string>();
+  private paused = false;
 
   // `modeNow` says how logs are written right now: plain, or encrypted with a
   // key, or null while the key is not available (then no log can be claimed).
@@ -215,11 +216,25 @@ export class SessionLogRegistry {
     return this.owned.size > 0;
   }
 
+  // While logs are being converted or the way they are written is changing, no
+  // window may claim one (it would read or write a file mid-conversion, or in
+  // the mode being left). Refuses while one is held. Always `resume` after.
+  pause(): boolean {
+    if (this.owned.size > 0) return false;
+    this.paused = true;
+    return true;
+  }
+
+  resume(): void {
+    this.paused = false;
+  }
+
   // The log identified by `key` (see logKeyFor), or null if another window
   // already owns it. `locate` finds its file, and is only called once the
   // claim succeeds, since it may rename folders the owner is writing in.
   claim(key: string, locate: () => string): SessionLog | null {
     if (this.owned.has(key)) return null;
+    if (this.paused) throw new Error("Moolin is changing its encryption settings: try again in a moment");
     const mode = this.modeNow();
     if (!mode) throw new Error("the logs are locked: unlock Moolin to log");
     this.owned.add(key);

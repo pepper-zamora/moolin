@@ -1,14 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { normalizePhrase, secretFromFile } from "./crypto-keys";
+import { normalizePhrase } from "./crypto-keys";
 import { PLAIN, inspectLog, readLogHistory } from "./log-format";
 import { Security } from "./security";
 import { SessionLogRegistry } from "./session-log";
 import { newCharacter, newWorld } from "./world-utils";
 import { readWorldsFile, saveWorlds } from "./worlds";
+
+// What a key file with these contents stands in for: their SHA-256.
+const fileSecret = (contents: string | Uint8Array): Buffer => crypto.createHash("sha256").update(contents).digest();
 
 const CHEAP = { N: 1 << 14, r: 8, p: 1 };
 const text = (history: { bytes: Uint8Array }): string => Buffer.from(history.bytes).toString();
@@ -95,11 +99,11 @@ test("after a restart it is locked, a wrong phrase is refused, and the right one
 test("a key file works the same way, by its contents", async () => {
   const t = setup();
   const file = Buffer.from("any bytes at all \x00\xff");
-  await t.make().enable(secretFromFile(file), "file");
+  await t.make().enable(fileSecret(file), "file");
   const s = t.make();
   assert.deepEqual(s.info(), { state: "locked", keySource: "file" });
-  assert.equal((await s.unlock(secretFromFile(Buffer.from("other")))).ok, false);
-  assert.equal((await s.unlock(secretFromFile(Buffer.from(file)))).ok, true);
+  assert.equal((await s.unlock(fileSecret(Buffer.from("other")))).ok, false);
+  assert.equal((await s.unlock(fileSecret(Buffer.from(file)))).ok, true);
 });
 
 test("changing the phrase keeps everything readable, under the new phrase only", async () => {
@@ -116,7 +120,7 @@ test("changing the phrase keeps everything readable, under the new phrase only",
   assert.equal(text(readLogHistory(t.logFile, restarted.logMode() as never, 1000)), "said in private\r\n");
 
   // From a phrase to a key file, too.
-  assert.equal((await restarted.change(secretFromFile(Buffer.from("f")), "file")).ok, true);
+  assert.equal((await restarted.change(fileSecret(Buffer.from("f")), "file")).ok, true);
   assert.equal(t.make().info().keySource, "file");
 });
 
@@ -131,7 +135,7 @@ test("turning it off puts the passwords and logs back, and ends the lock", async
   const t = setup();
   const s = t.make();
   await s.enable(phrase("a"), "phrase");
-  assert.deepEqual(await s.disable(), { ok: true, warnings: [] });
+  assert.deepEqual(await s.disable(), { ok: true });
   assert.deepEqual(s.info(), { state: "off", keySource: null });
   assert.equal(s.dataKey, null);
   assert.ok(fs.readFileSync(t.worldsPath, "utf8").includes("pw-marker"));
@@ -184,9 +188,77 @@ test("a log it could not convert is a warning, not a failure", async () => {
   const t = setup();
   const stranger = path.join(t.logRoot, "w9.Other", "moolin.log");
   fs.mkdirSync(path.dirname(stranger), { recursive: true });
-  fs.writeFileSync(stranger, "MOOLIN-LOG 1 encrypted 0123456789abcdef\nAAAA\n");
+  fs.writeFileSync(stranger, "MOOLIN-LOG 1 encrypted 0123456789abcdef fedcba9876543210\nAAAA\n");
   const outcome = await t.make().enable(phrase("a"), "phrase");
   assert.equal(outcome.ok, true);
   assert.equal(outcome.warnings?.length, 1);
   assert.match(outcome.warnings?.[0] ?? "", /different key/);
+});
+
+test("turning it off is refused, and encryption stays on, while a log can't be converted back", async () => {
+  const t = setup();
+  const s = t.make();
+  await s.enable(phrase("a"), "phrase");
+  // A log sealed under some other key: reading it back to plain is impossible.
+  const stranger = path.join(t.logRoot, "w9.Other", "moolin.log");
+  fs.mkdirSync(path.dirname(stranger), { recursive: true });
+  const header = "MOOLIN-LOG 1 encrypted 0123456789abcdef fedcba9876543210\n";
+  fs.writeFileSync(stranger, `${header}0 AAAA\n`);
+
+  const outcome = await s.disable();
+  assert.equal(outcome.ok, false);
+  assert.match(outcome.error ?? "", /left on/);
+  assert.match(outcome.error ?? "", /w9\.Other/);
+  assert.equal(s.state(), "unlocked", "still on, with its key");
+  assert.equal(readWorldsFile(t.worldsPath, s.dataKey).state.worlds[0].characters[0].password, "pw-marker");
+  assert.equal(fs.readFileSync(t.worldsPath, "utf8").includes("pw-marker"), false, "still sealed");
+  assert.ok(t.make().info().state === "locked", "a restart still finds it on");
+
+  // Without the log in the way, it can be turned off.
+  fs.rmSync(stranger);
+  assert.equal((await s.disable()).ok, true);
+});
+
+test("no window can claim a log while encryption is being turned on, off or unlocked", async () => {
+  const t = setup();
+  const s = t.make();
+  const claimNow = (): unknown => {
+    try {
+      return t.registry.claim("c1", () => t.logFile);
+    } catch (error) {
+      return error;
+    }
+  };
+  const pending = s.enable(phrase("a"), "phrase");
+  const during = claimNow();
+  assert.ok(during instanceof Error && /changing its encryption/.test(during.message), "during the key derivation");
+  assert.equal((await pending).ok, true);
+  const after = claimNow();
+  assert.ok(after && !(after instanceof Error), "free again afterwards");
+  (after as { close(): void }).close();
+
+  const restarted = t.make();
+  const unlocking = restarted.unlock(phrase("a"));
+  const duringUnlock = claimNow();
+  assert.ok(duringUnlock instanceof Error, "claims are refused while locked or unlocking");
+  assert.equal((await unlocking).ok, true);
+
+  const disabling = restarted.disable();
+  assert.ok(claimNow() instanceof Error, "while turning it off");
+  assert.equal((await disabling).ok, true);
+  const last = claimNow();
+  assert.ok(last && !(last instanceof Error));
+  (last as { close(): void }).close();
+});
+
+test("unlocking finishes a conversion that was stopped part-way before it returns", async () => {
+  const t = setup();
+  await t.make().enable(phrase("a"), "phrase");
+  // A log left plain, as if the conversion had stopped before reaching it.
+  const unconverted = path.join(t.logRoot, "w9.Other", "moolin.log");
+  fs.mkdirSync(path.dirname(unconverted), { recursive: true });
+  fs.writeFileSync(unconverted, "MOOLIN-LOG 1 plain\n");
+  const s = t.make();
+  assert.equal((await s.unlock(phrase("a"))).ok, true);
+  assert.match(fs.readFileSync(unconverted, "utf8"), /^MOOLIN-LOG 1 encrypted /);
 });

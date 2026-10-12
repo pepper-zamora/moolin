@@ -4,6 +4,7 @@
 // sent to the main process once and kept nowhere here; a key file is chosen in
 // a picker main shows, so no path passes through the page.
 import type { Outcome, SecurityDialogMode, SecurityInfo } from "./security";
+import { MAX_PHRASE_LENGTH } from "./security-limits";
 
 function element<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -54,6 +55,14 @@ let finished = false;
 
 function show(el: HTMLElement, visible: boolean): void {
   el.hidden = !visible;
+}
+
+// Whether a form still makes sense in a state: setting up needs encryption off,
+// unlocking needs it locked, and changing or managing it needs it unlocked.
+function appliesTo(form: View, state: SecurityInfo["state"]): boolean {
+  if (form === "offer" || form === "setup") return state === "off";
+  if (form === "unlock") return state === "locked";
+  return state === "unlocked";
 }
 
 function render(): void {
@@ -209,6 +218,17 @@ stopButton.addEventListener("click", () => void run(() => window.moolin.security
 
 cancel.addEventListener("click", () => dialog.close());
 
+// The inputs stop taking text at the longest phrase main accepts. Reaching it
+// says so (a paste is cut off silently otherwise), and typing less clears that.
+const FULL_MESSAGE = `That is as long as a key phrase can be (${MAX_PHRASE_LENGTH} characters).`;
+for (const input of [phraseInput, confirmInput, unlockPhrase]) {
+  input.maxLength = MAX_PHRASE_LENGTH;
+  input.addEventListener("input", () => {
+    if (input.value.length >= MAX_PHRASE_LENGTH) showError(FULL_MESSAGE);
+    else if (errorEl.textContent === FULL_MESSAGE) showError(null);
+  });
+}
+
 phraseInput.addEventListener("input", () => {
   hint.textContent =
     phraseInput.value.length > 0 && phraseInput.value.length < SHORT_PHRASE
@@ -234,9 +254,17 @@ export const encryptionDialog = {
   },
 
   // Lets the dialog know the state, which the manage view describes.
+  // Closes a form that no longer applies because another window changed the
+  // state (unlocking in one window leaves the others' unlock forms stale).
   setInfo(next: SecurityInfo): void {
     info = next;
-    if (dialog.open) render();
+    if (!dialog.open) return;
+    if (!working && !finished && !appliesTo(view, next.state)) {
+      answered = true; // not the user's answer, so an offer isn't declined
+      dialog.close();
+      return;
+    }
+    render();
   },
 
   open(mode: SecurityDialogMode): void {

@@ -1,15 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { secretFromFile } from "./crypto-keys";
 import { readKeyFile, unlockWithKeyFile } from "./key-file";
 import { PLAIN } from "./log-format";
 import { Security } from "./security";
 import { SessionLogRegistry } from "./session-log";
 import { newCharacter, newWorld } from "./world-utils";
 import { saveWorlds } from "./worlds";
+
+// What a key file with these contents stands in for: their SHA-256.
+const fileSecret = (contents: string | Uint8Array): Buffer => crypto.createHash("sha256").update(contents).digest();
 
 const CHEAP = { N: 1 << 14, r: 8, p: 1 };
 
@@ -35,7 +38,7 @@ test("a key file reads as the hash of its contents", async () => {
   try {
     const file = path.join(dir, "key");
     fs.writeFileSync(file, Buffer.from([0, 1, 2, 255]));
-    assert.deepEqual(await readKeyFile(file), { secret: secretFromFile(Buffer.from([0, 1, 2, 255])) });
+    assert.deepEqual(await readKeyFile(file), { secret: fileSecret(Buffer.from([0, 1, 2, 255])) });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -60,7 +63,7 @@ test("a remembered key file unlocks a locked install", async () => {
     const file = path.join(dir, "key");
     fs.writeFileSync(file, "stick contents");
     const make = securityIn(dir);
-    await make().enable(secretFromFile(Buffer.from("stick contents")), "file");
+    await make().enable(fileSecret(Buffer.from("stick contents")), "file");
     const restarted = make();
     assert.equal(restarted.state(), "locked");
     assert.equal(await unlockWithKeyFile(restarted, file), "unlocked with the remembered key file");
@@ -76,7 +79,7 @@ test("a remembered key file that is gone, empty or wrong leaves it locked, sayin
     const file = path.join(dir, "key");
     fs.writeFileSync(file, "stick contents");
     const make = securityIn(dir);
-    await make().enable(secretFromFile(Buffer.from("stick contents")), "file");
+    await make().enable(fileSecret(Buffer.from("stick contents")), "file");
 
     const s = make();
     assert.match(
@@ -98,7 +101,7 @@ test("there is nothing to try when no file is remembered, or it is not locked", 
   try {
     const make = securityIn(dir);
     assert.equal(await unlockWithKeyFile(make(), "/some/file"), null, "encryption is off");
-    await make().enable(secretFromFile(Buffer.from("x")), "file");
+    await make().enable(fileSecret(Buffer.from("x")), "file");
     assert.equal(await unlockWithKeyFile(make(), null), null, "no file remembered");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
