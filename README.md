@@ -544,8 +544,9 @@ local test server, and drives it over the Chrome DevTools Protocol:
 clicking, selecting, copying and typing, and checking where keyboard focus
 goes, that typed commands reach the server, what copying a wrapped or
 partial selection gives, Clear Screen, a Pueblo world's links, and the
-encryption flows (the first-run offer, turning it on, unlocking and logging
-encrypted). Its windows appear on screen while it
+encryption flows (the first-run offer, turning it on, unlocking, logging
+encrypted and changing the key phrase). The key file picker and the stop
+confirmation are native dialogs it can't drive, so unit tests cover those. Its windows appear on screen while it
 runs (a few seconds), so it needs a real display; on headless Linux use
 `xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
 work but hasn't been tried. To check a packaged build instead, point

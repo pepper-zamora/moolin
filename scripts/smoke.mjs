@@ -753,6 +753,32 @@ try {
     // What the window shows is still the plain text.
     expectEqual(await enc.evaluate("document.getElementById('terminal').textContent.includes('Welcome to the smoke test')"), true, "the scrollback");
   });
+  await check("changing the key phrase keeps the data key: the old phrase stops working, the new one unlocks", async () => {
+    const keyIdOf = () => JSON.parse(fs.readFileSync(worldsFile, "utf8")).encryption.keyId;
+    const before = keyIdOf();
+    await enc.evaluate("document.getElementById('encryption-status').click()");
+    await waitFor("the manage view", async () => (await dialogOpen(enc)) && (await text(enc, "enc-title")) === "Encryption is on", 3000);
+    await enc.evaluate("document.getElementById('enc-change-btn').click()");
+    await waitFor("the change form", async () => (await text(enc, "enc-title")) === "Change the key phrase or file", 3000);
+    await fill(enc, "enc-phrase", "the second phrase");
+    await fill(enc, "enc-confirm", "the second phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the change to finish", async () => !(await dialogOpen(enc)), 15000);
+    expectEqual(keyIdOf(), before, "the same data key");
+    const character = JSON.parse(fs.readFileSync(worldsFile, "utf8")).worlds[0].characters[0];
+    expectEqual(typeof character.passwordEncrypted, "string", "still sealed");
+
+    enc = await restartApp();
+    await waitFor("the unlock dialog", () => dialogOpen(enc), 5000);
+    await fill(enc, "enc-unlock-phrase", "smoke test key phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the old phrase to be refused", async () => (await text(enc, "enc-error")).includes("doesn't match"), 5000);
+    await fill(enc, "enc-unlock-phrase", "the second phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("unlocking", async () => !(await dialogOpen(enc)), 5000);
+    const loaded = await enc.evaluate("window.moolin.worlds.load().then((r) => r.worlds[0].characters[0].password)");
+    expectEqual(loaded, "guest", "the password, read back");
+  });
 } catch (error) {
   results.push({ name: "setup", ok: false });
   console.log(`  FAIL  setup: ${error.message}`);
