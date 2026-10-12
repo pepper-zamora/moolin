@@ -473,8 +473,8 @@ Beyond that, it's up to you:
 
 ## Preferences
 
-Worlds → Preferences… (Ctrl+,, Cmd+, on macOS) opens a dialog for app-wide settings: whether to show
-timestamps, whether to check for updates at startup, and the terminal's
+Worlds → Preferences… (Ctrl+,, Cmd+, on macOS) opens a dialog for app-wide settings: whether to check
+for updates at startup, whether to show timestamps, and the terminal's
 default font, size (a slider that moves in the steps Ctrl+= and Ctrl+-
 do), weight (Light, Regular, Medium or Bold), width (Condensed, Normal or
 Expanded) and Italic. The weight and italic are the base the server's own

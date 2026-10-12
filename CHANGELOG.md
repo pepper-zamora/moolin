@@ -22,7 +22,7 @@ renames that section to the new version and date.
   Ctrl+= and Ctrl+- do (8 to 32, by 2), with the chosen size shown beside it.
   It is remembered between sessions, as the size was before.
 - A Preferences dialog (Worlds → Preferences…, or Ctrl+,/Cmd+,), replacing
-  the placeholder: show timestamps, check for updates at startup, and the
+  the placeholder: check for updates at startup, show timestamps, and the
   terminal's default font and size, with a live sample of each curated font.
 - A freshly opened window now sizes itself to show 80x25 characters at its
   starting font, centered on screen, instead of a fixed size.
