@@ -114,12 +114,14 @@ from source never check at startup.
   `3f2a9c1e.LambdaMOO/7b0d44aa.Cowpernica/`, so worlds with the same name (or
   names differing only in case) get folders of their own, and renaming a
   world or character renames its folder to match. Connecting pre-populates
-  the scrollback with the last 2 MiB of the log. A log belongs to one window
-  at a time: the first window to connect to a world and character reads and
-  writes it until it disconnects (its last line is the "disconnected" one),
-  and other windows connected meanwhile don't log. The status bar shows which: a scroll beside
-  the security shield when the window is logging, a red "no" sign when
-  another window has the log. The log grows without bound for now; delete or
+  the scrollback with the last 2 MiB of the log. A character has one log,
+  shared by every window connected to it. Servers that allow several
+  connections to one character send all of its output to each, so a line that
+  several windows receive within five seconds of each other is written once
+  (lines that differ between connections, or an unfinished line such as a
+  prompt, can still appear more than once). The status bar shows a scroll
+  beside the security shield when the window is logging, and a red "no" sign
+  when it couldn't open the log. The log grows without bound for now; delete or
   prune it as a whole. It isn't plain text: its first line says what it is
   (`MOOLIN-LOG 1 plain`), and every line after it is a numbered base64 record
   holding what was shown and when each line arrived, so a server that sends
@@ -591,7 +593,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
 | `src/ipc-validate.ts`     | Checks on every message the window sends the main process (sizes, addresses, text, ...) |
 | `src/file-modes.ts`       | The owner-only permissions for the worlds file and session logs            |
-| `src/session-log.ts`      | Persistent per-world/character logs and which window owns each              |
+| `src/session-log.ts`      | Persistent per-world/character logs, shared by the windows using each       |
 | `src/security-limits.ts`  | The longest key phrase, shared by the dialog and the check on what it sends |
 | `src/security.ts`         | Whether encryption is on, locked or unlocked; turning it on, off or changing the key |
 | `src/encryption-dialog.ts` | The dialog for the first-run offer, unlocking and managing encryption  |
@@ -599,6 +601,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting between modes |
 | `src/key-file.ts`         | Reading a key file, and unlocking with the one Moolin remembers            |
 | `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
+| `src/line-dedupe.ts`      | Keeps one copy of a line when several connections to a character get it    |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
 | `src/renderer.ts`         | The terminal window's page: wires the scrollback, gutter, input area, status bar and keys together |

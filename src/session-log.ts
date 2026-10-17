@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./file-modes";
 import { countLineFeeds } from "./line-feeds";
+import { LineDeduper } from "./line-dedupe";
 import { PLAIN, convertLog, encodeRecord, prepareForAppend, readLogHistory } from "./log-format";
 import type { LogHistory, LogMode } from "./log-format";
 import type { Character, World } from "./worlds-types";
@@ -77,8 +78,8 @@ export function locateLogFile(root: string, world: World, character: Character |
   return path.join(dir, LOG_FILE_NAME);
 }
 
-// What claims a world/character's log: by id, so a rename (which moves the
-// folder) can't let two windows write the same files.
+// What identifies a world/character's log: by id, so a rename (which moves the
+// folder) can't give the same log two keys.
 export function logKeyFor(world: World, character: Character | null): string {
   return character ? `${world.id}/${character.id}` : world.id;
 }
@@ -101,7 +102,8 @@ function openPrivate(file: string): number {
   return fd;
 }
 
-// An open, append-only log file that one window owns, in the format described
+// An open, append-only log file, shared by the windows connected to its
+// character (see SessionLogRegistry), in the format described
 // in log-format.ts: plain, or sealed with the data key, whichever `mode` says.
 //
 // Writes are synchronous so a window that reads the log straight after
@@ -158,7 +160,7 @@ export class SessionLog {
     }
   }
 
-  // Closes the file and gives up ownership, letting another window claim it.
+  // Closes the file, and tells the registry it is no longer open.
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -197,30 +199,104 @@ export class SessionLog {
   }
 }
 
-// Hands out each log to at most one window at a time. Several windows can be
-// connected to the same world and character; only the first to claim the
-// log reads and writes it, so output isn't logged once per window.
+// A log's file with the windows writing it. Windows connected to the same
+// world and character share one, so the character has one history; the lines
+// each window receives are written once (see LineDeduper).
+class SharedLog {
+  readonly dedupe = new LineDeduper();
+  // How many windows are attached.
+  users = 0;
+
+  constructor(readonly log: SessionLog) {}
+}
+
+// What a window holds of a shared log, from attaching to it until `close`.
+export class LogAttachment {
+  private closed = false;
+
+  constructor(
+    private readonly shared: SharedLog,
+    private readonly clock: () => number,
+  ) {
+    shared.users++;
+  }
+
+  get file(): string {
+    return this.shared.log.file;
+  }
+
+  // False once closed, and once the log has stopped on a disk error.
+  get isOpen(): boolean {
+    return !this.closed && this.shared.log.isOpen;
+  }
+
+  history(maxBytes: number): LogHistory {
+    return this.shared.log.history(maxBytes);
+  }
+
+  // Appends what the window was shown. With another window attached, only the
+  // lines that window hasn't already written are, and the unfinished end of the
+  // output waits for its line feed. A line with no time is Moolin's own, so it
+  // is written as it is, after whatever the window was waiting to write.
+  append(data: string | Uint8Array, time: number | null): void {
+    if (!this.isOpen) return;
+    const { log, dedupe, users } = this.shared;
+    if (users < 2) {
+      log.append(data, time);
+      return;
+    }
+    const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+    if (time === null) {
+      log.append(dedupe.flush(this), this.clock());
+      log.append(bytes, null);
+    } else {
+      log.append(dedupe.push(this, bytes, this.clock()), time);
+    }
+  }
+
+  // Stops writing. The last window to leave closes the file; one leaving with
+  // a single window left writes what both were holding, since there is nothing
+  // left to match it against.
+  close(): void {
+    if (this.closed) return;
+    const wasOpen = this.isOpen;
+    this.closed = true;
+    const { log, dedupe } = this.shared;
+    if (wasOpen && this.shared.users >= 2) {
+      log.append(dedupe.leave(this), this.clock());
+      if (this.shared.users === 2) log.append(dedupe.flushAll(), this.clock());
+    }
+    if (--this.shared.users === 0) log.close();
+  }
+}
+
+// Hands out each world/character's log, which every window connected to it
+// attaches to; the file is closed when the last one leaves. Windows can't
+// write a file at the same time, and the lines every connection of a character
+// receives would be logged once per window, so the windows share one log and
+// the copies of a line are dropped on the way in.
 export class SessionLogRegistry {
-  private readonly owned = new Set<string>();
+  private readonly open = new Map<string, SharedLog>();
   private paused = false;
 
   // `modeNow` says how logs are written right now: plain, or encrypted with a
-  // key, or null while the key is not available (then no log can be claimed).
+  // key, or null while the key is not available (then no log can be opened).
   constructor(
     private readonly onError: (file: string, error: Error) => void = () => {},
     private readonly modeNow: () => LogMode | null = () => PLAIN,
+    private readonly clock: () => number = Date.now,
   ) {}
 
-  // Whether any window holds a log, which stops the logs being converted.
-  anyOwned(): boolean {
-    return this.owned.size > 0;
+  // Whether any log is open, which stops the logs being converted.
+  anyOpen(): boolean {
+    return this.open.size > 0;
   }
 
   // While logs are being converted or the way they are written is changing, no
-  // window may claim one (it would read or write a file mid-conversion, or in
-  // the mode being left). Refuses while one is held. Always `resume` after.
+  // window may attach to one (it would read or write a file mid-conversion, or in
+  // the mode being left). Refuses while one is open. Always `resume` after.
   pause(): boolean {
-    if (this.owned.size > 0) return false;
+    if (this.open.size > 0) return false;
     this.paused = true;
     return true;
   }
@@ -229,53 +305,51 @@ export class SessionLogRegistry {
     this.paused = false;
   }
 
-  // The log identified by `key` (see logKeyFor), or null if another window
-  // already owns it. `locate` finds its file, and is only called once the
-  // claim succeeds, since it may rename folders the owner is writing in.
-  claim(key: string, locate: () => string): SessionLog | null {
-    if (this.owned.has(key)) return null;
-    if (this.paused) throw new Error("Moolin is changing its encryption settings: try again in a moment");
-    const mode = this.modeNow();
-    if (!mode) throw new Error("the logs are locked: unlock Moolin to log");
-    this.owned.add(key);
-    let file: string;
-    try {
-      file = locate();
-    } catch (error) {
-      this.owned.delete(key);
-      throw error;
+  // The log identified by `key` (see logKeyFor), opened if no window has it
+  // open. `locate` finds its file, and is only called when it is opened, since
+  // it may rename folders a window already attached would be writing in.
+  attach(key: string, locate: () => string): LogAttachment {
+    let shared = this.open.get(key);
+    if (!shared) {
+      if (this.paused) throw new Error("Moolin is changing its encryption settings: try again in a moment");
+      const mode = this.modeNow();
+      if (!mode) throw new Error("the logs are locked: unlock Moolin to log");
+      const file = locate();
+      const log: SessionLog = new SessionLog(
+        file,
+        mode,
+        () => {
+          if (this.open.get(key)?.log === log) this.open.delete(key);
+        },
+        (error) => this.onError(file, error),
+      );
+      shared = new SharedLog(log);
+      this.open.set(key, shared);
     }
-    return new SessionLog(
-      file,
-      mode,
-      () => this.owned.delete(key),
-      (error) => this.onError(file, error),
-    );
+    return new LogAttachment(shared, this.clock);
   }
 }
 
-// The log one window writes to. A window claims its target's log as it
-// connects and releases it when the connection ends (or the window closes),
-// so another window can then take it over. A window that finds the log
-// already taken shows no history and logs nothing.
+// The log one window writes to. A window attaches to its target's log as it
+// connects and lets go of it when the connection ends (or the window closes).
 export class WindowLog {
-  private log: SessionLog | null = null;
+  private log: LogAttachment | null = null;
 
   constructor(
     private readonly registry: SessionLogRegistry,
     private readonly root: string,
   ) {}
 
-  // Releases any log held, then claims `world`/`character`'s. Returns up to
-  // `maxBytes` of its history to show, or nothing if another window has it.
+  // Lets go of any log held, then attaches to `world`/`character`'s. Returns up
+  // to `maxBytes` of its history to show.
   open(world: World, character: Character | null, maxBytes: number): LogHistory {
     this.release();
-    this.log = this.registry.claim(logKeyFor(world, character), () => locateLogFile(this.root, world, character));
-    return this.log ? this.log.history(maxBytes) : { bytes: new Uint8Array(), times: [] };
+    this.log = this.registry.attach(logKeyFor(world, character), () => locateLogFile(this.root, world, character));
+    return this.log.history(maxBytes);
   }
 
-  // Whether this window holds a log (and so is writing to it).
-  get owned(): boolean {
+  // Whether this window is writing a log.
+  get logging(): boolean {
     return this.log?.isOpen ?? false;
   }
 

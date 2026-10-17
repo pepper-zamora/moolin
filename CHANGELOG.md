@@ -62,6 +62,14 @@ renames that section to the new version and date.
 
 ### Changed
 
+- **Windows connected to the same character now share one log.** Before, the
+  first window to connect owned the log and the others logged nothing and
+  started with no history. Now every window logs and reads the same history,
+  and a line that several windows receive within five seconds of each other
+  is written once, since servers that allow several connections to a
+  character send all of its output to each. Closing one window no longer
+  stops logging for the others. The status bar's "no" sign now means the log
+  couldn't be opened (locked, or a disk error).
 - **The scrollback is rewritten**, no longer built on xterm.js: each server
   line is a real line of text in the page, which the browser wraps, selects
   and scrolls, with its own parser for colours and attributes. It keeps the

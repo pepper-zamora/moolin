@@ -23,7 +23,7 @@ async function encryptedMode(phrase = "x"): Promise<LogMode & { kind: "encrypted
 }
 
 function writeLog(file: string, mode: LogMode, body: string): void {
-  const log = new SessionLogRegistry(undefined, () => mode).claim(file, () => file);
+  const log = new SessionLogRegistry(undefined, () => mode).attach(file, () => file);
   assert.ok(log);
   log.history(1);
   log.append(body, 1);
@@ -117,7 +117,7 @@ test("a log that can't be converted is reported and left alone, and the rest are
 test("nothing is converted while a window is writing a log", async () => {
   const { root, files } = tree();
   const registry = new SessionLogRegistry();
-  const open = registry.claim("w1", () => files[0]);
+  const open = registry.attach("w1", () => files[0]);
   assert.ok(open);
   await assert.rejects(convertAllLogs(root, PLAIN, null, registry), /Disconnect every window/);
   open.close();
@@ -129,14 +129,14 @@ test("a window that connects while logs are being converted stops the conversion
   const { root, files } = tree();
   for (const [i, file] of files.entries()) writeLog(file, PLAIN, `log ${i}\r\n`);
   const registry = new SessionLogRegistry();
-  const claimed: Array<NonNullable<ReturnType<SessionLogRegistry["claim"]>>> = [];
+  const attached: Array<NonNullable<ReturnType<SessionLogRegistry["attach"]>>> = [];
   await assert.rejects(
     convertAllLogs(root, mode, null, registry, (done) => {
-      const log = done === 1 ? registry.claim("w", () => files[2]) : null;
-      if (log) claimed.push(log);
+      const log = done === 1 ? registry.attach("w", () => files[2]) : null;
+      if (log) attached.push(log);
     }),
     /connected while/,
   );
-  for (const log of claimed) log.close();
+  for (const log of attached) log.close();
   assert.deepEqual(inspectLog(files[2]), { kind: "plain" }, "the later logs were left alone");
 });

@@ -145,11 +145,11 @@ export class TerminalWindow {
     if (!this.window.isDestroyed()) this.window.webContents.send(channel, ...args);
   }
 
-  // Switches to `target`'s log. If this window gets to own it, the scrollback
-  // is replaced by the log's tail; otherwise (another window is connected to
-  // the same world/character and logging it) the window starts empty and
-  // doesn't log, so nothing is recorded twice. The status bar shows which
-  // (see getState).
+  // Switches to `target`'s log, shared with any other window connected to the
+  // same world and character (it keeps one copy of each line they all receive),
+  // and replaces the scrollback with the log's tail. If the log can't be
+  // opened the window starts empty and doesn't log; the status bar shows
+  // whether it is logging (see getState).
   private startLog(target: ConnectTarget): void {
     let history: LogHistory = { bytes: new Uint8Array(), times: [] };
     let unavailable: string | null = null;
@@ -160,7 +160,7 @@ export class TerminalWindow {
       unavailable = (error as Error).message;
       log("error", "main", `window ${this.window.id} log unavailable:`, unavailable);
     }
-    log("debug", "main", `window ${this.window.id} log`, this.sessionLog.file ?? "owned by another window");
+    log("debug", "main", `window ${this.window.id} log`, this.sessionLog.file ?? "none");
     this.scrollback.reset(history.bytes.length > 0 ? [history.bytes] : [], history.times);
     this.seq++;
     this.send(IpcChannels.terminalReset, this.getScrollback());
@@ -181,7 +181,7 @@ export class TerminalWindow {
   }
 
   // Appends to the scrollback, both live and in the replay buffer, and to the
-  // session log if this window owns one. `time` is the line's arrival time, or
+  // session log if this window is writing one. `time` is the line's arrival time, or
   // null for lines that carry no timestamp.
   private write(data: TerminalChunk, time: number | null): void {
     this.sessionLog.append(data, time);
@@ -191,7 +191,7 @@ export class TerminalWindow {
 
   getState(): WindowState {
     const connection = this.connection.getState();
-    return { ...connection, logging: connection.status !== "disconnected" && this.sessionLog.owned };
+    return { ...connection, logging: connection.status !== "disconnected" && this.sessionLog.logging };
   }
 
   getScrollback(): ScrollbackReplay {

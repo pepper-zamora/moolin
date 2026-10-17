@@ -63,7 +63,7 @@ export async function convertAllLogs(
   registry: SessionLogRegistry,
   onProgress: (done: number, total: number) => void = () => {},
 ): Promise<ConvertSummary> {
-  if (registry.anyOwned()) throw new Error("Disconnect every window first: a log is being written");
+  if (registry.anyOpen()) throw new Error("Disconnect every window first: a log is being written");
   const files = findLogs(root);
   const summary: ConvertSummary = { converted: 0, unchanged: 0, failed: [] };
   for (const [index, file] of files.entries()) {
@@ -77,7 +77,7 @@ export async function convertAllLogs(
     onProgress(index + 1, files.length);
     await new Promise((resolve) => setImmediate(resolve));
     // A window may have connected while this yielded.
-    if (registry.anyOwned()) throw new Error("A window connected while the logs were being converted");
+    if (registry.anyOpen()) throw new Error("A window connected while the logs were being converted");
   }
   return summary;
 }

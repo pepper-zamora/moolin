@@ -26,9 +26,9 @@ Larger feature ideas (triggers, aliases, a mapper and so on) live in
 
   The data is already in main: `ScrollbackBuffer` (`src/scrollback-buffer.ts`)
   records every line a window receives, in memory, whether or not the session
-  log file is being written (the file is skipped when another window owns it),
-  and the log file with its `.times` sidecar (`src/session-log.ts`) is a
-  colder tier behind it when this window owns it. Today the buffer is capped
+  log file is being written, and the log file (`src/session-log.ts`, one
+  shared by every window connected to the character) is a colder tier behind
+  it. Today the buffer is capped
   at 2 MiB (`MAX_SCROLLBACK_BYTES`, `src/terminal-window.ts`) and the
   renderer replays all of it. The design:
 

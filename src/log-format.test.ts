@@ -35,7 +35,7 @@ async function encryptedMode(phrase = "x"): Promise<LogMode & { kind: "encrypted
 
 // Writes `appends` through a SessionLog in `mode`.
 function writeLog(file: string, mode: LogMode, appends: Array<[string | Uint8Array, number | null]>): void {
-  const log = new SessionLogRegistry(undefined, () => mode).claim(file, () => file);
+  const log = new SessionLogRegistry(undefined, () => mode).attach(file, () => file);
   assert.ok(log);
   log.history(1);
   for (const [data, time] of appends) log.append(data, time);
@@ -316,7 +316,7 @@ test("a session log reports a file that is not a log, and leaves it alone", () =
   const file = tempFile();
   fs.writeFileSync(file, "before\r\n");
   const registry = new SessionLogRegistry(undefined, () => PLAIN);
-  const log = registry.claim("k", () => file);
+  const log = registry.attach("k", () => file);
   assert.ok(log);
   log.append("after\r\n", 5);
   assert.equal(log.isOpen, false, "logging stopped");
