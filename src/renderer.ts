@@ -537,6 +537,7 @@ function applyConnectionState(state: WindowState): void {
   document.title = connected && state.label ? `${state.label} - ${APP_NAME}` : APP_NAME;
   inputArea.disabled = !connected;
   view.setWordWrap(state.wordWrap);
+  view.setHonorClear(state.honorClear);
   statusBar.dataset.status = state.status;
   statusMessage =
     state.status === "connected"

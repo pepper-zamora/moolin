@@ -6,8 +6,9 @@ export const DEFAULT_LOGIN_TEMPLATE = 'co "{{character}}" {{password}}\\r';
 export const DEFAULT_PORT = 7777;
 
 // Word wrap starts off (today's plain column-wrap behavior is unchanged
-// until someone opts in); echo keeps its long-standing default-on behavior.
-export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = { wordWrap: false, echoCommands: true };
+// until someone opts in); echo keeps its long-standing default-on behavior;
+// a Pueblo server's clear is ignored, as most other clients do.
+export const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = { wordWrap: false, echoCommands: true, honorClear: false };
 
 // Character → World → Global: the first override that isn't "inherit" wins,
 // else Global's plain boolean. Callers pass overrides most-specific first.
@@ -31,12 +32,20 @@ export function newWorld(id: string): World {
     loginTemplate: DEFAULT_LOGIN_TEMPLATE,
     echoCommands: "inherit",
     wordWrap: "inherit",
+    honorClear: "inherit",
     characters: [],
   };
 }
 
 export function newCharacter(id: string): Character {
-  return { id, name: "New Character", password: "", echoCommands: "inherit", wordWrap: "inherit" };
+  return {
+    id,
+    name: "New Character",
+    password: "",
+    echoCommands: "inherit",
+    wordWrap: "inherit",
+    honorClear: "inherit",
+  };
 }
 
 export function isValidPort(port: unknown): port is number {

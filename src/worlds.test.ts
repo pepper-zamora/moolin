@@ -42,6 +42,7 @@ test("parseWorld fills in defaults for fields missing from an older record", () 
     loginTemplate: DEFAULT_LOGIN_TEMPLATE,
     echoCommands: "inherit",
     wordWrap: "inherit",
+    honorClear: "inherit",
     characters: [],
   });
 });
@@ -57,7 +58,10 @@ test("parseWorld reads a fully-populated record, including characters", () => {
     loginTemplate: "co {{character}} {{password}}\\r",
     echoCommands: "off",
     wordWrap: "on",
-    characters: [{ id: "c", name: "Cowpernica", password: "pw", echoCommands: "inherit", wordWrap: "on" }],
+    honorClear: "on",
+    characters: [
+      { id: "c", name: "Cowpernica", password: "pw", echoCommands: "inherit", wordWrap: "on", honorClear: "off" },
+    ],
   };
   assert.deepEqual(parseWorld(record), { ...record, tlsAllowUntrusted: false });
 });
@@ -84,7 +88,7 @@ test("parseWorld rejects malformed records and drops malformed characters", () =
   assert.equal(parseWorld({ id: "a", characters: "none" }), null);
   const world = parseWorld({ id: "a", characters: [{ id: "c", name: "ok" }, { name: "no id" }, "junk"] });
   assert.deepEqual(world?.characters, [
-    { id: "c", name: "ok", password: "", echoCommands: "inherit", wordWrap: "inherit" },
+    { id: "c", name: "ok", password: "", echoCommands: "inherit", wordWrap: "inherit", honorClear: "inherit" },
   ]);
 });
 
@@ -95,6 +99,7 @@ test("parseGlobalSettings defaults each field independently rather than rejectin
   assert.deepEqual(parseGlobalSettings({ wordWrap: true, echoCommands: "nope" }), {
     wordWrap: true,
     echoCommands: DEFAULT_GLOBAL_SETTINGS.echoCommands,
+    honorClear: DEFAULT_GLOBAL_SETTINGS.honorClear,
   });
 });
 

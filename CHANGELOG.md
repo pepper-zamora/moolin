@@ -12,6 +12,11 @@ renames that section to the new version and date.
 
 ### Added
 
+- A "Clear the screen when a Pueblo server asks" setting (Global, with World
+  and Character able to override it). A Pueblo server's
+  `<xch_page clear=text>` is now ignored by default, since some servers send
+  one at the end of their login output and it scrolled the room description
+  away; turn the setting on to honour it again.
 - A Preferences dialog (Worlds → Preferences…, or Ctrl+,/Cmd+,), replacing
   the placeholder: show timestamps, check for updates at startup, and the
   terminal's default font and size, with a live sample of each curated font.
@@ -36,8 +41,9 @@ renames that section to the new version and date.
   answered with `PUEBLOCLIENT 2.01`, and its `<a xch_cmd>`, `<send>` and
   `<a href>` links become clickable in the scrollback (right-click a link
   with several commands to choose one; the status bar shows what a link will
-  do while the pointer is on it), with `<br>` and `<xch_page clear=text>`
-  honoured (a clear waits until something follows it) and other HTML tags
+  do while the pointer is on it), with `<br>` honoured,
+  `<xch_page clear=text>` honoured if the setting for it is on (a clear waits
+  until something follows it), and other HTML tags
   dropped; text that only looks like a tag, such as `<name>`, is shown as
   sent. `--log-level=debug` says what was dropped or cleared. See
   [PROTOCOLS.md](PROTOCOLS.md).

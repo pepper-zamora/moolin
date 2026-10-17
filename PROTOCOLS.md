@@ -206,12 +206,14 @@ to never gets the login.
   only).
 - `<br>` is a line break, and a line feed directly after it is swallowed
   rather than breaking a second time.
-- `<xch_page clear="text">` clears the screen, as Ctrl+L does, but only
-  once something follows it to show on the clean screen, so a clear with
-  nothing after it doesn't blank the screen for no reason. Some servers send
-  one at the end of their login output, which then scrolls the room
-  description away when the next output arrives; whether to honour server
-  clears at all is an open question (see [TODO.md](TODO.md)).
+- `<xch_page clear="text">` is ignored unless the connection's "Clear the
+  screen when a Pueblo server asks" setting is on (Global, World or
+  Character, resolved at connect time like word wrap; off by default). When
+  on, it clears the screen as Ctrl+L does, but only once something follows
+  it to show on the clean screen, so a clear with nothing after it doesn't
+  blank the screen for no reason. It's off by default because some servers
+  send one at the end of their login output, which would scroll the room
+  description away when the next output arrives.
 
 Every other HTML or Pueblo tag is dropped and its content shown as plain
 text, so formatting tags (`<b>`, `<font>`) and images have no effect.
@@ -224,7 +226,7 @@ with its line.
 To see what Moolin made of a world's output, run it with
 `--log-level=debug`: it says when the greeting turned Pueblo on, once for
 each tag it dropped or showed as text, and each time a server clear was
-asked for and applied. The session log (`moolin.log`, with its `.times`
+ignored, or asked for and applied. The session log (`moolin.log`, with its `.times`
 sidecar) keeps the server's bytes exactly as they arrived, tags included, so
 a login can be replayed afterwards.
 
