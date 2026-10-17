@@ -64,6 +64,7 @@ const cowpernica: Character = {
   password: "hunter2",
   echoCommands: "inherit",
   wordWrap: "inherit",
+  honorClear: "inherit",
 };
 
 test("auto-login sends the expanded template after connecting as a character", {
@@ -82,6 +83,7 @@ test("auto-login sends the expanded template after connecting as a character", {
       address: `127.0.0.1:${port}`,
       tls: null,
       wordWrap: false,
+      honorClear: false,
     });
     await waitUntil(() => received().length > 0);
     assert.equal(received(), 'co "Cowpernica" hunter2\r');
@@ -129,10 +131,11 @@ test("connect()'s resolved settings carry through to getState() and echoCommands
   try {
     manager.connect(
       { world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null },
-      { wordWrap: true, echoCommands: false },
+      { wordWrap: true, echoCommands: false, honorClear: true },
     );
     await connected;
     assert.equal(manager.getState().wordWrap, true);
+    assert.equal(manager.getState().honorClear, true);
     assert.equal(manager.echoCommandsEnabled(), false);
   } finally {
     manager.disconnect();
@@ -140,7 +143,7 @@ test("connect()'s resolved settings carry through to getState() and echoCommands
   }
 });
 
-test("omitting connect()'s resolved settings defaults to no word-wrap and echo on", {
+test("omitting connect()'s resolved settings defaults to no word-wrap, echo on and server clears ignored", {
   timeout: TEST_TIMEOUT_MS,
 }, async () => {
   const { server, port } = await recordingServer();
@@ -149,6 +152,7 @@ test("omitting connect()'s resolved settings defaults to no word-wrap and echo o
     manager.connect({ world: { ...newWorld("w"), host: "127.0.0.1", port }, character: null });
     await connected;
     assert.equal(manager.getState().wordWrap, false);
+    assert.equal(manager.getState().honorClear, false);
     assert.equal(manager.echoCommandsEnabled(), true);
   } finally {
     manager.disconnect();
@@ -176,6 +180,7 @@ test("disconnecting returns to the disconnected state", { timeout: TEST_TIMEOUT_
       address: null,
       tls: null,
       wordWrap: false,
+      honorClear: false,
     });
     assert.equal(manager.getConnected(), null);
     assert.match(messages[messages.length - 1], /disconnected/);

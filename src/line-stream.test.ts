@@ -175,6 +175,7 @@ test("Moolin's own lines are never read as Pueblo", () => {
 
 test("a server's clear waits for something to show, then adds the blank screen once", () => {
   const s = pueblo();
+  s.honorClear = true;
   s.screenRows = 3;
   s.write('<xch_page clear="text"><xch_page clear="text">\r\n', 2);
   assert.equal(s.lines.length, 1 + 1); // only the line feed, so far
@@ -187,6 +188,7 @@ test("a server's clear waits for something to show, then adds the blank screen o
 
 test("a server's clear is applied before the first text after it, in the same chunk", () => {
   const s = pueblo();
+  s.honorClear = true;
   s.screenRows = 2;
   s.write('old\r\n<xch_page clear="text">new\r\n', 2);
   assert.deepEqual(
@@ -197,6 +199,7 @@ test("a server's clear is applied before the first text after it, in the same ch
 
 test("a server's clear at the end of a session leaves the last screen alone", () => {
   const s = pueblo();
+  s.honorClear = true;
   s.screenRows = 3;
   s.write("last screen\r\n</xch_mudtext><img xch_mode=purehtml><xch_page clear=text>\r\n", 2);
   s.write("\x1b[33m[disconnected]\x1b[0m\r\n", null);
@@ -206,8 +209,22 @@ test("a server's clear at the end of a session leaves the last screen alone", ()
   );
 });
 
+test("a server's clear is ignored unless honorClear is on", () => {
+  const notes: string[] = [];
+  const s = new LineStream((message) => notes.push(message));
+  s.screenRows = 3;
+  s.write(GREETING, 1);
+  s.write('old\r\n<xch_page clear="text">new\r\n', 2);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["This world is Pueblo 1.0 Enhanced.", "old", "new"],
+  );
+  assert.ok(notes.includes("pueblo: ignored the server's request to clear the screen"));
+});
+
 test("a server's clear is forgotten by a reset", () => {
   const s = pueblo();
+  s.honorClear = true;
   s.write("<xch_page clear=text>", 2);
   s.reset();
   s.write("plain\r\n", 3);
@@ -270,6 +287,7 @@ test("the stream says what it decides that could explain odd output", () => {
   const notes: string[] = [];
   const s = new LineStream((message) => notes.push(message));
   s.screenRows = 4;
+  s.honorClear = true;
   s.write("hello\r\n", 1);
   s.write("This world is Pueblo\r\n<font>x</font> <odd>\r\n", 2);
   s.write('<xch_page clear="text"><xch_page clear="text">more\r\n', 3);

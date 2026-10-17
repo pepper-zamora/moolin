@@ -171,6 +171,10 @@ export class ScrollbackView {
     this.emitChange();
   }
 
+  setHonorClear(honorClear: boolean): void {
+    this.stream.honorClear = honorClear;
+  }
+
   // Every line, drawn or not yet.
   allLines(): ReadonlyArray<Line> {
     this.flush();

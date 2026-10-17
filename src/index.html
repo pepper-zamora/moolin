@@ -110,6 +110,7 @@
               </p>
               <label class="check"><input name="wordWrap" type="checkbox" /> Wrap long lines at word boundaries</label>
               <label class="check"><input name="echoCommands" type="checkbox" /> Echo typed commands into the scrollback</label>
+              <label class="check"><input name="honorClear" type="checkbox" /> Clear the screen when a Pueblo server asks</label>
             </form>
 
             <form id="world-pane" class="pane" hidden>
@@ -140,6 +141,13 @@
                   <option value="off">Off</option>
                 </select>
               </label>
+              <label>Clear the screen when a Pueblo server asks
+                <select name="honorClear">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
             </form>
 
             <form id="character-pane" class="pane" hidden>
@@ -160,6 +168,13 @@
               </label>
               <label>Wrap long lines at word boundaries
                 <select name="wordWrap">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label>Clear the screen when a Pueblo server asks
+                <select name="honorClear">
                   <option value="inherit">Inherit</option>
                   <option value="on">On</option>
                   <option value="off">Off</option>
