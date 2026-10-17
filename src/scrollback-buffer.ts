@@ -63,7 +63,7 @@ export class ScrollbackBuffer {
 
   // Replaces the contents, e.g. with a log's history when a window connects.
   // `times` gives the arrival time of each line feed across `chunks`, in order
-  // (from the log's sidecar); omit it and the times come back as null (unknown).
+  // (read back from the log); omit it and the times come back as null (unknown).
   reset(chunks: TerminalChunk[], times: Array<number | null> | null = null): void {
     this.chunks = chunks.slice();
     this.bytes = 0;

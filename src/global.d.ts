@@ -4,6 +4,8 @@ import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { SelectAllTarget } from "./select-all";
 import type { LogLevel } from "./logger";
 import type { Preferences } from "./preferences";
+import type { SecurityRequest } from "./ipc-validate";
+import type { Outcome, SecurityDialogMode, SecurityInfo, SecurityPageState } from "./security";
 
 declare global {
   interface Window {
@@ -50,6 +52,16 @@ declare global {
       preferences: {
         onOpen(callback: (prefs: Preferences) => void): void;
         save(partial: Partial<Preferences>): Promise<void>;
+      };
+      security: {
+        getState(): Promise<SecurityPageState>;
+        setup(request: SecurityRequest): Promise<Outcome>;
+        unlock(request: SecurityRequest): Promise<Outcome>;
+        change(request: SecurityRequest): Promise<Outcome>;
+        disable(): Promise<Outcome>;
+        decline(never: boolean): void;
+        onOpen(callback: (mode: SecurityDialogMode) => void): void;
+        onStateChanged(callback: (info: SecurityInfo) => void): void;
       };
       reportUndoState(canUndo: boolean, canRedo: boolean): void;
       log(level: Exclude<LogLevel, "none">, scope: string, ...args: unknown[]): void;

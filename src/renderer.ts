@@ -1,11 +1,13 @@
 import "./styles.css";
 import { worldsDialog } from "./worlds-dialog";
 import { preferencesDialog } from "./preferences-dialog";
+import { encryptionDialog } from "./encryption-dialog";
 import { FindWidget } from "./find-widget";
 import { SecurityStatus } from "./security-status";
 import { CommandHistory, isOnFirstLine, isOnLastLine } from "./command-history";
 import { InputUndoStack, type InputSnapshot } from "./input-undo";
 import type { WindowState } from "./connection-manager";
+import type { SecurityInfo } from "./security";
 import { LinkMenu } from "./link-menu";
 import { LiveReplay } from "./live-replay";
 import { linkCommands } from "./pueblo";
@@ -154,10 +156,10 @@ const findWidget = new FindWidget(view, () => {
   if (!inputArea.disabled) inputArea.focus();
 });
 
-// True while either modal <dialog> (Worlds, Preferences) is open, so the
+// True while any modal <dialog> (Worlds, Preferences, Encryption) is open, so the
 // input area doesn't steal focus or keyboard shortcuts from their own fields.
 function modalOpen(): boolean {
-  return worldsDialog.isOpen() || preferencesDialog.isOpen();
+  return worldsDialog.isOpen() || preferencesDialog.isOpen() || encryptionDialog.isOpen();
 }
 
 const securityStatus = new SecurityStatus(() => {
@@ -525,6 +527,34 @@ worldsDialog.dialog.addEventListener("close", () => {
 });
 
 window.moolin.preferences.onOpen((prefs) => preferencesDialog.open(prefs));
+
+// Encryption: the padlock in the status bar, and the dialog it, the menu and
+// the start of the app open. Locked (an encrypted install not yet unlocked)
+// asks for the key at once; an install without encryption is offered it once.
+const encryptionStatus = element<HTMLSpanElement>("encryption-status");
+function applySecurity(info: SecurityInfo): void {
+  encryptionDialog.setInfo(info);
+  encryptionStatus.hidden = info.state === "off";
+  encryptionStatus.dataset.state = info.state;
+  const label =
+    info.state === "locked" ? "Locked: click to unlock" : "Passwords and logs are encrypted: click to manage";
+  encryptionStatus.title = label;
+  encryptionStatus.setAttribute("aria-label", label);
+  encryptionStatus.dataset.keySource = info.keySource ?? "";
+}
+encryptionStatus.addEventListener("click", () => {
+  encryptionDialog.open(encryptionStatus.dataset.state === "locked" ? "unlock" : "manage");
+});
+window.moolin.security.onStateChanged(applySecurity);
+window.moolin.security.onOpen((mode) => encryptionDialog.open(mode));
+void window.moolin.security.getState().then((state) => {
+  applySecurity(state);
+  if (state.state === "locked") encryptionDialog.open("unlock");
+  else if (state.offer) encryptionDialog.open("offer");
+});
+encryptionDialog.dialog.addEventListener("close", () => {
+  if (!inputArea.disabled) inputArea.focus();
+});
 preferencesDialog.dialog.addEventListener("close", () => {
   if (!inputArea.disabled) inputArea.focus();
 });

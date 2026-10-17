@@ -3,6 +3,7 @@
 // nothing it sends is used without being checked here first. Pure, so it can
 // be tested without Electron.
 import { LOG_LEVELS, type LogLevel } from "./logger";
+import { MAX_PHRASE_LENGTH } from "./security-limits";
 
 // The most text one input line may be (a large paste is still allowed).
 export const MAX_INPUT_LENGTH = 1024 * 1024;
@@ -98,4 +99,21 @@ export function parseConnectRequest(value: unknown): { world: unknown; character
 const MAX_CLIPBOARD_LENGTH = 16 * 1024 * 1024;
 export function parseClipboardText(value: unknown): string | null {
   return typeof value === "string" && value.length <= MAX_CLIPBOARD_LENGTH ? value : null;
+}
+
+// A key phrase typed in, or a key file to be chosen (main shows the chooser, so
+// no path ever comes from the page).
+export type SecurityRequest = { source: "phrase"; phrase: string } | { source: "file" };
+export function parseSecurityRequest(value: unknown): SecurityRequest | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { source, phrase } = value as { source?: unknown; phrase?: unknown };
+  if (source === "file") return { source: "file" };
+  if (source !== "phrase" || typeof phrase !== "string") return null;
+  return phrase.length > 0 && phrase.length <= MAX_PHRASE_LENGTH ? { source: "phrase", phrase } : null;
+}
+
+export function parseSecurityDecline(value: unknown): boolean | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { never } = value as { never?: unknown };
+  return typeof never === "boolean" ? never : null;
 }

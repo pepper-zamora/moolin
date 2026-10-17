@@ -28,7 +28,12 @@ import { DEFAULT_GLOBAL_SETTINGS, resolveTriState, targetLabel } from "./world-u
 import type { ResolvedSettings, WindowState } from "./connection-manager";
 import { checkForUpdate } from "./update-check";
 import { fontFamilyFor } from "./fonts";
+import { normalizePhrase, type KeySource } from "./crypto-keys";
+import { readKeyFile, unlockWithKeyFile } from "./key-file";
+import { Security, type Outcome, type SecurityPageState } from "./security";
 import {
+  parseSecurityDecline,
+  parseSecurityRequest,
   parseBooleanPair,
   parseClipboardText,
   parseConfirmText,
@@ -107,14 +112,24 @@ const APP_ICON = path.join(__dirname, "..", "icons", "icon-512.png");
 const INDEX_HTML = path.join(__dirname, "..", "src", "index.html");
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 
+const LOG_ROOT = path.join(app.getPath("documents"), "Moolin");
+const logRegistry = new SessionLogRegistry(
+  (file, error) => log("error", "main", "session log failed", file, error.message),
+  () => security.logMode(),
+);
+// Whether passwords and logs are encrypted, and the key while unlocked (see security.ts).
+const security = new Security(worldsPath, LOG_ROOT, logRegistry);
+// Whether to offer setting up encryption: once a run, to the first window to ask.
+let offerPending = prefs.encryptionPrompt === "ask" && security.state() === "off";
+
 const windowManager = new WindowManager(
   {
     appIcon: APP_ICON,
     preloadPath: PRELOAD_PATH,
     rendererArgs,
     indexHtmlPath: INDEX_HTML,
-    logRoot: path.join(app.getPath("documents"), "Moolin"),
-    logs: new SessionLogRegistry((file, error) => log("error", "main", "session log failed", file, error.message)),
+    logRoot: LOG_ROOT,
+    logs: logRegistry,
   },
   {
     onStateChange: (terminal) => buildMenu(terminal),
@@ -138,8 +153,14 @@ function updateMru(target: ConnectTarget): void {
   const entry: MruEntry = target.character
     ? { worldId: target.world.id, characterId: target.character.id }
     : { worldId: target.world.id };
-  const updated = updateMruState(worldsPath, (mru) =>
-    [entry, ...mru.filter((e) => e.worldId !== entry.worldId || e.characterId !== entry.characterId)].slice(0, MAX_MRU),
+  const updated = updateMruState(
+    worldsPath,
+    (mru) =>
+      [entry, ...mru.filter((e) => e.worldId !== entry.worldId || e.characterId !== entry.characterId)].slice(
+        0,
+        MAX_MRU,
+      ),
+    security.dataKey,
   );
   log("debug", "worlds", "mru updated:", updated);
   rebuildAllMenus();
@@ -147,7 +168,7 @@ function updateMru(target: ConnectTarget): void {
 
 // MRU entries whose world (and character, if any) still exist.
 function mruTargets(): ConnectTarget[] {
-  const { state } = readWorldsFile(worldsPath);
+  const { state } = readWorldsFile(worldsPath, security.dataKey);
   const targets: ConnectTarget[] = [];
   for (const entry of state.mru) {
     const world = state.worlds.find((w) => w.id === entry.worldId);
@@ -165,7 +186,7 @@ function mruTargets(): ConnectTarget[] {
 // Resolves Global/World/Character into what this connection actually uses,
 // snapshotted once at connect time (see ConnectionManager.connect).
 function resolveConnectionSettings(target: ConnectTarget): ResolvedSettings {
-  const { state } = readWorldsFile(worldsPath);
+  const { state } = readWorldsFile(worldsPath, security.dataKey);
   return {
     wordWrap: resolveTriState(
       state.globalSettings.wordWrap,
@@ -188,12 +209,22 @@ function resolveConnectionSettings(target: ConnectTarget): ResolvedSettings {
 // A window holds at most one connection. Connecting from a window that
 // already has one opens the new connection in a window of its own.
 function connectOrNewWindow(terminal: TerminalWindow, target: ConnectTarget): void {
+  if (!requireUnlocked(terminal)) return;
   const resolved = resolveConnectionSettings(target);
   if (terminal.connection.isActive()) {
     newTerminalWindow(terminal).connection.connect(target, resolved);
   } else {
     terminal.connection.connect(target, resolved);
   }
+}
+
+// While encryption is on and not yet unlocked, nothing connects (the passwords
+// can't be read, and a log can't be written): the window is asked to unlock.
+function requireUnlocked(terminal: TerminalWindow): boolean {
+  if (security.state() !== "locked") return true;
+  terminal.writeStatus("\x1b[33m[locked: unlock Moolin to connect]\x1b[0m\r\n");
+  terminal.send(IpcChannels.securityOpen, "unlock");
+  return false;
 }
 
 // Asks before doing something; Cancel is the default, so a stray Enter
@@ -232,9 +263,17 @@ async function confirmDisconnect(terminal: TerminalWindow): Promise<void> {
 // reuses the dialog's own create logic rather than main owning a duplicate
 // worlds list; the dialog finishes loading the list before creating.
 function openWorldsDialog(terminal: TerminalWindow, createNew: boolean): void {
+  if (!requireUnlocked(terminal)) return;
   log("debug", "main", "opening worlds dialog, createNew =", createNew);
   terminal.window.focus();
   terminal.send(IpcChannels.worldsOpen, { createNew });
+}
+
+// Worlds > Encryption…: unlock when locked, manage when on, set up when off.
+function openEncryption(terminal: TerminalWindow): void {
+  terminal.window.focus();
+  const state = security.state();
+  terminal.send(IpcChannels.securityOpen, state === "locked" ? "unlock" : state === "unlocked" ? "manage" : "setup");
 }
 
 function openPreferences(terminal: TerminalWindow): void {
@@ -242,7 +281,9 @@ function openPreferences(terminal: TerminalWindow): void {
   // showTimestamps is per-window state (see the View menu's checkbox below);
   // the dialog edits this window's actual value, which may have drifted from
   // the stored default if only this window's checkbox was toggled.
-  terminal.send(IpcChannels.preferencesOpen, { ...prefs, showTimestamps: terminal.showTimestamps });
+  // The encryption settings are the encryption dialog's business, not this one's.
+  const { encryptionPrompt: _prompt, keyFilePath: _keyFile, ...visible } = prefs;
+  terminal.send(IpcChannels.preferencesOpen, { ...visible, showTimestamps: terminal.showTimestamps });
 }
 
 // How long after startup the automatic update check runs, so it doesn't
@@ -314,6 +355,7 @@ function buildMenu(terminal: TerminalWindow): void {
         ...(mruItems.length > 0 ? ([{ type: "separator" }, ...mruItems] as Electron.MenuItemConstructorOptions[]) : []),
         { type: "separator" },
         { label: "&Preferences…", accelerator: "CmdOrCtrl+,", click: () => openPreferences(terminal) },
+        { label: "&Encryption…", click: () => openEncryption(terminal) },
         { type: "separator" },
         { role: "quit", label: "&Quit" },
       ],
@@ -496,7 +538,8 @@ ipcMain.handle(IpcChannels.worldsLoad, (event): WorldsLoadResult => {
   if (!terminalFor(event)) {
     return { worlds: [], globalSettings: DEFAULT_GLOBAL_SETTINGS, error: "Not a Moolin window" };
   }
-  const { state, error, recovered } = readWorldsFile(worldsPath);
+  const { state, error, recovered, locked } = readWorldsFile(worldsPath, security.dataKey);
+  if (locked) return { worlds: [], globalSettings: state.globalSettings, locked: true };
   if (error) log("error", "worlds", error);
   else log("debug", "worlds", "loaded", state.worlds.length, "world(s) from", worldsPath);
   const warning = recovered
@@ -519,7 +562,7 @@ ipcMain.handle(IpcChannels.worldsSave, (event, rawWorlds: unknown, rawGlobalSett
   }
   const globalSettings = parseGlobalSettings(rawGlobalSettings);
   try {
-    saveWorlds(worldsPath, worlds, globalSettings);
+    saveWorlds(worldsPath, worlds, globalSettings, security.dataKey);
   } catch (err) {
     const error = `Could not save ${worldsPath}: ${(err as Error).message}`;
     log("error", "worlds", error);
@@ -703,6 +746,104 @@ ipcMain.on(IpcChannels.terminalContextMenu, (event, rawOptions: unknown) => {
   Menu.buildFromTemplate(template).popup({ window });
 });
 
+// --- Encryption ------------------------------------------------------------
+// Key phrases cross IPC here once and are never logged, so a malformed request
+// is reported without its contents.
+
+function broadcastSecurity(): void {
+  for (const terminal of windowManager.all()) terminal.send(IpcChannels.securityStateChanged, security.info());
+  rebuildAllMenus();
+}
+
+// The secret a request stands for: the phrase typed, or the file the user picks
+// (the page never names a path). null when the picker was cancelled.
+async function secretFor(
+  request: { source: "phrase"; phrase: string } | { source: "file" },
+  parent: BrowserWindow | undefined,
+): Promise<{ secret: Buffer; source: KeySource; keyFile: string | null } | { error: string } | null> {
+  if (request.source === "phrase") return { secret: normalizePhrase(request.phrase), source: "phrase", keyFile: null };
+  const options: Electron.OpenDialogOptions = { title: "Choose a key file", properties: ["openFile"] };
+  const chosen = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+  const file = chosen.filePaths[0];
+  if (chosen.canceled || !file) return null;
+  const read = await readKeyFile(file);
+  return "error" in read ? read : { secret: read.secret, source: "file", keyFile: file };
+}
+
+// Runs one encryption operation for a window: resolves its secret, does it,
+// remembers or forgets the key file's path, and tells every window.
+async function securityOperation(
+  event: Electron.IpcMainInvokeEvent,
+  channel: string,
+  rawRequest: unknown,
+  run: (secret: Buffer, source: KeySource) => Promise<Outcome>,
+): Promise<Outcome> {
+  const terminal = terminalFor(event);
+  const request = parseSecurityRequest(rawRequest);
+  if (!terminal) return { ok: false, error: "Not a Moolin window" };
+  if (!request) {
+    ignoreBad(channel, "<hidden>");
+    return { ok: false, error: "That request was malformed" };
+  }
+  const resolved = await secretFor(request, terminal.window);
+  if (resolved === null) return { ok: false }; // cancelled: nothing to say
+  if ("error" in resolved) return { ok: false, error: resolved.error };
+  const outcome = await run(resolved.secret, resolved.source);
+  if (outcome.ok) {
+    prefs.keyFilePath = resolved.keyFile;
+    writePreferences(prefsPath, prefs);
+    broadcastSecurity();
+  }
+  return outcome;
+}
+
+ipcMain.handle(IpcChannels.securityGetState, (event): SecurityPageState => {
+  const info = security.info();
+  const offer = !!terminalFor(event) && offerPending && info.state === "off";
+  if (offer) offerPending = false;
+  return { ...info, offer };
+});
+
+ipcMain.handle(IpcChannels.securitySetup, (event, request: unknown) =>
+  securityOperation(event, IpcChannels.securitySetup, request, (secret, source) => security.enable(secret, source)),
+);
+ipcMain.handle(IpcChannels.securityUnlock, (event, request: unknown) =>
+  securityOperation(event, IpcChannels.securityUnlock, request, (secret) => security.unlock(secret)),
+);
+ipcMain.handle(IpcChannels.securityChange, (event, request: unknown) =>
+  securityOperation(event, IpcChannels.securityChange, request, (secret, source) => security.change(secret, source)),
+);
+
+ipcMain.handle(IpcChannels.securityDisable, async (event): Promise<Outcome> => {
+  const terminal = terminalFor(event);
+  if (!terminal) return { ok: false, error: "Not a Moolin window" };
+  const confirmed = await confirmAction(
+    terminal.window,
+    "Stop using encryption?",
+    "Stop encrypting",
+    "Passwords and logs will be stored unencrypted again, readable by anyone who can read your files.",
+  );
+  if (!confirmed) return { ok: false };
+  const outcome = await security.disable();
+  if (outcome.ok) {
+    prefs.keyFilePath = null;
+    prefs.encryptionPrompt = "never"; // they chose to turn it off: don't offer it back
+    writePreferences(prefsPath, prefs);
+    broadcastSecurity();
+  }
+  return outcome;
+});
+
+// "Not now" on the offer; with "don't ask me again" it is not offered again.
+ipcMain.on(IpcChannels.securityDecline, (event, raw: unknown) => {
+  const never = parseSecurityDecline(raw);
+  if (!terminalFor(event) || never === null) return;
+  if (never && prefs.encryptionPrompt !== "never") {
+    prefs.encryptionPrompt = "never";
+    writePreferences(prefsPath, prefs);
+  }
+});
+
 ipcMain.on(IpcChannels.logEmit, (event, level: unknown, scope: unknown, args: unknown) => {
   const call = parseLogCall(level, scope, args);
   if (terminalFor(event) && call) log(call.level, call.scope, ...call.args);
@@ -717,8 +858,10 @@ if (isPrimaryInstance) {
     newTerminalWindow();
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     log("debug", "main", "app ready");
+    const unlocked = await unlockWithKeyFile(security, prefs.keyFilePath);
+    if (unlocked) log("info", "security", unlocked);
     newTerminalWindow();
 
     // Only in packaged builds: running from source shouldn't prompt about
