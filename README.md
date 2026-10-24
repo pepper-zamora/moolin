@@ -634,6 +634,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/connection-manager.ts` | One window's connection: status, auto-login, status messages            |
 | `src/conversation-patterns.ts` | Conversation patterns as regular expressions, with their {{…}} shorthands |
 | `src/conversation-tabs.ts` | The window's conversation tabs and their chat bubbles                |
+| `src/conversations.ts`    | Which conversation a matched line belongs to, and what its bubble says   |
 | `src/telnet.ts`           | A telnet session over TCP or TLS, with per-option negotiation handlers    |
 | `src/telnet-protocol.ts`  | Telnet byte-stream parser and command encoding (no I/O)                   |
 | `src/worlds.ts`           | Reading, validating and writing the worlds file                           |

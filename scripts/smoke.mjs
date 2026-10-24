@@ -398,6 +398,7 @@ try {
         conversationPatterns: [
           { template: "{{them}} pages: {{message}}", from: "them", kind: "say" },
           { template: "You page: {{message}}", from: "us", kind: "say" },
+          { template: "From afar, {{them}} {{message}}", from: "them", kind: "emote" },
         ],
         characters: [],
       })}, null)`,
@@ -588,15 +589,15 @@ try {
 
   // Last in this window, since the tab strip that appears changes its size.
   await check("a page moves to a conversation tab named for the other character, and Ctrl+Page Down shows it", async () => {
-    latestSocket?.write("Jack pages: Hello!\r\nYou page: Hi back\r\nnot a page\r\n");
+    latestSocket?.write("Jack pages: Hello!\r\nYou page: Hi back\r\nFrom afar, Jack waves.\r\nnot a page\r\n");
     await waitFor("the line after the pages", async () => (await main.lineTexts()).includes("not a page"), 3000);
     const lines = await main.lineTexts();
-    expectEqual(lines.includes("Jack pages: Hello!") || lines.includes("You page: Hi back"), false, "pages in the scrollback");
+    expectEqual(["Jack pages: Hello!", "You page: Hi back", "From afar, Jack waves."].some((l) => lines.includes(l)), false, "pages in the scrollback");
     const state = () =>
       main.evaluate(`JSON.stringify({
         tabs: Array.from(document.querySelectorAll("#window-tabs [role=tab]"), (t) => t.textContent + (t.classList.contains("unread") ? "*" : "")),
         selected: document.querySelector("#window-tabs [aria-selected=true]").textContent,
-        bubbles: Array.from(document.querySelectorAll(".conversation .bubble-row"), (r) => r.className + ":" + r.textContent),
+        bubbles: Array.from(document.querySelectorAll(".conversation .bubble-row"), (r) => r.className + ":" + r.querySelector(".bubble").className + ":" + r.textContent),
         scrollbackShown: !document.getElementById("terminal-row").hidden,
       })`);
     expectEqual(
@@ -604,7 +605,12 @@ try {
       JSON.stringify({
         tabs: ["Smoke Test", "Jack*"],
         selected: "Smoke Test",
-        bubbles: ["bubble-row from-them:JHello!", "bubble-row from-us:YHi back"],
+        // A say has an avatar (J, Y) before its text; an emote has none.
+        bubbles: [
+          "bubble-row from-them:bubble:JHello!",
+          "bubble-row from-us:bubble:YHi back",
+          "bubble-row from-them:bubble emote:Jack waves.",
+        ],
         scrollbackShown: true,
       }),
       "after the pages",

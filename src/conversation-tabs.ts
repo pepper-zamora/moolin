@@ -5,8 +5,9 @@
 // on the left, ours on the right, an emote as italic text without one. Only
 // lines that arrive while the window is open are moved (replayed history
 // stays in the scrollback), and the tabs start over with each connection.
-// The tab strip is hidden until the first conversation starts.
-import { type ConversationMatch, ConversationMatcher, initials } from "./conversation-patterns";
+// The tab strip is hidden until the first conversation starts. Which
+// conversation a line belongs to, and what it says, is conversations.ts's.
+import { type ConversationEntry, Conversations } from "./conversations";
 import { TabStrip } from "./tabs";
 import type { ConversationPattern } from "./worlds-types";
 
@@ -27,13 +28,9 @@ interface Conversation {
 export class ConversationTabs {
   private readonly tabs: TabStrip;
   private readonly list: HTMLElement;
-  // Keyed by the other character's name in lower case.
+  private readonly model = new Conversations();
+  // Keyed by the other character's name as first seen (ConversationEntry.partner).
   private readonly conversations = new Map<string, Conversation>();
-  private matcher = new ConversationMatcher([], null);
-  private us: string | null = null;
-  // Where a line that doesn't name the other character goes when no
-  // conversation tab is selected: the conversation with the latest message.
-  private latest: Conversation | null = null;
   private nextId = 1;
   private font = { family: "", size: 14 };
 
@@ -61,8 +58,7 @@ export class ConversationTabs {
   // disconnected there are no patterns, so nothing more is moved.
   setConnection(worldName: string | null, characterName: string | null, patterns: ConversationPattern[]): void {
     if (worldName !== null) this.mainTab.textContent = worldName;
-    this.us = characterName;
-    this.matcher = new ConversationMatcher(patterns, characterName);
+    this.model.setConnection(characterName, patterns);
   }
 
   // Offered each line from the server as it ends; returns whether it was
@@ -70,12 +66,9 @@ export class ConversationTabs {
   // A line that doesn't name the other character, with no conversation to
   // put it in, stays where it is.
   take(text: string, time: number | null): boolean {
-    if (this.matcher.empty) return false;
-    const match = this.matcher.match(text);
-    if (!match) return false;
-    const conversation = match.them ? this.conversationWith(match.them) : (this.selectedConversation() ?? this.latest);
-    if (!conversation) return false;
-    this.addEntry(conversation, match, time);
+    const entry = this.model.take(text, time, this.selectedConversation()?.name ?? null);
+    if (!entry) return false;
+    this.addEntry(this.conversations.get(entry.partner) ?? this.open(entry.partner), entry);
     return true;
   }
 
@@ -87,7 +80,7 @@ export class ConversationTabs {
       conversation.panel.remove();
     }
     this.conversations.clear();
-    this.latest = null;
+    this.model.clear();
     this.strip.hidden = true;
   }
 
@@ -130,10 +123,8 @@ export class ConversationTabs {
     return null;
   }
 
-  private conversationWith(name: string): Conversation {
-    const key = name.toLowerCase();
-    const existing = this.conversations.get(key);
-    if (existing) return existing;
+  // A new conversation's tab and panel.
+  private open(name: string): Conversation {
     const id = this.nextId++;
     const tab = document.createElement("button");
     tab.type = "button";
@@ -157,7 +148,7 @@ export class ConversationTabs {
       if (!panel.hidden)
         conversation.stuck = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - STICK_THRESHOLD;
     });
-    this.conversations.set(key, conversation);
+    this.conversations.set(name, conversation);
     this.strip.hidden = false;
     return conversation;
   }
@@ -167,29 +158,24 @@ export class ConversationTabs {
     panel.style.fontSize = `${this.font.size}px`;
   }
 
-  private addEntry(conversation: Conversation, match: ConversationMatch, time: number | null): void {
+  private addEntry(conversation: Conversation, entry: ConversationEntry): void {
     const { panel, tab } = conversation;
-    const name = match.from === "us" ? (match.us ?? this.us ?? "You") : (match.them ?? conversation.name);
     const row = document.createElement("div");
-    row.className = `bubble-row from-${match.from}`;
+    row.className = `bubble-row from-${entry.from}`;
     const bubble = document.createElement("div");
-    if (match.kind === "emote") {
-      bubble.className = "bubble emote";
-      bubble.textContent = `${name} ${match.message}`.trim();
-    } else {
+    bubble.className = entry.kind === "emote" ? "bubble emote" : "bubble";
+    bubble.textContent = entry.text;
+    if (entry.kind === "say") {
       const avatar = document.createElement("span");
       avatar.className = "avatar";
-      avatar.textContent = initials(name);
-      avatar.title = name;
-      bubble.className = "bubble";
-      bubble.textContent = match.message;
+      avatar.textContent = entry.initials;
+      avatar.title = entry.name;
       row.append(avatar);
     }
-    if (time !== null) bubble.title = new Date(time).toLocaleTimeString();
+    if (entry.time !== null) bubble.title = new Date(entry.time).toLocaleTimeString();
     row.append(bubble);
     panel.append(row);
     if (conversation.stuck) panel.scrollTop = panel.scrollHeight;
     if (tab.getAttribute("aria-selected") !== "true") tab.classList.add("unread");
-    this.latest = conversation;
   }
 }
