@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { compilePattern, patternError } from "./conversation-patterns";
+import { ConversationMatcher, compilePattern, initials, patternError } from "./conversation-patterns";
+import type { ConversationPattern } from "./worlds-types";
 
 function groups(template: string, line: string, us?: string): Record<string, string> | null {
   const match = compilePattern(template, us).exec(line);
@@ -43,4 +44,57 @@ test("patternError explains an invalid pattern and accepts a valid one", () => {
   assert.equal(patternError("{{them}} pages: {{message}}"), null);
   assert.match(patternError("{{them}} pages: (") ?? "", /Invalid regular expression/);
   assert.match(patternError("{{them}} and {{them}}") ?? "", /Invalid regular expression/);
+});
+
+const pages: ConversationPattern[] = [
+  { template: "Long distance to {{them}}, {{us}} {{message}}", from: "us", kind: "emote" },
+  { template: "From afar, {{them}} {{message}}", from: "them", kind: "emote" },
+  { template: "You page: {{message}}", from: "us", kind: "say" },
+  { template: "{{them}} pages: {{message}}", from: "them", kind: "say" },
+];
+
+test("ConversationMatcher reports the first pattern to match, with who and what", () => {
+  const matcher = new ConversationMatcher(pages, "Diane");
+  assert.deepEqual(matcher.match("Long distance to Jack, Diane smiles."), {
+    from: "us",
+    kind: "emote",
+    us: "Diane",
+    them: "Jack",
+    message: "smiles.",
+  });
+  assert.deepEqual(matcher.match("From afar, Jack smiles."), {
+    from: "them",
+    kind: "emote",
+    us: null,
+    them: "Jack",
+    message: "smiles.",
+  });
+  assert.deepEqual(matcher.match("You page: Hello!"), {
+    from: "us",
+    kind: "say",
+    us: null,
+    them: null,
+    message: "Hello!",
+  });
+  assert.equal(matcher.match("Jack pages: Hello!")?.them, "Jack");
+  assert.equal(matcher.match('Jack says, "Hello!"'), null);
+});
+
+test("ConversationMatcher skips blank and invalid patterns", () => {
+  const matcher = new ConversationMatcher(
+    [
+      { template: "  ", from: "them", kind: "say" },
+      { template: "{{them}} pages: (", from: "them", kind: "say" },
+    ],
+    null,
+  );
+  assert.equal(matcher.empty, true);
+  assert.equal(matcher.match("Jack pages: ("), null);
+});
+
+test("initials takes the first letters of up to two words", () => {
+  assert.equal(initials("Jack"), "J");
+  assert.equal(initials("mary jane watson"), "MJ");
+  assert.equal(initials("Dr_Who"), "DW");
+  assert.equal(initials(""), "?");
 });

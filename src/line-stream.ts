@@ -73,6 +73,11 @@ export class LineStream {
     return this.builder.takeDirty();
   }
 
+  // See LineBuilder.remove.
+  remove(line: Line): void {
+    this.builder.remove(line);
+  }
+
   dropFront(count: number): Line[] {
     return this.builder.dropFront(count);
   }

@@ -25,7 +25,15 @@ function cert(subject: string, issuer: string): CertificateDetails {
 }
 
 test("securityOf grades a connection only once it's connected", () => {
-  const base = { label: "Moo", address: "moo:7777", wordWrap: false, honorClear: false };
+  const base = {
+    label: "Moo",
+    address: "moo:7777",
+    wordWrap: false,
+    honorClear: false,
+    worldName: "Moo",
+    characterName: null,
+    conversationPatterns: [],
+  };
   assert.equal(securityOf({ ...base, status: "connecting", tls: null }), null);
   assert.equal(securityOf({ ...base, status: "disconnected", tls: null }), null);
   assert.equal(securityOf({ ...base, status: "connected", tls: null }), "plaintext");

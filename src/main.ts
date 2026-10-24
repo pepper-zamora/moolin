@@ -703,6 +703,9 @@ ipcMain.handle(
       tls: null,
       wordWrap: false,
       honorClear: false,
+      worldName: null,
+      characterName: null,
+      conversationPatterns: [],
       logging: false,
     },
 );

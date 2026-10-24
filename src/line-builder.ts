@@ -131,6 +131,15 @@ export class LineBuilder {
     this.lastBreak = null;
   }
 
+  // Takes a closed line out of the scrollback (moved to a conversation tab).
+  remove(line: Line): void {
+    const index = this.lines.lastIndexOf(line);
+    if (index < 0 || line === this.open) return;
+    this.lines.splice(index, 1);
+    line.dropped = true;
+    if (this.lastBreak === line) this.lastBreak = null;
+  }
+
   // The lines to redraw, in order; the next call returns only newer changes.
   takeDirty(): Line[] {
     const dirty = this.dirty;

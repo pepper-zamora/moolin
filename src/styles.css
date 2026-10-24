@@ -49,11 +49,123 @@ html, body {
 
 /* The terminal and its timestamp gutter sit side by side; the row is what
    flexes to fill the window's height. */
-#terminal-row {
+/* The scrollback and the conversation panels share one grid cell. */
+#views {
   flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+
+#views > * {
+  grid-area: 1 / 1;
+}
+
+#terminal-row {
   min-height: 0;
   display: flex;
   position: relative; /* anchors the find widget */
+}
+
+/* Kept laid out behind a conversation, so its size (what the server was told)
+   and scroll position stay put. */
+#terminal-row[hidden] {
+  visibility: hidden;
+}
+
+/* The window's tabs: the scrollback's, then one per conversation. */
+#window-tab-strip {
+  margin-bottom: 0;
+  background: #1e1e1e;
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+}
+
+#window-tab-strip[hidden] {
+  display: none;
+}
+
+#window-tab-strip [role="tab"],
+#window-tab-strip .tab-scroll {
+  font: inherit;
+  cursor: pointer;
+}
+
+#window-tab-strip .tab-scroll {
+  color: #9d9d9d;
+}
+
+/* A conversation with a message not yet seen. */
+#window-tab-strip [role="tab"].unread::after {
+  content: " \2022";
+  color: #3794ff;
+}
+
+.conversation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.25;
+}
+
+.conversation[hidden] {
+  display: none;
+}
+
+.bubble-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 80%;
+}
+
+.bubble-row.from-them {
+  align-self: flex-start;
+}
+
+.bubble-row.from-us {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.avatar {
+  flex: none;
+  width: 2em;
+  height: 2em;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8em;
+  font-weight: 600;
+  background: #4d4d4d;
+  color: #ffffff;
+}
+
+.from-us .avatar {
+  background: #0e639c;
+}
+
+.bubble {
+  padding: 5px 10px;
+  border-radius: 12px;
+  background: #2d2d30;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.from-us .bubble {
+  background: #094771;
+}
+
+.bubble.emote {
+  padding: 2px 4px;
+  background: transparent;
+  font-style: italic;
 }
 
 /* The scrollback: a scrolling element holding one div per line (see
@@ -766,7 +878,7 @@ html, body {
   display: none;
 }
 
-#worlds-dialog .tab-strip [role="tab"] {
+:is(#worlds-dialog .tab-strip, #window-tab-strip) [role="tab"] {
   flex: none;
   min-width: 0;
   padding: 4px 12px 5px;
@@ -778,21 +890,21 @@ html, body {
   white-space: nowrap;
 }
 
-#worlds-dialog .tab-strip [role="tab"]:hover {
+:is(#worlds-dialog .tab-strip, #window-tab-strip) [role="tab"]:hover {
   color: #d4d4d4;
 }
 
-#worlds-dialog .tab-strip [role="tab"][aria-selected="true"] {
+:is(#worlds-dialog .tab-strip, #window-tab-strip) [role="tab"][aria-selected="true"] {
   color: #e7e7e7;
   border-bottom-color: #0e639c;
 }
 
-#worlds-dialog .tab-strip [role="tab"]:focus-visible {
+:is(#worlds-dialog .tab-strip, #window-tab-strip) [role="tab"]:focus-visible {
   outline: 1px solid #007fd4;
   outline-offset: -1px;
 }
 
-#worlds-dialog .tab-strip .tab-scroll {
+:is(#worlds-dialog .tab-strip, #window-tab-strip) .tab-scroll {
   flex: none;
   min-width: 0;
   width: 22px;
@@ -804,7 +916,7 @@ html, body {
   line-height: 1;
 }
 
-#worlds-dialog .tab-strip .tab-scroll:hover:not(:disabled) {
+:is(#worlds-dialog .tab-strip, #window-tab-strip) .tab-scroll:hover:not(:disabled) {
   background: #3c3c3c;
 }
 

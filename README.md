@@ -263,8 +263,26 @@ You page: {{message}}
 {{them}} pages: {{message}}
 ```
 
-A pattern that isn't a valid regular expression is flagged under it. The
-patterns are saved for now but not yet acted on.
+A pattern that isn't a valid regular expression is flagged under it, and
+left out of matching.
+
+Once connected, each line from the server is checked against the world's
+patterns, first to last. A line one matches is moved out of the scrollback
+into a tab of its own for that conversation, titled with `{{them}}`, beside
+the scrollback's tab (titled with the world's name); the tabs appear with the
+first conversation. There it's a chat bubble: theirs on the left and yours
+on the right, each with an avatar of the speaker's initials, while an emote
+is shown as italic text, the speaker's name then `{{message}}`. A line whose
+pattern has no `{{them}}` (like `You page: {{message}}`) goes to the
+conversation shown, or else the one with the latest message; with neither,
+it stays in the scrollback. A tab with a message you haven't seen yet is
+marked with a dot. Typing still goes to the world as usual, whichever tab
+is shown, and Find searches the scrollback, switching to its tab.
+
+The session log is unaffected: moved lines are logged like any other. Only
+lines that arrive while the window is open are moved, and each connection
+starts with no conversation tabs, so earlier conversations aren't restored;
+a world's log replayed on connect shows in the scrollback as it was.
 
 Global's Settings tab holds three app-wide defaults — **Wrap long lines at
 word boundaries**, **Echo typed commands into the scrollback** and **Clear
@@ -327,7 +345,8 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Enter / Shift+Enter      | Send / insert a newline                                 |
 | Up / Down                | Previous / next command, from the first / last line     |
 | Ctrl+Up / Ctrl+Down      | Previous / next command, from anywhere                  |
-| Page Up / Page Down      | Scroll the scrollback                                   |
+| Page Up / Page Down      | Scroll the scrollback (or the conversation shown)       |
+| Ctrl+Page Down / Ctrl+Page Up | Next / previous tab, once there are conversation tabs |
 | Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
 | Ctrl+F                   | Find in the scrollback                                  |
 | F3 / Shift+F3            | Next / previous match                                   |
@@ -614,6 +633,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/terminal-window.ts`  | One window: its BrowserWindow, connection, scrollback buffer and menu     |
 | `src/connection-manager.ts` | One window's connection: status, auto-login, status messages            |
 | `src/conversation-patterns.ts` | Conversation patterns as regular expressions, with their {{…}} shorthands |
+| `src/conversation-tabs.ts` | The window's conversation tabs and their chat bubbles                |
 | `src/telnet.ts`           | A telnet session over TCP or TLS, with per-option negotiation handlers    |
 | `src/telnet-protocol.ts`  | Telnet byte-stream parser and command encoding (no I/O)                   |
 | `src/worlds.ts`           | Reading, validating and writing the worlds file                           |

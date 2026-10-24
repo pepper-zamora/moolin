@@ -395,6 +395,10 @@ try {
         loginTemplate: "",
         echoCommands: "on",
         wordWrap: "on",
+        conversationPatterns: [
+          { template: "{{them}} pages: {{message}}", from: "them", kind: "say" },
+          { template: "You page: {{message}}", from: "us", kind: "say" },
+        ],
         characters: [],
       })}, null)`,
     );
@@ -580,6 +584,37 @@ try {
     expectEqual(await main.lineCount(), count, "lines after a second clear");
     latestSocket?.write("after the clear\r\n");
     await waitFor("new output after clearing", async () => (await visibleText()).includes("after the clear"), 3000);
+  });
+
+  // Last in this window, since the tab strip that appears changes its size.
+  await check("a page moves to a conversation tab named for the other character, and Ctrl+Page Down shows it", async () => {
+    latestSocket?.write("Jack pages: Hello!\r\nYou page: Hi back\r\nnot a page\r\n");
+    await waitFor("the line after the pages", async () => (await main.lineTexts()).includes("not a page"), 3000);
+    const lines = await main.lineTexts();
+    expectEqual(lines.includes("Jack pages: Hello!") || lines.includes("You page: Hi back"), false, "pages in the scrollback");
+    const state = () =>
+      main.evaluate(`JSON.stringify({
+        tabs: Array.from(document.querySelectorAll("#window-tabs [role=tab]"), (t) => t.textContent + (t.classList.contains("unread") ? "*" : "")),
+        selected: document.querySelector("#window-tabs [aria-selected=true]").textContent,
+        bubbles: Array.from(document.querySelectorAll(".conversation .bubble-row"), (r) => r.className + ":" + r.textContent),
+        scrollbackShown: !document.getElementById("terminal-row").hidden,
+      })`);
+    expectEqual(
+      await state(),
+      JSON.stringify({
+        tabs: ["Smoke Test", "Jack*"],
+        selected: "Smoke Test",
+        bubbles: ["bubble-row from-them:JHello!", "bubble-row from-us:YHi back"],
+        scrollbackShown: true,
+      }),
+      "after the pages",
+    );
+    await main.key("PageDown", "PageDown", 34, 2 /* Ctrl */);
+    const shown = JSON.parse(await state());
+    expectEqual(`${shown.selected} ${shown.tabs[1]} ${shown.scrollbackShown}`, "Jack Jack false", "after Ctrl+Page Down");
+    expectEqual(await main.activeElement(), "input-area", "focus after switching tabs");
+    await main.key("PageUp", "PageUp", 33, 2 /* Ctrl */);
+    expectEqual(JSON.parse(await state()).selected, "Smoke Test", "after Ctrl+Page Up");
   });
 
   // Launching again opens a second window in the running instance; it starts

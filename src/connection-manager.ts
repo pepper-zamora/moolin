@@ -1,6 +1,6 @@
 import { GreetingDetector } from "./pueblo";
 import { TelnetSession, type TlsInfo } from "./telnet";
-import type { ConnectTarget } from "./worlds-types";
+import type { ConnectTarget, ConversationPattern } from "./worlds-types";
 import { expandLoginTemplate, isConnectable, targetLabel, worldLabel } from "./world-utils";
 import type { LogLevel } from "./logger";
 
@@ -33,6 +33,12 @@ export interface ConnectionState {
   wordWrap: boolean;
   // Whether to act on a Pueblo server's clear; resolved the same way.
   honorClear: boolean;
+  // The world's name and the character connected as (null without one), and
+  // the world's conversation patterns, as of connect time; null, null and
+  // none while disconnected.
+  worldName: string | null;
+  characterName: string | null;
+  conversationPatterns: ConversationPattern[];
 }
 
 // What the renderer is told about its window: the connection, plus whether
@@ -136,6 +142,9 @@ export class ConnectionManager {
       tls: this.connected ? this.tlsInfo : null,
       wordWrap: this.resolved?.wordWrap ?? false,
       honorClear: this.resolved?.honorClear ?? false,
+      worldName: this.target ? worldLabel(this.target.world) : null,
+      characterName: this.target?.character?.name ?? null,
+      conversationPatterns: this.target?.world.conversationPatterns ?? [],
     };
   }
 

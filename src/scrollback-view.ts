@@ -49,6 +49,9 @@ export interface ScrollbackViewOptions {
   // drag (a double or triple click goes down, up, down...), and went up again.
   onPointerDown: () => void;
   onPointerUp: () => void;
+  // A line from the server has ended (live, not replayed history); return
+  // true to take it out of the scrollback (it was moved to a conversation tab).
+  onLine?: (line: Line) => boolean;
 }
 
 // The scrollback: one <div> per line in a scrolling element, drawn from the
@@ -71,6 +74,8 @@ export class ScrollbackView {
   private cellWidthPx = 0;
   private size: number;
   private hovered: string | null = null;
+  // Set while history is replayed, which isn't offered to onLine.
+  private replaying = false;
 
   constructor(
     private readonly el: HTMLElement,
@@ -194,8 +199,13 @@ export class ScrollbackView {
     pueblo = false,
     greetingOpen = true,
   ): void {
-    this.stream.replay(chunks, times, pueblo, greetingOpen);
-    this.flush();
+    this.replaying = true;
+    try {
+      this.stream.replay(chunks, times, pueblo, greetingOpen);
+      this.flush();
+    } finally {
+      this.replaying = false;
+    }
   }
 
   // See LineStream.closeGreeting.
@@ -248,7 +258,13 @@ export class ScrollbackView {
     // cap) are never drawn.
     this.trim();
     const fresh = document.createDocumentFragment();
+    const open = this.stream.openLine;
     for (const line of dirty) {
+      if (!this.replaying && !line.dropped && line !== open && line.time !== null && this.options.onLine?.(line)) {
+        this.stream.remove(line);
+        line.el?.remove();
+        continue;
+      }
       // Dropped before it was drawn, or finished and drawn already (it is
       // listed again when a swallowed line feed gives it its time).
       if (line.dropped || line.runs === null) continue;

@@ -12,26 +12,40 @@
   </head>
   <body>
     <div id="app">
-      <div id="terminal-row">
-        <!-- Per-line timestamp column; a sibling of the terminal rather than
-             part of its buffer, kept scroll-synced in renderer.ts. -->
-        <div id="gutter" hidden></div>
-        <div id="terminal"></div>
-        <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
-        <canvas id="search-ruler" hidden></canvas>
-        <!-- Scrollback search (Ctrl+F), floating over the terminal's top
-             right; driven by find-widget.ts. -->
-        <div id="find-widget" role="search" hidden>
-          <div class="find-field">
-            <input id="find-input" type="text" spellcheck="false" placeholder="Find" aria-label="Find" />
-            <button id="find-case" class="find-toggle" type="button" aria-pressed="false" title="Match Case (Alt+C)">Aa</button>
-            <button id="find-word" class="find-toggle" type="button" aria-pressed="false" title="Match Whole Word (Alt+W)"><u>ab</u></button>
-            <button id="find-regex" class="find-toggle" type="button" aria-pressed="false" title="Use Regular Expression (Alt+R)">.*</button>
+      <!-- The scrollback's tab, then one per private conversation (see
+           conversation-tabs.ts); hidden until the first conversation starts. -->
+      <div id="window-tab-strip" class="tab-strip" hidden>
+        <div id="window-tabs" role="tablist" aria-label="Conversations">
+          <button id="scrollback-tab" role="tab" type="button" aria-selected="true" aria-controls="terminal-row">Scrollback</button>
+        </div>
+        <button class="tab-scroll tab-scroll-prev" type="button" aria-label="Scroll tabs left" hidden>&#x2039;</button>
+        <button class="tab-scroll tab-scroll-next" type="button" aria-label="Scroll tabs right" hidden>&#x203a;</button>
+      </div>
+      <!-- The scrollback and the conversations take turns in the same space;
+           the scrollback stays laid out while hidden, keeping its size and
+           scroll position. -->
+      <div id="views">
+        <div id="terminal-row">
+          <!-- Per-line timestamp column; a sibling of the terminal rather than
+               part of its buffer, kept scroll-synced in renderer.ts. -->
+          <div id="gutter" hidden></div>
+          <div id="terminal"></div>
+          <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
+          <canvas id="search-ruler" hidden></canvas>
+          <!-- Scrollback search (Ctrl+F), floating over the terminal's top
+               right; driven by find-widget.ts. -->
+          <div id="find-widget" role="search" hidden>
+            <div class="find-field">
+              <input id="find-input" type="text" spellcheck="false" placeholder="Find" aria-label="Find" />
+              <button id="find-case" class="find-toggle" type="button" aria-pressed="false" title="Match Case (Alt+C)">Aa</button>
+              <button id="find-word" class="find-toggle" type="button" aria-pressed="false" title="Match Whole Word (Alt+W)"><u>ab</u></button>
+              <button id="find-regex" class="find-toggle" type="button" aria-pressed="false" title="Use Regular Expression (Alt+R)">.*</button>
+            </div>
+            <span id="find-count" aria-live="polite">No results</span>
+            <button id="find-prev" class="find-action" type="button" title="Previous Match (Shift+Enter)" aria-label="Previous Match">&#x2191;</button>
+            <button id="find-next" class="find-action" type="button" title="Next Match (Enter)" aria-label="Next Match">&#x2193;</button>
+            <button id="find-close" class="find-action" type="button" title="Close (Escape)" aria-label="Close">&#x2715;</button>
           </div>
-          <span id="find-count" aria-live="polite">No results</span>
-          <button id="find-prev" class="find-action" type="button" title="Previous Match (Shift+Enter)" aria-label="Previous Match">&#x2191;</button>
-          <button id="find-next" class="find-action" type="button" title="Next Match (Enter)" aria-label="Next Match">&#x2193;</button>
-          <button id="find-close" class="find-action" type="button" title="Close (Escape)" aria-label="Close">&#x2715;</button>
         </div>
       </div>
       <hr id="divider" />

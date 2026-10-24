@@ -84,6 +84,9 @@ test("auto-login sends the expanded template after connecting as a character", {
       tls: null,
       wordWrap: false,
       honorClear: false,
+      worldName: "Test",
+      characterName: "Cowpernica",
+      conversationPatterns: [],
     });
     await waitUntil(() => received().length > 0);
     assert.equal(received(), 'co "Cowpernica" hunter2\r');
@@ -181,6 +184,9 @@ test("disconnecting returns to the disconnected state", { timeout: TEST_TIMEOUT_
       tls: null,
       wordWrap: false,
       honorClear: false,
+      worldName: null,
+      characterName: null,
+      conversationPatterns: [],
     });
     assert.equal(manager.getConnected(), null);
     assert.match(messages[messages.length - 1], /disconnected/);

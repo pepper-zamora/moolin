@@ -16,6 +16,7 @@ import { fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./f
 import { chooseSelectAllTarget, type SelectAllTarget } from "./select-all";
 import { ScrollbackView } from "./scrollback-view";
 import { TimestampGutter } from "./timestamp-gutter";
+import { ConversationTabs } from "./conversation-tabs";
 
 window.addEventListener("error", (event) => {
   window.moolin.log("error", "renderer", "uncaught error:", event.error ?? event.message);
@@ -73,6 +74,12 @@ function sendLinkCommand(command: string): void {
 
 const linkMenu = new LinkMenu(sendLinkCommand);
 
+const conversations = new ConversationTabs(
+  element<HTMLDivElement>("window-tab-strip"),
+  element<HTMLButtonElement>("scrollback-tab"),
+  element<HTMLDivElement>("views"),
+);
+
 // The scrollback is output-only; all typing goes to #input-area, and the
 // scrollback never takes keyboard focus (see reclaimFocus).
 
@@ -122,6 +129,8 @@ const view = new ScrollbackView(terminalContainer, {
     else setHoverMessage(target.link.href);
   },
   log: (message) => window.moolin.log("debug", "renderer", message),
+  // A line a conversation pattern matches moves to its conversation's tab.
+  onLine: (line) => conversations.take(line.text, line.time),
   onPointerDown: () => cancelPendingReclaim(),
   onPointerUp: () => {
     // Not at once: focusing the input area replaces the document's selection,
@@ -148,6 +157,7 @@ function applyFont(family: string, size: number): void {
   inputArea.style.fontSize = `${size}px`;
   view.setFont(family, size);
   gutter.setFont(family, size);
+  conversations.setFont(family, size);
   resizeInput();
 }
 applyFont(fontFamily, initialFont.fontSize);
@@ -394,9 +404,17 @@ function selectAll(requested?: SelectAllTarget): void {
 window.moolin.onSelectAllRequested(selectAll);
 window.moolin.onUndoRequested(() => undoInput());
 window.moolin.onRedoRequested(() => redoInput());
+// Find searches the scrollback, so it shows the scrollback's tab first.
+function openFind(): void {
+  conversations.showMain();
+  findWidget.open();
+}
 window.moolin.onFindRequested((action) => {
-  if (action === "open") findWidget.open();
-  else findWidget.findFromMenu(action);
+  if (action === "open") openFind();
+  else {
+    conversations.showMain();
+    findWidget.findFromMenu(action);
+  }
 });
 window.moolin.onClearScreenRequested(() => clearToOffscreen());
 window.moolin.onToggleTimestamps((show) => {
@@ -430,8 +448,9 @@ document.addEventListener(
     const editingFind = findWidget.root.contains(document.activeElement);
     let handled = true;
     if (mod && !event.shiftKey && key === "f") {
-      findWidget.open();
+      openFind();
     } else if (event.key === "F3" && !mod && !event.altKey) {
+      conversations.showMain();
       findWidget.findFromMenu(event.shiftKey ? "previous" : "next");
     } else if (event.key === "Escape" && findWidget.isOpen()) {
       findWidget.close();
@@ -454,9 +473,17 @@ document.addEventListener(
       redoInput();
     } else if (mod && !event.shiftKey && key === "l") {
       clearToOffscreen();
+    } else if (
+      mod &&
+      !event.shiftKey &&
+      (event.key === "PageUp" || event.key === "PageDown") &&
+      conversations.hasConversations()
+    ) {
+      conversations.step(event.key === "PageUp" ? -1 : 1);
     } else if (event.key === "PageUp" || event.key === "PageDown") {
       // Home/End are left to the input area.
-      view.scrollPages(event.key === "PageUp" ? -1 : 1);
+      const direction = event.key === "PageUp" ? -1 : 1;
+      if (!conversations.scrollPages(direction)) view.scrollPages(direction);
     } else {
       handled = false;
     }
@@ -493,6 +520,7 @@ function writeReplay(replay: ScrollbackReplay): void {
 // Starts over from a replay: the connect-time switch to a world's logged
 // history.
 function applyReset(replay: ScrollbackReplay): void {
+  conversations.clear();
   view.reset();
   writeReplay(replay);
 }
@@ -568,6 +596,7 @@ function applyConnectionState(state: WindowState): void {
   inputArea.disabled = !connected;
   view.setWordWrap(state.wordWrap);
   view.setHonorClear(state.honorClear);
+  conversations.setConnection(state.worldName, state.characterName, state.conversationPatterns);
   statusBar.dataset.status = state.status;
   statusMessage =
     state.status === "connected"
