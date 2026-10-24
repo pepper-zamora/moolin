@@ -95,12 +95,14 @@
           <div id="worlds-error" class="worlds-error" hidden></div>
 
           <!-- One tab per kind of thing a world, character or the global
-               root can have (Settings now; Triggers and others later). The
+               root can have (Settings for all three, Conversations for a
+               world; Triggers and others later). The
                ‹ › buttons, together at the right end, scroll the tabs and
                appear only when they don't fit on one row; see tabs.ts. -->
           <div id="worlds-tab-strip" class="tab-strip">
             <div id="worlds-tabs" role="tablist" aria-label="Sections">
               <button id="settings-tab" role="tab" type="button" aria-selected="true" aria-controls="settings-panel" aria-keyshortcuts="Alt+S"><u>S</u>ettings</button>
+              <button id="conversations-tab" role="tab" type="button" aria-selected="false" aria-controls="conversations-panel" aria-keyshortcuts="Alt+O" hidden>C<u>o</u>nversations</button>
             </div>
             <button class="tab-scroll tab-scroll-prev" type="button" aria-label="Scroll tabs left" hidden>&#x2039;</button>
             <button class="tab-scroll tab-scroll-next" type="button" aria-label="Scroll tabs right" hidden>&#x203a;</button>
@@ -191,6 +193,13 @@
               </label>
             </form>
 
+          </div>
+
+          <!-- Shown only while a world (not one of its characters) is selected. -->
+          <div id="conversations-panel" class="tab-panel" role="tabpanel" aria-labelledby="conversations-tab" hidden>
+            <div class="pane">
+              <p class="placeholder">Settings for private conversations between characters on this world.</p>
+            </div>
           </div>
 
           <div class="worlds-buttons">

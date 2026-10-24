@@ -38,6 +38,8 @@ const connectBtn = element<HTMLButtonElement>("connect-btn");
 const sidebar = dialog.querySelector<HTMLElement>(".worlds-sidebar") as HTMLElement;
 const tabStrip = element<HTMLDivElement>("worlds-tab-strip");
 const settingsTab = element<HTMLButtonElement>("settings-tab");
+const conversationsTab = element<HTMLButtonElement>("conversations-tab");
+const conversationsPanel = element<HTMLDivElement>("conversations-panel");
 // The selected tab carries over between selections and dialog openings.
 const tabs = new TabStrip(tabStrip);
 
@@ -457,6 +459,19 @@ function updateButtons(): void {
   newCharacterBtn.disabled = !world || !!loadError;
 }
 
+// Conversations belong to a world, so its tab shows only while a world is
+// selected; leaving it for anything else falls back to Settings.
+function updateTabs(isWorld: boolean): void {
+  if (conversationsTab.hidden === !isWorld) return;
+  const wasSelected = conversationsTab.getAttribute("aria-selected") === "true";
+  conversationsTab.hidden = !isWorld;
+  if (!isWorld) {
+    conversationsTab.setAttribute("aria-selected", "false");
+    conversationsPanel.hidden = true;
+    if (wasSelected) tabs.select(settingsTab, { focus: false });
+  }
+}
+
 function render(): void {
   renderTree();
   const { world, character } = selected();
@@ -464,6 +479,7 @@ function render(): void {
   globalPane.hidden = selection !== "global";
   worldPane.hidden = !world || !!character;
   characterPane.hidden = !character;
+  updateTabs(!!world && !character);
   for (const form of [globalPane, worldPane, characterPane]) {
     for (const el of Array.from(form.elements)) (el as HTMLInputElement).disabled = !!loadError;
   }
@@ -640,6 +656,7 @@ const mnemonics: Record<string, HTMLButtonElement> = {
   h: newCharacterBtn,
   c: connectBtn,
   s: settingsTab,
+  o: conversationsTab,
 };
 
 dialog.addEventListener("keydown", (event) => {
@@ -648,7 +665,7 @@ dialog.addEventListener("keydown", (event) => {
   const button = mnemonics[event.key.toLowerCase()];
   if (!button) return;
   event.preventDefault();
-  if (!button.disabled && button.style.visibility !== "hidden") button.click();
+  if (!button.disabled && !button.hidden && button.style.visibility !== "hidden") button.click();
 });
 // The underlines show only while Alt is held, as in GTK and Windows.
 dialog.addEventListener("keyup", (event) => {

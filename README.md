@@ -230,8 +230,10 @@ a world or one of its characters selected, **New Character** adds a character
 to that world (as does right-clicking a world, or Shift+F10). Select a world
 or character and press **Connect** (or Enter, or double-click).
 
-The selected item's details are in tabs to the right of the tree; for now
-there is just **Settings**, with more (such as triggers) to come. When the
+The selected item's details are in tabs to the right of the tree:
+**Settings**, and for a world also **Conversations** (for private
+conversations between characters; still empty), with more (such as
+triggers) to come. When the
 tabs don't fit on one row, ‹ › buttons at the right end scroll through them.
 
 Global's Settings tab holds three app-wide defaults — **Wrap long lines at
@@ -325,7 +327,8 @@ selected tab's fields, then Connect.
 | Ctrl+Page Down / Ctrl+Page Up     | Next / previous tab, from anywhere in the dialog (Cmd on macOS) |
 | Ctrl+Tab / Ctrl+Shift+Tab         | Next / previous tab, likewise (Cmd on macOS)                   |
 | F6 / Shift+F6                     | Jump between the tree, the tabs and the selected tab's fields |
-| Alt+N / Alt+H / Alt+C / Alt+S     | New World / New Character / Connect / the Settings tab        |
+| Alt+N / Alt+H / Alt+C             | New World / New Character / Connect                           |
+| Alt+S / Alt+O                     | The Settings tab / the Conversations tab (worlds only)        |
 | Escape                            | Close the dialog (as does a click outside it)                 |
 
 Changes are saved as you make them.
