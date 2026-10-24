@@ -33,6 +33,7 @@ export function newWorld(id: string): World {
     echoCommands: "inherit",
     wordWrap: "inherit",
     honorClear: "inherit",
+    conversationPatterns: [],
     characters: [],
   };
 }

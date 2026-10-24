@@ -231,10 +231,40 @@ to that world (as does right-clicking a world, or Shift+F10). Select a world
 or character and press **Connect** (or Enter, or double-click).
 
 The selected item's details are in tabs to the right of the tree:
-**Settings**, and for a world also **Conversations** (for private
-conversations between characters; still empty), with more (such as
+**Settings**, and for a world also **Conversations**, with more (such as
 triggers) to come. When the
 tabs don't fit on one row, ‹ › buttons at the right end scroll through them.
+
+A world's Conversations tab lists patterns that pick out the lines of a
+private conversation between two characters, such as pages. Each pattern is
+a regular expression matched against the whole line (Moolin adds the `^`
+and `$` itself, so there's no need to type them); in it `{{us}}` stands
+for the character you're connected as, `{{them}}` for the other one, and
+`{{message}}` for what's said or done (they're shorthand for the named
+groups `us`, `them` and `message`, which can be written out instead, e.g.
+`(?<them>\w+) pages: (?<message>.*)`). Each also says who it's from (us or
+them) and whether it's something said or an emote. For example, a MOO that
+shows pages like this:
+
+```
+Long distance to Jack, Diane smiles.
+From afar, Jack smiles.
+You page: Hello!
+Jack pages: Hello!
+```
+
+is matched, connected as Diane, by these four, in order: from us, an
+emote; from them, an emote; from us, said; from them, said.
+
+```
+Long distance to {{them}}, {{us}} {{message}}
+From afar, {{them}} {{message}}
+You page: {{message}}
+{{them}} pages: {{message}}
+```
+
+A pattern that isn't a valid regular expression is flagged under it. The
+patterns are saved for now but not yet acted on.
 
 Global's Settings tab holds three app-wide defaults — **Wrap long lines at
 word boundaries**, **Echo typed commands into the scrollback** and **Clear
@@ -583,6 +613,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/window-manager.ts`   | The set of open terminal windows and their placement                      |
 | `src/terminal-window.ts`  | One window: its BrowserWindow, connection, scrollback buffer and menu     |
 | `src/connection-manager.ts` | One window's connection: status, auto-login, status messages            |
+| `src/conversation-patterns.ts` | Conversation patterns as regular expressions, with their {{…}} shorthands |
 | `src/telnet.ts`           | A telnet session over TCP or TLS, with per-option negotiation handlers    |
 | `src/telnet-protocol.ts`  | Telnet byte-stream parser and command encoding (no I/O)                   |
 | `src/worlds.ts`           | Reading, validating and writing the worlds file                           |

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { Character, GlobalSettings, MruEntry, TriState, World } from "./worlds-types";
+import type { Character, ConversationPattern, GlobalSettings, MruEntry, TriState, World } from "./worlds-types";
 import { DEFAULT_GLOBAL_SETTINGS, DEFAULT_LOGIN_TEMPLATE, isValidPort } from "./world-utils";
 import { log } from "./logger";
 import { type KeyEnvelope, keyIdOf, open, parseEnvelope, seal } from "./crypto-keys";
@@ -124,6 +124,13 @@ function parseCharacter(value: unknown): Character | null {
   return { id: value.id, name, password, echoCommands, wordWrap, honorClear };
 }
 
+function parseConversationPattern(value: unknown): ConversationPattern | null {
+  if (!isObject(value) || !isString(value.template)) return null;
+  if (value.from !== "us" && value.from !== "them") return null;
+  if (value.kind !== "say" && value.kind !== "emote") return null;
+  return { template: value.template, from: value.from, kind: value.kind };
+}
+
 // Pre-tri-state worlds stored echoCommands as a plain boolean; map it
 // directly onto the matching tri-state value so an old file keeps behaving
 // the same way until someone deliberately changes it in the dialog.
@@ -149,6 +156,7 @@ export function parseWorld(value: unknown): World | null {
   const echoCommands = migrateEchoCommands(value.echoCommands);
   const wordWrap = optional(value.wordWrap, isTriState, "inherit");
   const honorClear = optional(value.honorClear, isTriState, "inherit");
+  const rawPatterns = value.conversationPatterns === undefined ? [] : value.conversationPatterns;
   const rawCharacters = value.characters === undefined ? [] : value.characters;
   if (
     name === undefined ||
@@ -160,11 +168,18 @@ export function parseWorld(value: unknown): World | null {
     echoCommands === undefined ||
     wordWrap === undefined ||
     honorClear === undefined ||
+    !Array.isArray(rawPatterns) ||
     !Array.isArray(rawCharacters)
   ) {
     return null;
   }
 
+  const conversationPatterns: ConversationPattern[] = [];
+  for (const raw of rawPatterns) {
+    const pattern = parseConversationPattern(raw);
+    if (pattern) conversationPatterns.push(pattern);
+    else log("warn", "worlds", "dropping malformed conversation pattern from world", value.id);
+  }
   const characters: Character[] = [];
   for (const raw of rawCharacters) {
     const character = parseCharacter(raw);
@@ -183,6 +198,7 @@ export function parseWorld(value: unknown): World | null {
     echoCommands,
     wordWrap,
     honorClear,
+    conversationPatterns,
     characters,
   };
 }
@@ -246,6 +262,7 @@ export function seedDefaultWorlds(): World[] {
       echoCommands: "inherit",
       wordWrap: "inherit",
       honorClear: "inherit",
+      conversationPatterns: [],
       characters: [
         {
           id: crypto.randomUUID(),

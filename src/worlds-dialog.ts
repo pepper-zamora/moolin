@@ -1,7 +1,7 @@
 // Worlds and characters dialog, shown inside the terminal window. Keeps the
 // loaded copy of the worlds list, edits it in place and saves the whole list
 // (via the main process) on each committed change.
-import type { Character, GlobalSettings, World } from "./worlds-types";
+import type { Character, ConversationPattern, GlobalSettings, World } from "./worlds-types";
 import {
   characterLabel,
   deleteCharacterPrompt,
@@ -13,6 +13,7 @@ import {
   worldLabel,
 } from "./world-utils";
 import { TabStrip } from "./tabs";
+import { patternError } from "./conversation-patterns";
 
 // "global" is the root node, whose settings apply to every world and
 // character beneath it.
@@ -40,6 +41,9 @@ const tabStrip = element<HTMLDivElement>("worlds-tab-strip");
 const settingsTab = element<HTMLButtonElement>("settings-tab");
 const conversationsTab = element<HTMLButtonElement>("conversations-tab");
 const conversationsPanel = element<HTMLDivElement>("conversations-panel");
+const conversationsPane = element<HTMLFormElement>("conversations-pane");
+const patternList = element<HTMLDivElement>("conversation-patterns");
+const addPatternBtn = element<HTMLButtonElement>("add-pattern-btn");
 // The selected tab carries over between selections and dialog openings.
 const tabs = new TabStrip(tabStrip);
 
@@ -434,6 +438,81 @@ function updateDependentFields(world: World): void {
   field(worldPane, "tlsAllowUntrusted").disabled = !!loadError || !world.tls;
 }
 
+function patternSelect(name: string, label: string, options: [string, string][], value: string): HTMLSelectElement {
+  const select = document.createElement("select");
+  select.name = name;
+  select.setAttribute("aria-label", label);
+  for (const [optionValue, text] of options) select.add(new Option(text, optionValue));
+  select.value = value;
+  return select;
+}
+
+// Shows, under a pattern's row, why it isn't a valid regular expression.
+function showPatternError(entry: HTMLElement, template: string): void {
+  const error = patternError(template);
+  const message = entry.querySelector<HTMLElement>(".pattern-error");
+  if (message) {
+    message.textContent = error ?? "";
+    message.hidden = !error;
+  }
+  entry.querySelector("input")?.setAttribute("aria-invalid", String(!!error));
+}
+
+// One entry per pattern, holding its index: a row with the pattern, who it's
+// from, whether it's said or emoted and a Remove button, and under that any
+// error in the pattern.
+function fillConversationsPane(world: World): void {
+  patternList.replaceChildren(
+    ...world.conversationPatterns.map((pattern, index) => {
+      const entry = document.createElement("div");
+      entry.className = "pattern";
+      entry.dataset.index = String(index);
+      const row = document.createElement("div");
+      row.className = "pattern-row";
+      const template = document.createElement("input");
+      template.name = "template";
+      template.type = "text";
+      template.spellcheck = false;
+      template.value = pattern.template;
+      template.setAttribute("aria-label", `Pattern ${index + 1}`);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "remove-pattern";
+      remove.textContent = "Remove";
+      remove.setAttribute("aria-label", `Remove pattern ${index + 1}`);
+      row.append(
+        template,
+        patternSelect(
+          "from",
+          "From",
+          [
+            ["them", "From them"],
+            ["us", "From us"],
+          ],
+          pattern.from,
+        ),
+        patternSelect(
+          "kind",
+          "Kind",
+          [
+            ["say", "Says"],
+            ["emote", "Emotes"],
+          ],
+          pattern.kind,
+        ),
+        remove,
+      );
+      const error = document.createElement("p");
+      error.className = "pattern-error";
+      error.id = `pattern-error-${index}`;
+      template.setAttribute("aria-describedby", error.id);
+      entry.append(row, error);
+      showPatternError(entry, pattern.template);
+      return entry;
+    }),
+  );
+}
+
 function fillCharacterPane(character: Character): void {
   field(characterPane, "name").value = character.name;
   const password = field(characterPane, "password");
@@ -480,7 +559,8 @@ function render(): void {
   worldPane.hidden = !world || !!character;
   characterPane.hidden = !character;
   updateTabs(!!world && !character);
-  for (const form of [globalPane, worldPane, characterPane]) {
+  if (world && !character) fillConversationsPane(world);
+  for (const form of [globalPane, worldPane, characterPane, conversationsPane]) {
     for (const el of Array.from(form.elements)) (el as HTMLInputElement).disabled = !!loadError;
   }
   if (selection === "global") fillGlobalPane();
@@ -541,11 +621,53 @@ globalPane.addEventListener("input", (event) => {
     globalSettings[el.name] = el.checked;
 });
 
+// The pattern a control in the Conversations tab belongs to.
+function patternOf(el: Element): { world: World; index: number; pattern: ConversationPattern } | null {
+  const { world } = selected();
+  const index = Number(el.closest<HTMLElement>(".pattern")?.dataset.index);
+  const pattern = world?.conversationPatterns[index];
+  return world && pattern ? { world, index, pattern } : null;
+}
+
+conversationsPane.addEventListener("input", (event) => {
+  const el = event.target as HTMLInputElement;
+  const found = patternOf(el);
+  if (!found) return;
+  if (el.name === "template") {
+    found.pattern.template = el.value;
+    const entry = el.closest<HTMLElement>(".pattern");
+    if (entry) showPatternError(entry, el.value);
+  } else if (el.name === "from") found.pattern.from = el.value as ConversationPattern["from"];
+  else if (el.name === "kind") found.pattern.kind = el.value as ConversationPattern["kind"];
+});
+
+patternList.addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest(".remove-pattern");
+  const found = button && patternOf(button);
+  if (!found) return;
+  found.world.conversationPatterns.splice(found.index, 1);
+  fillConversationsPane(found.world);
+  // Focus moves to the row that took its place, or Add Pattern after the last.
+  const rows = patternList.querySelectorAll<HTMLElement>(".pattern");
+  (rows[found.index]?.querySelector<HTMLElement>(".remove-pattern") ?? addPatternBtn).focus();
+  save();
+});
+
+addPatternBtn.addEventListener("click", () => {
+  const { world, character } = selected();
+  if (!world || character) return;
+  world.conversationPatterns.push({ template: "", from: "them", kind: "say" });
+  fillConversationsPane(world);
+  patternList.lastElementChild?.querySelector<HTMLInputElement>("input")?.focus();
+  save();
+});
+
 worldPane.addEventListener("change", save);
 characterPane.addEventListener("change", save);
 globalPane.addEventListener("change", save);
+conversationsPane.addEventListener("change", save);
 // Enter in a field commits it rather than submitting the form.
-for (const form of [globalPane, worldPane, characterPane]) {
+for (const form of [globalPane, worldPane, characterPane, conversationsPane]) {
   form.addEventListener("submit", (event) => event.preventDefault());
 }
 

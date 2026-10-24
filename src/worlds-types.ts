@@ -17,6 +17,21 @@ export interface GlobalSettings {
   honorClear: boolean;
 }
 
+// Who a conversation line comes from: the character we're connected as, or
+// the other one.
+export type ConversationSpeaker = "us" | "them";
+// Something said (shown as is) or an emote (shown after the speaker's name).
+export type ConversationKind = "say" | "emote";
+
+// One shape of server line that belongs in a private conversation between
+// two characters. In the template {{us}} and {{them}} stand for their names
+// and {{message}} for what's said or done; the rest is matched literally.
+export interface ConversationPattern {
+  template: string;
+  from: ConversationSpeaker;
+  kind: ConversationKind;
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -44,6 +59,7 @@ export interface World {
   echoCommands: TriState;
   wordWrap: TriState;
   honorClear: TriState;
+  conversationPatterns: ConversationPattern[];
   characters: Character[];
 }
 

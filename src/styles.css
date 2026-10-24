@@ -846,6 +846,25 @@ html, body {
   line-height: 1.4;
 }
 
+.pattern {
+  margin-bottom: 6px;
+}
+
+.pattern-row {
+  display: flex;
+  gap: 6px;
+}
+
+.pattern-error {
+  margin: 4px 0 0;
+  color: #f48771;
+}
+
+.pattern-row input {
+  flex: 1;
+  min-width: 0;
+}
+
 .password-row {
   display: flex;
   gap: 6px;

@@ -197,9 +197,18 @@
 
           <!-- Shown only while a world (not one of its characters) is selected. -->
           <div id="conversations-panel" class="tab-panel" role="tabpanel" aria-labelledby="conversations-tab" hidden>
-            <div class="pane">
-              <p class="placeholder">Settings for private conversations between characters on this world.</p>
-            </div>
+            <form id="conversations-pane" class="pane">
+              <p class="hint">
+                Patterns pick out the lines of a private conversation between two characters. Each is a regular
+                expression matched against the whole line (no need for ^ and $), where {{us}} stands for the character you're connected
+                as, {{them}} for the other one and {{message}} for what's said or done (or write the named groups
+                yourself: (?&lt;them&gt;\w+) and so on). For example, {{them}} pages: {{message}}
+              </p>
+              <div id="conversation-patterns"></div>
+              <div class="pattern-buttons">
+                <button id="add-pattern-btn" type="button">Add Pattern</button>
+              </div>
+            </form>
           </div>
 
           <div class="worlds-buttons">

@@ -43,6 +43,7 @@ test("parseWorld fills in defaults for fields missing from an older record", () 
     echoCommands: "inherit",
     wordWrap: "inherit",
     honorClear: "inherit",
+    conversationPatterns: [],
     characters: [],
   });
 });
@@ -59,11 +60,33 @@ test("parseWorld reads a fully-populated record, including characters", () => {
     echoCommands: "off",
     wordWrap: "on",
     honorClear: "on",
+    conversationPatterns: [
+      { template: "{{them}} pages: {{message}}", from: "them", kind: "say" },
+      { template: "From afar, {{them}} {{message}}", from: "them", kind: "emote" },
+    ],
     characters: [
       { id: "c", name: "Cowpernica", password: "pw", echoCommands: "inherit", wordWrap: "on", honorClear: "off" },
     ],
   };
   assert.deepEqual(parseWorld(record), { ...record, tlsAllowUntrusted: false });
+});
+
+test("parseWorld drops a malformed conversation pattern but keeps the rest", () => {
+  const world = parseWorld({
+    id: "a",
+    conversationPatterns: [
+      { template: "You page: {{message}}", from: "us", kind: "say" },
+      { template: "{{them}} pages: {{message}}", from: "someone", kind: "say" },
+      { template: 7, from: "them", kind: "say" },
+      { template: "{{them}} {{message}}", from: "them", kind: "shout" },
+      null,
+    ],
+  });
+  assert.deepEqual(world?.conversationPatterns, [{ template: "You page: {{message}}", from: "us", kind: "say" }]);
+});
+
+test("parseWorld rejects conversation patterns that aren't a list", () => {
+  assert.equal(parseWorld({ id: "a", conversationPatterns: "{{them}} pages: {{message}}" }), null);
 });
 
 test("parseWorld migrates an old plain-boolean echoCommands to the matching tri-state", () => {
