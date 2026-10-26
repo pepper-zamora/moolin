@@ -10,6 +10,8 @@ renames that section to the new version and date.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-26
+
 ### Added
 
 - A "Clear the screen when a Pueblo server asks" setting (Global, with World
@@ -137,6 +139,13 @@ renames that section to the new version and date.
 - Keyboard shortcuts now use Cmd instead of Ctrl on macOS, matching that
   platform's convention.
 
+## [0.1.1] - 2026-10-07
+
+### Fixed
+
+- The pacman package now installs on Arch: it no longer depends on
+  http-parser, which Arch has dropped, and lists the libraries Moolin needs.
+
 ## [0.1.0] - 2026-10-04
 
 The first public release.
@@ -163,5 +172,7 @@ The first public release.
   portable exe) and macOS (dmg and zip, Apple silicon and Intel). The
   Windows and macOS builds are unsigned.
 
-[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/pepper-zamora/moolin/compare/v0.1.1...v0.3.0
+[0.1.1]: https://github.com/pepper-zamora/moolin/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pepper-zamora/moolin/releases/tag/v0.1.0
