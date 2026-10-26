@@ -14,6 +14,12 @@ export interface ScrollbackReplay {
   // or reset numbered at or below it is already reflected here (see
   // TerminalWindow).
   seq: number;
+  // Whether the connection is in Pueblo mode at the end of the buffer, so a
+  // replay that no longer holds the server's greeting still reads the tags.
+  pueblo: boolean;
+  // Whether the server's greeting could still switch Pueblo on (no line has
+  // been sent to the server yet).
+  greetingOpen: boolean;
 }
 
 function byteLength(data: TerminalChunk): number {
@@ -41,9 +47,9 @@ export class ScrollbackBuffer {
   // One entry per line feed currently in the buffer, in order: the time that
   // line arrived, or null if unknown. Adding an entry per line feed on append
   // and dropping a dropped chunk's worth off the front keeps it aligned with
-  // exactly the line feeds a replay will feed to xterm — whose onLineFeed
-  // fires once for each (see line-feeds.ts) and never on wrap, so the
-  // renderer can consume these in lockstep to re-stamp each line.
+  // exactly the line feeds a replay will feed the scrollback, which makes one
+  // line break for each (see line-feeds.ts) and none on wrap, so the renderer
+  // can consume these in lockstep to re-stamp each line.
   private lineTimes: Array<number | null> = [];
 
   constructor(private readonly maxBytes: number) {}
@@ -57,7 +63,7 @@ export class ScrollbackBuffer {
 
   // Replaces the contents, e.g. with a log's history when a window connects.
   // `times` gives the arrival time of each line feed across `chunks`, in order
-  // (from the log's sidecar); omit it and the times come back as null (unknown).
+  // (read back from the log); omit it and the times come back as null (unknown).
   reset(chunks: TerminalChunk[], times: Array<number | null> | null = null): void {
     this.chunks = chunks.slice();
     this.bytes = 0;

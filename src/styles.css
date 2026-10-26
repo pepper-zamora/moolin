@@ -1,3 +1,32 @@
+/* Moolin's own Iosevka build (see font/private-build-plans.toml and "npm run
+   font:build"), bundled with the app so it's available without installing
+   anything. Four faces cover what the scrollback switches between (SGR bold
+   and italic); the build also has Condensed/Extended widths, unused here. */
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+}
+
 :root {
   color-scheme: dark;
 }
@@ -27,15 +56,95 @@ html, body {
   position: relative; /* anchors the find widget */
 }
 
+/* The scrollback: a scrolling element holding one div per line (see
+   scrollback-view.ts). The browser wraps and selects the text. */
 #terminal {
   flex: 1 1 auto;
   min-width: 0;
+  position: relative; /* the lines' offsetTop, for the gutter, is measured from here */
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 14px;
+  line-height: 1.25;
+  white-space: pre-wrap;
+  /* Wrap at the last column, mid-word, unless word wrap is on (a connection
+     setting: ScrollbackView.setWordWrap). */
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  tab-size: 8;
+  cursor: text;
+}
+
+#terminal.wrap-words {
+  word-break: normal;
+}
+
+#terminal ::selection,
+#terminal::selection {
+  /* Focus lives in the input area, so the scrollback is never focused; the
+     selection is drawn the same as a focused one rather than dimmed. */
+  background: #264f78;
+}
+
+::highlight(held-selection) {
+  background-color: #264f78;
+}
+
+/* Search matches; a translucent orange blended onto the black background. */
+::highlight(find-match) {
+  background-color: #4e1f00;
+}
+
+::highlight(find-active) {
+  background-color: #515c6a;
+}
+
+/* Measures a character cell (see ScrollbackView.refit). */
+#terminal .probe {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+}
+
+#terminal::-webkit-scrollbar {
+  width: 14px;
+}
+
+#terminal::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+#terminal::-webkit-scrollbar-thumb {
+  background: #5a5a5a;
+}
+
+#terminal::-webkit-scrollbar-thumb:hover {
+  background: #7a7a7a;
+}
+
+#terminal::-webkit-scrollbar-thumb:active {
+  background: #9a9a9a;
+}
+
+/* Strip over the scrollbar track marking search matches; drawn by find-widget.ts. */
+#search-ruler {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 14px;
+  height: 100%;
+  z-index: 5;
+  pointer-events: none;
 }
 
 /* A separate column to the left of the terminal, not part of its buffer.
-   Entries are positioned absolutely by renderer.ts to line up with the
-   terminal rows (xterm's cell height isn't just font-size, so alignment is
-   driven by measured pixel offsets, not CSS line-height here). It's purely
+   Entries are positioned absolutely by timestamp-gutter.ts to line up with
+   the lines (a wrapped line spans several rows, so alignment is driven by
+   measured pixel offsets, not by counting rows). It's purely
    visual: no pointer events, no text selection, so it never interferes with
    selecting or clicking the scrollback. */
 #gutter {
@@ -76,13 +185,105 @@ html, body {
   white-space: pre;
 }
 
+/* ANSI colours (the classes come from appearance() in ansi-parser.ts): the
+   16-colour palette as foreground (f), background (b), and the terminal's own
+   colours for inverse text on a default (fbg, bfg). */
+:root {
+  --fg: #ffffff;
+  --bg: #000000;
+  --c0: #2e3436;
+  --c1: #cc0000;
+  --c2: #4e9a06;
+  --c3: #c4a000;
+  --c4: #3465a4;
+  --c5: #75507b;
+  --c6: #06989a;
+  --c7: #d3d7cf;
+  --c8: #555753;
+  --c9: #ef2929;
+  --c10: #8ae234;
+  --c11: #fce94f;
+  --c12: #729fcf;
+  --c13: #ad7fa8;
+  --c14: #34e2e2;
+  --c15: #eeeeec;
+}
+
+.f0 { color: var(--c0); } .b0 { background-color: var(--c0); }
+.f1 { color: var(--c1); } .b1 { background-color: var(--c1); }
+.f2 { color: var(--c2); } .b2 { background-color: var(--c2); }
+.f3 { color: var(--c3); } .b3 { background-color: var(--c3); }
+.f4 { color: var(--c4); } .b4 { background-color: var(--c4); }
+.f5 { color: var(--c5); } .b5 { background-color: var(--c5); }
+.f6 { color: var(--c6); } .b6 { background-color: var(--c6); }
+.f7 { color: var(--c7); } .b7 { background-color: var(--c7); }
+.f8 { color: var(--c8); } .b8 { background-color: var(--c8); }
+.f9 { color: var(--c9); } .b9 { background-color: var(--c9); }
+.f10 { color: var(--c10); } .b10 { background-color: var(--c10); }
+.f11 { color: var(--c11); } .b11 { background-color: var(--c11); }
+.f12 { color: var(--c12); } .b12 { background-color: var(--c12); }
+.f13 { color: var(--c13); } .b13 { background-color: var(--c13); }
+.f14 { color: var(--c14); } .b14 { background-color: var(--c14); }
+.f15 { color: var(--c15); } .b15 { background-color: var(--c15); }
+.fbg { color: var(--bg); }
+.bfg { background-color: var(--fg); }
+.bd { font-weight: bold; }
+.dm { opacity: 0.6; }
+.it { font-style: italic; }
+.ul { text-decoration: underline; }
+.st { text-decoration: line-through; }
+.ul.st { text-decoration: underline line-through; }
+
+/* Web addresses in the output. */
+.url { text-decoration: underline; cursor: pointer; }
+
+/* Pueblo links: dotted until hovered, so they read as clickable without
+   fighting the colours the server chose. */
+.link { text-decoration: underline dotted; cursor: pointer; }
+.link:hover { text-decoration: underline; }
+
+/* The commands of a Pueblo link that offers several. */
+#link-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 8em;
+  max-width: 40em;
+  padding: 4px 0;
+  background: #252526;
+  border: 1px solid #454545;
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+}
+
+#link-menu button {
+  padding: 4px 16px;
+  border: 0;
+  background: none;
+  color: #ccc;
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+#link-menu button:hover {
+  background: #04395e;
+  color: #fff;
+}
+
 /* Scrollback find widget, styled after VS Code's: hangs from the top edge
    at the right, clear of the scrollbar and its overview ruler. */
 #find-widget {
   position: absolute;
   top: 0;
   right: 28px;
-  z-index: 10; /* above xterm's canvas layers */
+  z-index: 10; /* above the scrollback and its ruler */
   display: flex;
   align-items: center;
   gap: 2px;
@@ -228,6 +429,11 @@ html, body {
   white-space: nowrap;
 }
 
+#screen-size {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .security-icon,
 #logging-status {
   display: flex;
@@ -260,6 +466,24 @@ html, body {
 
 #security-shield {
   cursor: default;
+}
+
+#encryption-status {
+  display: flex;
+  cursor: pointer;
+}
+
+#encryption-status svg {
+  fill: none;
+  stroke: #b8b8b8;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#encryption-status[data-state="locked"] svg {
+  stroke: #e5a50a;
+  fill: rgba(229, 165, 10, 0.25);
 }
 
 /* Fill and mark per state; the mark (check, ?, x) carries the meaning for
@@ -365,12 +589,11 @@ html, body {
   color: #cca700;
 }
 
-/* Worlds dialog */
+/* Dialog chrome shared by every modal <dialog> (Worlds, Preferences); each
+   dialog's own width/height is set on its #id instead, below. */
 
-#worlds-dialog {
+.app-dialog {
   box-sizing: border-box;
-  width: min(760px, calc(100vw - 32px));
-  height: min(480px, calc(100vh - 32px));
   padding: 0;
   background: #252526;
   color: #d4d4d4;
@@ -381,12 +604,19 @@ html, body {
   font-size: 13px;
 }
 
-#worlds-dialog * {
+.app-dialog * {
   box-sizing: border-box;
 }
 
-#worlds-dialog::backdrop {
+.app-dialog::backdrop {
   background: rgba(0, 0, 0, 0.4);
+}
+
+/* Worlds dialog */
+
+#worlds-dialog {
+  width: min(760px, calc(100vw - 32px));
+  height: min(480px, calc(100vh - 32px));
 }
 
 .worlds-layout {
@@ -639,10 +869,10 @@ html, body {
   padding-top: 12px;
 }
 
-#worlds-dialog input[type="text"],
-#worlds-dialog input[type="number"],
-#worlds-dialog input[type="password"],
-#worlds-dialog button {
+.app-dialog input[type="text"],
+.app-dialog input[type="number"],
+.app-dialog input[type="password"],
+.app-dialog button {
   background: #3c3c3c;
   color: #d4d4d4;
   border: 1px solid #555;
@@ -651,32 +881,157 @@ html, body {
   font: inherit;
 }
 
-#worlds-dialog button {
+.app-dialog button {
   cursor: pointer;
   min-width: 80px;
 }
 
-#worlds-dialog button u {
+.app-dialog button u {
   text-decoration: none;
 }
 
-#worlds-dialog.show-mnemonics button u {
+.app-dialog.show-mnemonics button u {
   text-decoration: underline;
 }
 
-#worlds-dialog button.primary {
+.app-dialog button.primary {
   background: #0e639c;
   border-color: #0e639c;
   color: #fff;
 }
 
-#worlds-dialog button:disabled,
-#worlds-dialog input:disabled {
+.app-dialog button:disabled,
+.app-dialog input:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
-#worlds-dialog input:focus,
-#worlds-dialog button:focus-visible {
+.app-dialog input:focus,
+.app-dialog button:focus-visible {
   outline: 1px solid #007fd4;
+}
+
+/* Preferences dialog */
+
+#preferences-dialog {
+  width: min(480px, calc(100vw - 32px));
+  height: min(560px, calc(100vh - 32px));
+}
+
+.prefs-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 12px 16px;
+  overflow: hidden; /* only the font list scrolls */
+}
+
+#pref-font-size {
+  width: 64px;
+}
+
+#pref-font-list {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow: auto;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 3px;
+}
+
+.font-option {
+  display: block;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid #333;
+}
+
+.font-option:last-child {
+  border-bottom: none;
+}
+
+.font-option:hover {
+  background: #2a2d2e;
+}
+
+.font-option-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.font-option-label {
+  font-weight: 600;
+}
+
+.font-sample {
+  margin-top: 6px;
+  margin-left: 22px;
+  white-space: pre;
+  line-height: 1.4;
+  opacity: 0.9;
+}
+
+/* Encryption dialog */
+
+#encryption-dialog {
+  width: min(460px, calc(100vw - 32px));
+}
+
+.enc-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+
+.enc-layout h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.enc-layout p,
+.enc-layout ul {
+  margin: 0;
+  line-height: 1.4;
+}
+
+.enc-layout label:not(.check) {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 6px;
+}
+
+.enc-note {
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+#enc-manage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+#enc-error {
+  color: #f85149;
+}
+
+#enc-warnings {
+  padding-left: 18px;
+  color: #e5a50a;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.enc-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 6px;
 }

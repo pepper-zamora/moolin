@@ -1,11 +1,12 @@
 // Worlds and characters dialog, shown inside the terminal window. Keeps the
 // loaded copy of the worlds list, edits it in place and saves the whole list
 // (via the main process) on each committed change.
-import type { Character, World } from "./worlds-types";
+import type { Character, GlobalSettings, World } from "./worlds-types";
 import {
   characterLabel,
   deleteCharacterPrompt,
   deleteWorldPrompt,
+  DEFAULT_GLOBAL_SETTINGS,
   isConnectable,
   newCharacter,
   newWorld,
@@ -29,7 +30,7 @@ const newWorldBtn = element<HTMLButtonElement>("new-world-btn");
 const newCharacterBtn = element<HTMLButtonElement>("new-character-btn");
 const errorEl = element<HTMLDivElement>("worlds-error");
 const emptyPane = element<HTMLDivElement>("empty-pane");
-const globalPane = element<HTMLDivElement>("global-pane");
+const globalPane = element<HTMLFormElement>("global-pane");
 const worldPane = element<HTMLFormElement>("world-pane");
 const characterPane = element<HTMLFormElement>("character-pane");
 const showPasswordBtn = element<HTMLButtonElement>("show-password-btn");
@@ -45,6 +46,7 @@ function field(form: HTMLFormElement, name: string): HTMLInputElement {
 }
 
 let worlds: World[] = [];
+let globalSettings: GlobalSettings = DEFAULT_GLOBAL_SETTINGS;
 // Set when the worlds file exists but couldn't be read; editing is then
 // disabled, and main refuses saves anyway, so the user's file isn't
 // overwritten.
@@ -77,6 +79,7 @@ async function load(): Promise<void> {
   const result = await window.moolin.worlds.load();
   loadError = result.error ?? null;
   worlds = result.worlds;
+  globalSettings = result.globalSettings;
   showError(loadError ? `${loadError}. Changes will not be saved.` : (result.warning ?? null));
   newWorldBtn.disabled = !!loadError;
   // Drop a selection that no longer exists.
@@ -92,8 +95,9 @@ let saving: Promise<void> = Promise.resolve();
 function save(): void {
   if (loadError) return;
   const snapshot = structuredClone(worlds);
+  const globalSnapshot = structuredClone(globalSettings);
   saving = saving
-    .then(() => window.moolin.worlds.save(snapshot))
+    .then(() => window.moolin.worlds.save(snapshot, globalSnapshot))
     .then(
       (result) => showError(result.error ?? null),
       (err: unknown) => showError(`Could not save: ${err instanceof Error ? err.message : String(err)}`),
@@ -415,7 +419,9 @@ function fillWorldPane(world: World): void {
   field(worldPane, "tlsAllowUntrusted").checked = world.tlsAllowUntrusted;
   field(worldPane, "autoLogin").checked = world.autoLogin;
   field(worldPane, "loginTemplate").value = world.loginTemplate;
-  field(worldPane, "echoCommands").checked = world.echoCommands;
+  field(worldPane, "echoCommands").value = world.echoCommands;
+  field(worldPane, "wordWrap").value = world.wordWrap;
+  field(worldPane, "honorClear").value = world.honorClear;
   updateDependentFields(world);
 }
 
@@ -432,6 +438,15 @@ function fillCharacterPane(character: Character): void {
   password.value = character.password;
   password.type = "password";
   showPasswordBtn.textContent = "Show";
+  field(characterPane, "echoCommands").value = character.echoCommands;
+  field(characterPane, "wordWrap").value = character.wordWrap;
+  field(characterPane, "honorClear").value = character.honorClear;
+}
+
+function fillGlobalPane(): void {
+  field(globalPane, "wordWrap").checked = globalSettings.wordWrap;
+  field(globalPane, "echoCommands").checked = globalSettings.echoCommands;
+  field(globalPane, "honorClear").checked = globalSettings.honorClear;
 }
 
 function updateButtons(): void {
@@ -449,10 +464,11 @@ function render(): void {
   globalPane.hidden = selection !== "global";
   worldPane.hidden = !world || !!character;
   characterPane.hidden = !character;
-  for (const form of [worldPane, characterPane]) {
+  for (const form of [globalPane, worldPane, characterPane]) {
     for (const el of Array.from(form.elements)) (el as HTMLInputElement).disabled = !!loadError;
   }
-  if (character) fillCharacterPane(character);
+  if (selection === "global") fillGlobalPane();
+  else if (character) fillCharacterPane(character);
   else if (world) fillWorldPane(world);
   updateButtons();
 }
@@ -475,9 +491,13 @@ worldPane.addEventListener("input", (event) => {
     case "tls":
     case "tlsAllowUntrusted":
     case "autoLogin":
-    case "echoCommands":
       world[el.name] = el.checked;
       updateDependentFields(world);
+      break;
+    case "echoCommands":
+    case "wordWrap":
+    case "honorClear":
+      world[el.name] = el.value as World["echoCommands"];
       break;
     case "name":
     case "host":
@@ -494,13 +514,22 @@ characterPane.addEventListener("input", (event) => {
   if (!character) return;
   const el = event.target as HTMLInputElement;
   if (el.name === "name" || el.name === "password") character[el.name] = el.value;
+  else if (el.name === "echoCommands" || el.name === "wordWrap" || el.name === "honorClear")
+    character[el.name] = el.value as Character["echoCommands"];
   if (el.name === "name") renderTree();
+});
+
+globalPane.addEventListener("input", (event) => {
+  const el = event.target as HTMLInputElement;
+  if (el.name === "wordWrap" || el.name === "echoCommands" || el.name === "honorClear")
+    globalSettings[el.name] = el.checked;
 });
 
 worldPane.addEventListener("change", save);
 characterPane.addEventListener("change", save);
+globalPane.addEventListener("change", save);
 // Enter in a field commits it rather than submitting the form.
-for (const form of [worldPane, characterPane]) {
+for (const form of [globalPane, worldPane, characterPane]) {
   form.addEventListener("submit", (event) => event.preventDefault());
 }
 
@@ -541,10 +570,11 @@ window.moolin.worlds.onChanged(() => {
 // - in the tree: arrows, Home/End, Enter, Delete and the context menu keys
 //   (see the tree's keydown handler above);
 // - in the tab strip: Left/Right and Home/End move between tabs (tabs.ts);
-// - anywhere: Ctrl+Page Down / Ctrl+Page Up (or Ctrl+Tab / Ctrl+Shift+Tab)
-//   switch to the next/previous tab, F6 / Shift+F6 jump between the tree,
-//   the tab strip and the selected tab's first field, Alt+letter presses a
-//   button or selects a tab by its underlined letter, and Escape closes.
+// - anywhere: Ctrl+Page Down / Ctrl+Page Up (or Ctrl+Tab / Ctrl+Shift+Tab;
+//   Cmd on macOS) switch to the next/previous tab, F6 / Shift+F6 jump
+//   between the tree, the tab strip and the selected tab's first field,
+//   Alt+letter presses a button or selects a tab by its underlined letter,
+//   and Escape closes.
 
 // The dialog's areas for F6, in order.
 const areas = ["tree", "tabs", "panel"] as const;
@@ -580,15 +610,15 @@ function focusArea(area: Area): boolean {
 }
 
 dialog.addEventListener("keydown", (event) => {
-  const ctrlOnly = event.ctrlKey && !event.altKey && !event.metaKey;
+  const modOnly = (event.ctrlKey || event.metaKey) && !event.altKey;
   const plain = !event.ctrlKey && !event.altKey && !event.metaKey;
-  if (ctrlOnly && !event.shiftKey && (event.key === "PageDown" || event.key === "PageUp")) {
+  if (modOnly && !event.shiftKey && (event.key === "PageDown" || event.key === "PageUp")) {
     event.preventDefault();
     // Focus follows the switch from inside the tabs or their panel, where
     // the field that had it may have just been hidden; from the tree, the
     // tree keeps it.
     tabs.step(event.key === "PageDown" ? 1 : -1, { focus: areaOf(document.activeElement) !== "tree" });
-  } else if (ctrlOnly && event.key === "Tab") {
+  } else if (modOnly && event.key === "Tab") {
     event.preventDefault();
     tabs.step(event.shiftKey ? -1 : 1, { focus: areaOf(document.activeElement) !== "tree" });
   } else if (plain && event.key === "F6") {

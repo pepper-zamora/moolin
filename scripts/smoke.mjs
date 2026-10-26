@@ -6,11 +6,18 @@
 // Everything runs in a throwaway sandbox: its own config folder (so its own
 // preferences and single-instance lock, apart from a Moolin you have
 // running), worlds file and Documents folder (for session logs), and a local
-// server to connect to. Windows open on screen while it runs. Linux only,
-// since it sandboxes via XDG_CONFIG_HOME and user-dirs.dirs.
+// server to connect to. Windows open on screen while it runs (so it needs a
+// real display; on headless Linux use xvfb-run).
+//
+// On Linux, the sandbox works by setting XDG_CONFIG_HOME and faking
+// user-dirs.dirs, which Electron's app.getPath("userData"/"documents")
+// honors there. Elsewhere (macOS, Windows) Electron ignores both, so main.ts
+// instead reads MOOLIN_CONFIG_DIR/MOOLIN_DOCUMENTS_DIR directly when set and
+// redirects app.setPath() itself before anything reads those paths.
 //
 // To check a packaged build instead, set MOOLIN_SMOKE_APP to its executable
-// (release/linux-unpacked/moolin, or the AppImage).
+// (release/linux-unpacked/moolin, the AppImage, or the macOS .app's binary
+// inside Contents/MacOS/).
 //
 // Exits non-zero if any check fails.
 import { spawn } from "node:child_process";
@@ -24,11 +31,10 @@ const ROOT = path.join(import.meta.dirname, "..");
 const packagedApp = process.env.MOOLIN_SMOKE_APP && path.resolve(process.env.MOOLIN_SMOKE_APP);
 const electron = createRequire(import.meta.url)("electron");
 const TIMEOUT_MS = 10000;
+// Focus returns to the input area this long after a click in the scrollback,
+// the time the system allows for it to become a double click (see renderer.ts).
+const FOCUS_RETURN_MS = 650;
 
-if (process.platform !== "linux") {
-  console.error("smoke: Linux only for now (it sandboxes the app via XDG_CONFIG_HOME)");
-  process.exit(2);
-}
 if (packagedApp && !fs.existsSync(packagedApp)) {
   console.error(`smoke: no app at ${packagedApp}`);
   process.exit(2);
@@ -59,13 +65,43 @@ const documentsDir = path.join(sandbox, "Documents");
 const worldsFile = path.join(sandbox, "worlds");
 fs.mkdirSync(configDir);
 fs.mkdirSync(documentsDir);
-fs.writeFileSync(path.join(configDir, "user-dirs.dirs"), `XDG_DOCUMENTS_DIR="${documentsDir}"\n`);
-const env = { ...process.env, XDG_CONFIG_HOME: configDir };
-delete env.ELECTRON_RUN_AS_NODE;
 
-// A server that greets each connection and records what it's sent.
+// The first phase of the run is not interested in being offered encryption
+// (the encryption phase at the end starts from "ask" again).
+function writePreferences(prompt) {
+  const dir = process.platform === "linux" ? path.join(configDir, "Moolin") : configDir;
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "preferences.json"), JSON.stringify({ encryptionPrompt: prompt }));
+}
+writePreferences("never");
+
+const env = { ...process.env };
+delete env.ELECTRON_RUN_AS_NODE;
+// Where Electron actually resolves app.getPath("userData") to, given how
+// each platform's branch below redirects it; used to find DevToolsActivePort.
+let userDataDir;
+if (process.platform === "linux") {
+  // Electron's default userData is $XDG_CONFIG_HOME/<app name>.
+  fs.writeFileSync(path.join(configDir, "user-dirs.dirs"), `XDG_DOCUMENTS_DIR="${documentsDir}"\n`);
+  env.XDG_CONFIG_HOME = configDir;
+  userDataDir = path.join(configDir, "Moolin");
+} else {
+  // macOS/Windows: Electron doesn't consult XDG_CONFIG_HOME or
+  // user-dirs.dirs, so redirect the paths directly (main.ts honors these,
+  // via app.setPath, which takes configDir as the literal userData path —
+  // no app-name subdirectory appended).
+  env.MOOLIN_CONFIG_DIR = configDir;
+  env.MOOLIN_DOCUMENTS_DIR = documentsDir;
+  userDataDir = configDir;
+}
+
+// A server that greets each connection and records what it's sent. Also
+// keeps the latest socket around so a check can push arbitrary data to the
+// client on demand (see the copy checks below).
 let received = "";
+let latestSocket = null;
 const server = net.createServer((socket) => {
+  latestSocket = socket;
   socket.on("data", (data) => {
     received += data.toString();
   });
@@ -142,7 +178,7 @@ class Page {
   // A point inside the scrollback, `dx` pixels in from its left edge.
   async scrollbackPoint(dx = 20) {
     return this.evaluate(
-      `(() => { const r = document.querySelector("#terminal .xterm-screen").getBoundingClientRect(); return { x: r.x + ${dx}, y: r.y + 10 }; })()`,
+      `(() => { const r = document.querySelector("#terminal").getBoundingClientRect(); return { x: r.x + ${dx}, y: r.y + 10 }; })()`,
     );
   }
 
@@ -150,11 +186,13 @@ class Page {
     await this.call("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount });
   }
 
-  async clickScrollback() {
+  // `settle` waits for focus to come back to the input area, which is put
+  // there once the time for a double click has passed (or at the first key).
+  async clickScrollback(settle = true) {
     const point = await this.scrollbackPoint();
     await this.mouse("mousePressed", point);
     await this.mouse("mouseReleased", point);
-    await sleep(150); // focus is put right after the event that moved it
+    if (settle) await sleep(FOCUS_RETURN_MS);
   }
 
   async dragInScrollback() {
@@ -162,7 +200,7 @@ class Page {
     await this.mouse("mousePressed", from);
     for (let i = 1; i <= 5; i++) await this.mouse("mouseMoved", { x: from.x + i * 15, y: from.y });
     await this.mouse("mouseReleased", { x: from.x + 75, y: from.y });
-    await sleep(150);
+    await sleep(FOCUS_RETURN_MS);
   }
 
   async doubleClickScrollback() {
@@ -174,15 +212,116 @@ class Page {
     await sleep(150);
   }
 
+  // The scrollback's lines as the page has them: one element per line the
+  // server sent, however many rows it wraps to.
+  async lineTexts() {
+    return this.evaluate(`Array.from(document.querySelectorAll("#terminal .line"), (line) => line.textContent)`);
+  }
+
+  // How many line elements the scrollback holds.
+  async lineCount() {
+    return this.evaluate(`document.querySelectorAll("#terminal .line").length`);
+  }
+
+  // The screen position of character `offset` of the newest line starting
+  // with `prefix` (null if there is none): its top-left corner plus a pixel
+  // when `edge` is "left", and the middle of its box when "middle". A drag
+  // that starts at one character's left edge and ends at another's selects
+  // exactly the characters between them. Offsets past the end of the text
+  // give the right edge of the last character.
+  async textPoint(prefix, offset, edge = "left") {
+    return this.evaluate(`(() => {
+      const prefix = ${JSON.stringify(prefix)};
+      const offset = ${offset};
+      const line = Array.from(document.querySelectorAll("#terminal .line")).reverse().find((l) => l.textContent.startsWith(prefix));
+      if (!line) return null;
+      const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
+      let seen = 0;
+      let last = null;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        last = node;
+        if (offset < seen + node.length) {
+          const range = document.createRange();
+          range.setStart(node, offset - seen);
+          range.setEnd(node, offset - seen + 1);
+          const box = range.getBoundingClientRect();
+          return { x: ${edge === "middle" ? "box.x + box.width / 2" : "box.x + 1"}, y: box.y + box.height / 2 };
+        }
+        seen += node.length;
+      }
+      if (!last) return null;
+      const range = document.createRange();
+      range.setStart(last, last.length - 1);
+      range.setEnd(last, last.length);
+      const box = range.getBoundingClientRect();
+      return { x: box.right - 1, y: box.y + box.height / 2 };
+    })()`);
+  }
+
+  // Drags a selection from one point to another with real mouse events, in
+  // many small steps with a frame between them, as a hand would.
+  async dragSelect(from, to) {
+    await this.mouse("mousePressed", from);
+    const steps = 20;
+    for (let i = 1; i <= steps; i++) {
+      await this.mouse("mouseMoved", {
+        x: from.x + ((to.x - from.x) * i) / steps,
+        y: from.y + ((to.y - from.y) * i) / steps,
+      });
+      await sleep(10);
+    }
+    await this.mouse("mouseReleased", to);
+    await sleep(150);
+  }
+
+  // Selects characters [start, end) of the newest line starting with `prefix`.
+  async selectText(prefix, start, end) {
+    const from = await this.textPoint(prefix, start);
+    const to = await this.textPoint(prefix, end);
+    if (!from || !to) throw new Error(`couldn't find a line starting with ${JSON.stringify(prefix)}`);
+    await this.dragSelect(from, to);
+  }
+
+  // Selects from character `start` of one line to character `end` of another.
+  async selectAcross(fromPrefix, start, toPrefix, end) {
+    const from = await this.textPoint(fromPrefix, start);
+    const to = await this.textPoint(toPrefix, end);
+    if (!from || !to) throw new Error("couldn't find both lines");
+    await this.dragSelect(from, to);
+  }
+
+  // Clicks `count` times in a row at a point (2 selects a word, 3 a line).
+  async clickAt(point, count) {
+    for (let clickCount = 1; clickCount <= count; clickCount++) {
+      await this.mouse("mousePressed", point, clickCount);
+      await this.mouse("mouseReleased", point, clickCount);
+    }
+    await sleep(150);
+  }
+
+  // What Ctrl+C put on the clipboard.
+  async copy() {
+    await this.key("c", "KeyC", 67, 2 /* Ctrl */);
+    await sleep(150);
+    return this.evaluate("window.moolin.clipboard.readText()");
+  }
+
   async key(key, code, keyCode, modifiers = 0) {
     for (const type of ["rawKeyDown", "keyUp"]) {
       await this.call("Input.dispatchKeyEvent", { type, key, code, windowsVirtualKeyCode: keyCode, modifiers });
     }
   }
 
-  // Types `text` wherever focus is, then presses Enter.
+  // Types `text` wherever focus is, then presses Enter. Each character goes
+  // down as a real key press does, a keydown then the character, since the
+  // page may act on the keydown (the first one after a click in the
+  // scrollback is what moves focus to the input area).
   async typeLine(text) {
-    for (const char of text) await this.call("Input.dispatchKeyEvent", { type: "char", text: char });
+    for (const char of text) {
+      await this.call("Input.dispatchKeyEvent", { type: "rawKeyDown", key: char, text: char });
+      await this.call("Input.dispatchKeyEvent", { type: "char", text: char });
+      await this.call("Input.dispatchKeyEvent", { type: "keyUp", key: char });
+    }
     await this.key("Enter", "Enter", 13);
   }
 
@@ -226,7 +365,7 @@ const pages = [];
 try {
   launch("--remote-debugging-port=0");
   // Chromium writes the port it picked into the profile folder.
-  const portFile = path.join(configDir, "Moolin", "DevToolsActivePort");
+  const portFile = path.join(userDataDir, "DevToolsActivePort");
   devtoolsPort = await waitFor("the app to start", () =>
     fs.existsSync(portFile) ? Number(fs.readFileSync(portFile, "utf8").split("\n")[0]) : 0,
   );
@@ -240,6 +379,11 @@ try {
   console.log("smoke: connected window");
   await check("connects to a world", async () => {
     await main.evaluate(
+      // wordWrap is forced on here (rather than just for its own checks,
+      // below) so they can reuse this same connection instead of opening a
+      // second window mid-run — word wrap only affects how server output is
+      // displayed, so it doesn't interfere with any of the other checks that
+      // share this connection.
       `window.moolin.connect(${JSON.stringify({
         id: "smoke",
         name: "Smoke Test",
@@ -249,7 +393,8 @@ try {
         tlsAllowUntrusted: false,
         autoLogin: false,
         loginTemplate: "",
-        echoCommands: true,
+        echoCommands: "on",
+        wordWrap: "on",
         characters: [],
       })}, null)`,
     );
@@ -257,6 +402,28 @@ try {
       (await main.evaluate("document.getElementById('status-text').textContent")).startsWith("Connected"),
     );
     expectEqual(await main.activeElement(), "input-area", "focus once connected");
+  });
+
+  // A Pueblo world announces itself; Moolin answers, and from then on its
+  // links can be hovered (the status bar says what they send) and clicked.
+  // Runs before anything is typed: the greeting only counts until the first
+  // line is sent to the server (ConnectionManager.isGreetingOpen).
+  await check("a Pueblo greeting is answered, and its links show their command and send it", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    received = "";
+    latestSocket.write('This world is Pueblo 1.0 Enhanced.\r\nExits: <a xch_cmd="north|n">north</a><br>\r\n');
+    await waitFor("the Pueblo reply", () => received.includes("PUEBLOCLIENT 2.01\r\n"), 3000);
+    await waitFor("the link", () => main.evaluate("!!document.querySelector('#terminal .link')"), 3000);
+    const status = () => main.evaluate("document.getElementById('status-text').textContent");
+    const before = await status();
+    const point = await main.textPoint("Exits:", 8, "middle");
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
+    await waitFor("the link's command in the status bar", async () => (await status()) === "Send: north | n", 2000);
+    received = "";
+    await main.clickAt(point, 1);
+    await waitFor("the command", () => received === "north\r\n", 2000);
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...(await main.textPoint("Exits:", 0, "middle")) });
+    await waitFor("the status to return", async () => (await status()) === before, 2000);
   });
 
   await check("typing in the input area reaches the server", () => typingReachesServer(main, "look"));
@@ -273,10 +440,146 @@ try {
     await typingReachesServer(main, "after drag");
   });
 
+  await check("typing straight after clicking the scrollback reaches the input area", async () => {
+    await main.clickScrollback(false);
+    await typingReachesServer(main, "straight after click");
+  });
+
   await check("double-clicking the scrollback leaves typing in the input area", async () => {
     await main.doubleClickScrollback();
     expectEqual(await main.activeElement(), "input-area", "focus after the double-click");
     await typingReachesServer(main, "after double-click");
+  });
+
+  // Copying from the scrollback gives exactly the text selected, however the
+  // lines wrap on screen. The long line below is built long enough (many
+  // "words", far wider than any window) to wrap at least twice, so a
+  // selection can start on one row and end on another.
+  const longLine = Array.from({ length: 15 }, (_, i) => `wordNumber${i}IsDeliberatelyLong`).join(" ");
+  const cols = Number((await main.evaluate("document.getElementById('screen-size').textContent")).split("x")[0]);
+  await check("a word-wrapped long line copies back as exactly one line, with no padding", async () => {
+    if (!latestSocket) throw new Error("no server socket to write the long line to");
+    if (cols >= longLine.length) throw new Error(`test window too wide (cols=${cols}) for this line to wrap`);
+    latestSocket.write(`${longLine}\r\n`);
+    await waitFor("the long line", async () => (await main.lineTexts()).includes(longLine), 3000);
+    await main.selectText("wordNumber0", 0, longLine.length);
+    expectEqual(await main.copy(), longLine, "clipboard after copying the whole wrapped line");
+  });
+
+  await check("a selection crossing a wrap point copies exactly the selected text", async () => {
+    await main.selectText("wordNumber0", cols - 10, cols + 10);
+    expectEqual(await main.copy(), longLine.slice(cols - 10, cols + 10), "clipboard after copying across a wrap");
+  });
+
+  await check("a selection confined to one row of a wrapped paragraph copies precisely", async () => {
+    await main.selectText("wordNumber0", 0, 10); // "wordNumber"
+    expectEqual(await main.copy(), longLine.slice(0, 10), "clipboard after a single-row selection");
+  });
+
+  await check("double-clicking a word inside a wrapped paragraph copies just that word", async () => {
+    const point = await main.textPoint("wordNumber0", longLine.indexOf("wordNumber1") + 5, "middle");
+    await main.clickAt(point, 2);
+    expectEqual(await main.copy(), "wordNumber1IsDeliberatelyLong", "clipboard after double-clicking a word");
+  });
+
+  // The third standard gesture: triple-click selects a whole line, and a
+  // wrapped one is still one line.
+  await check("triple-clicking a wrapped paragraph copies the whole line", async () => {
+    await main.clickAt(await main.textPoint("wordNumber0", 5, "middle"), 3);
+    expectEqual(await main.copy(), longLine, "clipboard after triple-clicking the wrapped paragraph");
+  });
+
+  await check("a partial selection on a short line is copied precisely", async () => {
+    if (!latestSocket) throw new Error("no server socket to write the short line to");
+    latestSocket.write("short line\r\n");
+    await waitFor("the short line", async () => (await main.lineTexts()).includes("short line"), 3000);
+    await main.selectText("short line", 0, 5);
+    expectEqual(await main.copy(), "short", "clipboard after copying part of a short line");
+  });
+
+  // A selection across separate lines takes the selected part of the first and
+  // last, and every middle line whole, joined by newlines.
+  await check("a selection spanning parts of two lines copies just the selected part of each", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    latestSocket.write("alpha bravo charlie\r\ndelta echo foxtrot\r\n");
+    await waitFor("both lines", async () => (await main.lineTexts()).includes("delta echo foxtrot"), 3000);
+    await main.selectAcross("alpha bravo", 6, "delta echo", 5); // "bravo charlie" .. "delta"
+    expectEqual(await main.copy(), "bravo charlie\ndelta", "clipboard after spanning two partial lines");
+  });
+
+  await check("a selection spanning two partial lines with a whole line between copies all three", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    latestSocket.write("golf hotel india\r\njuliet kilo lima\r\nmike november oscar\r\n");
+    await waitFor("all three lines", async () => (await main.lineTexts()).includes("mike november oscar"), 3000);
+    await main.selectAcross("golf hotel", 5, "mike november", 6);
+    expectEqual(await main.copy(), "hotel india\njuliet kilo lima\nmike n", "clipboard after spanning three lines");
+  });
+
+  // Select All (Cmd/Ctrl+A) selects the input line, so it can be typed over,
+  // unless something is selected in the scrollback, when it selects the whole
+  // scrollback.
+  await check("Select All selects the input line, or the scrollback when it has a selection", async () => {
+    const input = () =>
+      main.evaluate(`(() => { const i = document.getElementById("input-area"); return [i.selectionStart, i.selectionEnd, i.value.length]; })()`);
+    const pageSelection = () => main.evaluate("getSelection().toString()");
+    // The earlier checks left a selection in the scrollback; clicking into the
+    // input line is what lets go of it.
+    await main.evaluate(`document.getElementById("input-area").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+    await main.evaluate(`(() => { const i = document.getElementById("input-area"); i.focus(); i.value = "say hello"; i.setSelectionRange(9, 9); })()`);
+    await main.key("a", "KeyA", 65, 2 /* Ctrl */);
+    await sleep(150);
+    expectEqual(JSON.stringify(await input()), "[0,9,9]", "input selection after Select All with nothing selected above");
+    // Select something in the scrollback with the mouse; focus returns to the input line.
+    await main.selectText("Welcome to the smoke test", 0, 7);
+    await waitFor("focus back in the input line", async () => (await main.activeElement()) === "input-area", 2000);
+    await main.key("a", "KeyA", 65, 2 /* Ctrl */);
+    await sleep(150);
+    const everything = (await main.lineTexts()).join("\n");
+    const whole = await pageSelection();
+    if (whole.trimEnd() !== everything.trimEnd()) {
+      throw new Error(
+        `Select All with a scrollback selection didn't select the whole scrollback (${whole.length} of ${everything.length} characters)`,
+      );
+    }
+    // Clicking into the input line lets go of the scrollback selection, so Select All is the input line's again.
+    await main.evaluate(`document.getElementById("input-area").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))`);
+    await main.evaluate(`(() => { const i = document.getElementById("input-area"); i.focus(); i.setSelectionRange(3, 3); })()`);
+    await main.key("a", "KeyA", 65, 2 /* Ctrl */);
+    await sleep(150);
+    expectEqual(JSON.stringify(await input()), "[0,9,9]", "input selection after clicking back into the input line");
+    await main.evaluate(`document.getElementById("input-area").value = ""`);
+  });
+
+  // A web address in the output shows where it goes in the status bar's left
+  // area while the pointer is over it, and the connection status returns when
+  // it leaves.
+  await check("hovering a web address shows it in the status bar, and leaving restores the status", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    latestSocket.write("docs at https://example.com/page now\r\n");
+    await waitFor("the address", async () => (await main.lineTexts()).includes("docs at https://example.com/page now"), 3000);
+    const status = () => main.evaluate("document.getElementById('status-text').textContent");
+    const before = await status();
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...(await main.textPoint("docs at", 12, "middle")) });
+    await waitFor("the address in the status bar", async () => (await status()) === "https://example.com/page", 2000);
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", ...(await main.textPoint("docs at", 0, "middle")) });
+    await waitFor("the status to return", async () => (await status()) === before, 2000);
+  });
+
+  // Ctrl+L scrolls everything so far out of view with blank lines, once.
+  await check("Clear Screen moves earlier output out of view, and a second press adds nothing", async () => {
+    await main.key("l", "KeyL", 76, 2 /* Ctrl */);
+    await sleep(300);
+    const visibleText = () =>
+      main.evaluate(`Array.from(document.querySelectorAll("#terminal .line"))
+        .filter((l) => { const r = l.getBoundingClientRect(); const t = document.getElementById("terminal").getBoundingClientRect(); return r.bottom > t.top && r.top < t.bottom; })
+        .map((l) => l.textContent).join("")`);
+    expectEqual(await visibleText(), "", "text left in view after clearing");
+    const count = await main.lineCount();
+    await main.key("l", "KeyL", 76, 2 /* Ctrl */);
+    await sleep(300);
+    expectEqual(await main.lineCount(), count, "lines after a second clear");
+    latestSocket?.write("after the clear\r\n");
+    await waitFor("new output after clearing", async () => (await visibleText()).includes("after the clear"), 3000);
   });
 
   // Launching again opens a second window in the running instance; it starts
@@ -314,20 +617,190 @@ try {
 
   // Electron doesn't run menu shortcuts for keys sent over DevTools, so this
   // checks their precondition instead: a shortcut only fires if the page
-  // doesn't cancel the key. xterm would (it turns Ctrl+letter into a control
-  // character), so this puts focus in its text box, the worst case, and
-  // presses Ctrl+O there in the same task, before focus can be reclaimed.
+  // doesn't cancel the key. The key is sent to the scrollback itself, where a
+  // click leaves focus.
   await check("the scrollback never swallows menu shortcuts like Ctrl+O", async () => {
     for (const page of [main, second]) {
       const cancelled = await page.evaluate(`(() => {
-        document.querySelector(".xterm-helper-textarea").focus();
         const event = new KeyboardEvent("keydown", { key: "o", code: "KeyO", ctrlKey: true, bubbles: true, cancelable: true });
-        Object.defineProperty(event, "keyCode", { get: () => 79 }); // what xterm reads
-        document.activeElement.dispatchEvent(event);
+        document.getElementById("terminal").dispatchEvent(event);
         return event.defaultPrevented;
       })()`);
       expectEqual(cancelled, false, "Ctrl+O cancelled");
     }
+  });
+
+  // --- Encryption: the offer, setting it up, locking, unlocking --------------
+  // The app is restarted for each, in the same sandbox, since lock and unlock
+  // are what happens when it starts. The phase-one connection above left a plain
+  // log behind, which setting up encryption must convert.
+  console.log("smoke: encryption");
+  const preferencesFile = path.join(userDataDir, "preferences.json");
+  const logFiles = () => {
+    const found = [];
+    const walk = (dir) => {
+      for (const entry of fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : []) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (entry.name === "moolin.log") found.push(full);
+      }
+    };
+    walk(path.join(documentsDir, "Moolin"));
+    return found;
+  };
+  const dialogOpen = (page) => page.evaluate("document.getElementById('encryption-dialog').open");
+  const text = (page, id) => page.evaluate(`document.getElementById(${JSON.stringify(id)}).textContent`);
+  const fill = (page, id, value) =>
+    page.evaluate(`(() => { const el = document.getElementById(${JSON.stringify(id)}); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+
+  async function restartApp() {
+    for (const page of pages.splice(0)) page.close();
+    for (const child of launched.splice(0)) {
+      try {
+        process.kill(-child.pid);
+      } catch {
+        // already gone
+      }
+    }
+    await sleep(1500);
+    fs.rmSync(path.join(userDataDir, "DevToolsActivePort"), { force: true });
+    launch("--remote-debugging-port=0");
+    devtoolsPort = await waitFor("the app to restart", () => {
+      const portFile = path.join(userDataDir, "DevToolsActivePort");
+      return fs.existsSync(portFile) ? Number(fs.readFileSync(portFile, "utf8").split("\n")[0]) : 0;
+    });
+    const [target] = await waitFor("a window after the restart", async () => {
+      const targets = await pageTargets().catch(() => []);
+      return targets.length > 0 && targets;
+    });
+    const page = await Page.attach(target);
+    pages.push(page);
+    return page;
+  }
+
+  writePreferences("ask");
+  let enc = await restartApp();
+
+  await check("a first run offers encryption, and Not now with Don't ask again is remembered", async () => {
+    await waitFor("the offer", () => dialogOpen(enc), 5000);
+    expectEqual((await text(enc, "enc-title")).startsWith("Encrypt your passwords"), true, "the offer's title");
+    await enc.evaluate("document.getElementById('enc-never').click(); document.getElementById('enc-cancel').click()");
+    await waitFor("the offer to close", async () => !(await dialogOpen(enc)), 3000);
+    await waitFor("the choice to be saved", () => fs.readFileSync(preferencesFile, "utf8").includes('"never"'), 3000);
+    await sleep(300);
+    expectEqual(await dialogOpen(enc), false, "no second offer");
+  });
+
+  writePreferences("ask");
+  enc = await restartApp();
+
+  await check("setting a key phrase encrypts the passwords and converts the existing log", async () => {
+    expectEqual(logFiles().length, 1, "logs before");
+    expectEqual(fs.readFileSync(logFiles()[0], "utf8").startsWith("MOOLIN-LOG 1 plain"), true, "the log before");
+    await waitFor("the offer", () => dialogOpen(enc), 5000);
+    await fill(enc, "enc-phrase", "smoke test key phrase");
+    await fill(enc, "enc-confirm", "a different phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the mismatch to be reported", async () => (await text(enc, "enc-error")).includes("don't match"), 3000);
+    expectEqual(await dialogOpen(enc), true, "still open after a mismatch");
+    await fill(enc, "enc-confirm", "smoke test key phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("encryption to finish", async () => !(await dialogOpen(enc)), 15000);
+
+    const worlds = JSON.parse(fs.readFileSync(worldsFile, "utf8"));
+    expectEqual(worlds.encryption?.version, 1, "the encryption block");
+    const character = worlds.worlds[0].characters[0];
+    expectEqual(typeof character.passwordEncrypted, "string", "the sealed password");
+    expectEqual("password" in character, false, "no plain password");
+    const log = fs.readFileSync(logFiles()[0], "utf8");
+    expectEqual(log.startsWith("MOOLIN-LOG 1 encrypted "), true, "the log's header");
+    expectEqual(log.includes("Welcome"), false, "no plain text in the log");
+    expectEqual(await enc.evaluate("!document.getElementById('encryption-status').hidden"), true, "the padlock");
+  });
+
+  enc = await restartApp();
+
+  await check("an encrypted install starts locked: connecting is refused, a wrong phrase is too, the right one unlocks", async () => {
+    await waitFor("the unlock dialog", () => dialogOpen(enc), 5000);
+    expectEqual(await text(enc, "enc-title"), "Unlock Moolin", "the dialog");
+    await enc.evaluate(`window.moolin.connect(${JSON.stringify({ id: "smoke", name: "Smoke Test", host: "127.0.0.1", port: serverPort, tls: false, tlsAllowUntrusted: false, autoLogin: false, loginTemplate: "", echoCommands: "on", wordWrap: "off", characters: [] })}, null)`);
+    await waitFor("the refusal", () => enc.evaluate("document.getElementById('terminal').textContent.includes('locked')"), 3000);
+
+    await fill(enc, "enc-unlock-phrase", "not the phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the wrong phrase to be refused", async () => (await text(enc, "enc-error")).includes("doesn't match"), 5000);
+    expectEqual(await dialogOpen(enc), true, "still locked");
+
+    await fill(enc, "enc-unlock-phrase", "smoke test key phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("unlocking", async () => !(await dialogOpen(enc)), 5000);
+    expectEqual(await enc.evaluate("document.getElementById('encryption-status').dataset.state"), "unlocked", "the padlock");
+    const loaded = await enc.evaluate("window.moolin.worlds.load().then((r) => r.worlds[0].characters[0].password)");
+    expectEqual(loaded, "guest", "the password, read back");
+  });
+
+  await check("a connection after unlocking is logged encrypted", async () => {
+    received = "";
+    await enc.evaluate(`window.moolin.connect(${JSON.stringify({ id: "smoke", name: "Smoke Test", host: "127.0.0.1", port: serverPort, tls: false, tlsAllowUntrusted: false, autoLogin: false, loginTemplate: "", echoCommands: "on", wordWrap: "off", characters: [] })}, null)`);
+    await waitFor("the status bar to say connected", async () =>
+      (await enc.evaluate("document.getElementById('status-text').textContent")).startsWith("Connected"),
+    );
+    await sleep(500);
+    const log = fs.readFileSync(logFiles()[0], "utf8");
+    expectEqual(log.startsWith("MOOLIN-LOG 1 encrypted "), true, "the header");
+    expectEqual(log.includes("Welcome"), false, "no plain text");
+    expectEqual(log.split("\n").length > 3, true, "records were appended");
+    // What the window shows is still the plain text.
+    expectEqual(await enc.evaluate("document.getElementById('terminal').textContent.includes('Welcome to the smoke test')"), true, "the scrollback");
+  });
+  await check("changing the key phrase keeps the data key: the old phrase stops working, the new one unlocks", async () => {
+    const keyIdOf = () => JSON.parse(fs.readFileSync(worldsFile, "utf8")).encryption.keyId;
+    const before = keyIdOf();
+    await enc.evaluate("document.getElementById('encryption-status').click()");
+    await waitFor("the manage view", async () => (await dialogOpen(enc)) && (await text(enc, "enc-title")) === "Encryption is on", 3000);
+    await enc.evaluate("document.getElementById('enc-change-btn').click()");
+    await waitFor("the change form", async () => (await text(enc, "enc-title")) === "Change the key phrase or file", 3000);
+    await fill(enc, "enc-phrase", "the second phrase");
+    await fill(enc, "enc-confirm", "the second phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the change to finish", async () => !(await dialogOpen(enc)), 15000);
+    expectEqual(keyIdOf(), before, "the same data key");
+    const character = JSON.parse(fs.readFileSync(worldsFile, "utf8")).worlds[0].characters[0];
+    expectEqual(typeof character.passwordEncrypted, "string", "still sealed");
+
+    enc = await restartApp();
+    await waitFor("the unlock dialog", () => dialogOpen(enc), 5000);
+    await fill(enc, "enc-unlock-phrase", "smoke test key phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("the old phrase to be refused", async () => (await text(enc, "enc-error")).includes("doesn't match"), 5000);
+    await fill(enc, "enc-unlock-phrase", "the second phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("unlocking", async () => !(await dialogOpen(enc)), 5000);
+    const loaded = await enc.evaluate("window.moolin.worlds.load().then((r) => r.worlds[0].characters[0].password)");
+    expectEqual(loaded, "guest", "the password, read back");
+  });
+  await check("a phrase field stops at the limit and says so, and unlocking in one window closes another's unlock form", async () => {
+    enc = await restartApp();
+    await waitFor("the unlock dialog", () => dialogOpen(enc), 5000);
+    expectEqual(await enc.evaluate("document.getElementById('enc-unlock-phrase').maxLength"), 1024, "the field's limit");
+    await fill(enc, "enc-unlock-phrase", "x".repeat(1024));
+    await waitFor("the limit to be mentioned", async () => (await text(enc, "enc-error")).includes("as long as"), 3000);
+    await fill(enc, "enc-unlock-phrase", "x".repeat(10));
+    await waitFor("the notice to clear", async () => (await text(enc, "enc-error")) === "", 3000);
+
+    const firstId = (await pageTargets())[0].id;
+    launch();
+    const otherTarget = await waitFor("another window", async () =>
+      (await pageTargets()).find((target) => target.id !== firstId),
+    );
+    const other = await Page.attach(otherTarget);
+    pages.push(other);
+    await waitFor("its unlock dialog", () => dialogOpen(other), 5000);
+
+    await fill(enc, "enc-unlock-phrase", "the second phrase");
+    await enc.evaluate("document.getElementById('enc-primary').click()");
+    await waitFor("unlocking", async () => !(await dialogOpen(enc)), 5000);
+    await waitFor("the other window's form to close", async () => !(await dialogOpen(other)), 3000);
   });
 } catch (error) {
   results.push({ name: "setup", ok: false });

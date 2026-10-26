@@ -1,9 +1,9 @@
 export type LogLevel = "none" | "error" | "warn" | "info" | "debug";
 
-const LEVELS: LogLevel[] = ["none", "error", "warn", "info", "debug"];
+export const LOG_LEVELS: readonly LogLevel[] = ["none", "error", "warn", "info", "debug"];
 
 export function parseLogLevel(raw: string | undefined): LogLevel {
-  return raw !== undefined && (LEVELS as string[]).includes(raw) ? (raw as LogLevel) : "none";
+  return raw !== undefined && (LOG_LEVELS as readonly string[]).includes(raw) ? (raw as LogLevel) : "none";
 }
 
 // Reads "--log-level=<level>" from an argv. Main parses its own command line;
@@ -16,7 +16,7 @@ export function getCliLogLevel(argv: string[]): LogLevel {
 }
 
 export function isEnabled(configured: LogLevel, level: Exclude<LogLevel, "none">): boolean {
-  return LEVELS.indexOf(configured) >= LEVELS.indexOf(level);
+  return LOG_LEVELS.indexOf(configured) >= LOG_LEVELS.indexOf(level);
 }
 
 let currentLevel: LogLevel = "none";

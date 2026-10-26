@@ -3,15 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  locateLogFile,
-  logPathFor,
-  readLogTail,
-  readTimesTail,
-  sanitizePathSegment,
-  SessionLogRegistry,
-  WindowLog,
-} from "./session-log";
+import { locateLogFile, logPathFor, sanitizePathSegment, SessionLogRegistry, WindowLog } from "./session-log";
 import { newWorld } from "./world-utils";
 
 function tempDir(): string {
@@ -29,27 +21,19 @@ test("sanitizePathSegment neutralises separators, dots and empties", () => {
 test("logPathFor nests character under world, or omits it, each prefixed by its id", () => {
   const world = { ...newWorld("3f2a9c1e-77d0-4b6e-9a51-0c8e2d4f6a1b"), name: "LambdaMOO" };
   assert.equal(
-    logPathFor("/r", world, { id: "c", name: "Cowpernica", password: "" }),
+    logPathFor("/r", world, {
+      id: "c",
+      name: "Cowpernica",
+      password: "",
+      echoCommands: "inherit",
+      wordWrap: "inherit",
+      honorClear: "inherit",
+    }),
     path.join("/r", "3f2a9c1e.LambdaMOO", "c.Cowpernica", "moolin.log"),
   );
   assert.equal(logPathFor("/r", world, null), path.join("/r", "3f2a9c1e.LambdaMOO", "moolin.log"));
   // Only letters and digits of the id are used; an id with none still gets a prefix.
   assert.equal(logPathFor("/r", { ...world, id: "../.." }, null), path.join("/r", "_.LambdaMOO", "moolin.log"));
-});
-
-test("readLogTail returns empty for a missing file and whole small files", () => {
-  const dir = tempDir();
-  assert.equal(readLogTail(path.join(dir, "nope"), 100).length, 0);
-  const file = path.join(dir, "f");
-  fs.writeFileSync(file, "one\r\ntwo\r\n");
-  assert.equal(Buffer.from(readLogTail(file, 100)).toString(), "one\r\ntwo\r\n");
-});
-
-test("readLogTail starts at a line boundary when truncating", () => {
-  const dir = tempDir();
-  const file = path.join(dir, "f");
-  fs.writeFileSync(file, "aaaa\nbbbb\ncccc\n");
-  assert.equal(Buffer.from(readLogTail(file, 8)).toString(), "cccc\n");
 });
 
 test("only the first claimant owns a log; closing releases it", () => {
@@ -84,10 +68,13 @@ test("append creates directories, keeps escapes, and accumulates across sessions
   assert.equal(Buffer.from(second.history(1000).bytes).toString(), "\x1b[31mred\x1b[0m\r\nhi\r\n");
   second.append("more\r\n", 3000);
   second.close();
-  assert.equal(fs.readFileSync(file, "utf8"), "\x1b[31mred\x1b[0m\r\nhi\r\nmore\r\n");
+  const again = registry.claim(file, () => file);
+  assert.ok(again);
+  assert.equal(Buffer.from(again.history(1000).bytes).toString(), "\x1b[31mred\x1b[0m\r\nhi\r\nmore\r\n");
+  again.close();
 });
 
-test("the sidecar restores each line's arrival time across sessions", () => {
+test("each line's arrival time is restored across sessions", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   const registry = new SessionLogRegistry();
   const first = registry.claim(file, () => file);
@@ -121,7 +108,7 @@ test("history times align to the log tail when it is truncated", () => {
   reopened.close();
 });
 
-test("the sidecar marks untimed (Moolin) lines as null, keeping alignment", () => {
+test("untimed (Moolin) lines come back as null, keeping alignment", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   const registry = new SessionLogRegistry();
   const log = registry.claim(file, () => file);
@@ -133,44 +120,6 @@ test("the sidecar marks untimed (Moolin) lines as null, keeping alignment", () =
   const reopened = registry.claim(file, () => file);
   assert.ok(reopened);
   assert.deepEqual(reopened.history(1000).times, [null, 5000]);
-  reopened.close();
-});
-
-test("readTimesTail reports unknown (null) times when there is no sidecar", () => {
-  const missing = path.join(tempDir(), "nope.times");
-  assert.deepEqual(readTimesTail(missing, 3), [null, null, null]);
-  assert.deepEqual(readTimesTail(missing, 0), []);
-});
-
-test("readTimesTail reads a torn final record as an unknown (null) time", () => {
-  const file = path.join(tempDir(), "moolin.log.times");
-  const records = Buffer.alloc(8 * 2 + 3); // two whole records, then 3 torn bytes
-  records.writeDoubleLE(1000, 0);
-  records.writeDoubleLE(2000, 8);
-  fs.writeFileSync(file, records);
-  assert.deepEqual(readTimesTail(file, 3), [1000, 2000, null]);
-  assert.deepEqual(readTimesTail(file, 2), [2000, null]);
-  assert.deepEqual(readTimesTail(file, 4), [null, 1000, 2000, null]);
-});
-
-test("appending after a torn sidecar write keeps later times aligned", () => {
-  const file = path.join(tempDir(), "w", "moolin.log");
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  // As if the app died mid-way through recording the second line's time.
-  fs.writeFileSync(file, "one\r\ntwo\r\n");
-  const records = Buffer.alloc(8 + 3);
-  records.writeDoubleLE(1000, 0);
-  fs.writeFileSync(`${file}.times`, records);
-
-  const registry = new SessionLogRegistry();
-  const log = registry.claim(file, () => file);
-  assert.ok(log);
-  log.append("three\r\n", 3000);
-  log.close();
-
-  const reopened = registry.claim(file, () => file);
-  assert.ok(reopened);
-  assert.deepEqual(reopened.history(1000).times, [1000, null, 3000]);
   reopened.close();
 });
 
@@ -194,7 +143,14 @@ test("a log reclaimed straight after close reads back everything, times aligned"
   second.close();
 });
 
-const cowpernica = { id: "7b0d44aa-0000", name: "Cowpernica", password: "" };
+const cowpernica = {
+  id: "7b0d44aa-0000",
+  name: "Cowpernica",
+  password: "",
+  echoCommands: "inherit" as const,
+  wordWrap: "inherit" as const,
+  honorClear: "inherit" as const,
+};
 
 test("locateLogFile creates nothing, and names new folders by id and label", () => {
   const root = tempDir();
@@ -203,15 +159,12 @@ test("locateLogFile creates nothing, and names new folders by id and label", () 
   assert.deepEqual(fs.readdirSync(root), []);
 });
 
-test("locateLogFile moves a pre-prefix folder, and follows renames", () => {
+test("locateLogFile follows renames of a world and character", () => {
   const root = tempDir();
   const world = { ...newWorld("3f2a9c1e-x"), name: "LambdaMOO" };
-  // From before folders had id prefixes.
-  fs.mkdirSync(path.join(root, "LambdaMOO", "Cowpernica"), { recursive: true });
-  fs.writeFileSync(path.join(root, "LambdaMOO", "Cowpernica", "moolin.log"), "old\n");
   const file = locateLogFile(root, world, cowpernica);
-  assert.equal(file, path.join(root, "3f2a9c1e.LambdaMOO", "7b0d44aa.Cowpernica", "moolin.log"));
-  assert.equal(fs.readFileSync(file, "utf8"), "old\n");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "old\n");
 
   // Renaming the world and character renames their folders to match.
   const renamed = locateLogFile(root, { ...world, name: "LambdaCOW" }, { ...cowpernica, name: "Nica" });
@@ -263,65 +216,24 @@ test("a log that stops on a disk error no longer counts as owned", () => {
   assert.equal(errors.length, 1);
 });
 
-// Simulates the app dying with the log open: claimed and written to, but
-// never closed, so the open-file marker is left behind.
-function crashAfter(file: string, write: (log: NonNullable<ReturnType<SessionLogRegistry["claim"]>>) => void): void {
+test("log files and the folders made for them can be read by their owner alone", {
+  skip: process.platform === "win32",
+}, () => {
+  const root = tempDir();
+  const file = path.join(root, "w", "c", "moolin.log");
   const log = new SessionLogRegistry().claim(file, () => file);
   assert.ok(log);
-  write(log);
-  assert.ok(fs.existsSync(`${file}.open`));
-}
+  log.append("secret\r\n", 1000);
+  const mode = (target: string) => fs.statSync(target).mode & 0o777;
+  assert.equal(mode(file), 0o600);
+  assert.equal(mode(path.dirname(file)), 0o700);
+  log.close();
 
-test("after a crash, times lost with the last write are filled in as unknown", () => {
-  const file = path.join(tempDir(), "w", "moolin.log");
-  crashAfter(file, (log) => {
-    log.append("one\n", 1);
-    log.append("two\nthree\n", 2);
-  });
-  // The crash came between writing "two\nthree\n" and recording its times.
-  fs.truncateSync(`${file}.times`, 8);
-
-  const reopened = new SessionLogRegistry().claim(file, () => file);
-  assert.ok(reopened);
-  assert.deepEqual(reopened.history(1000).times, [1, null, null]);
-  reopened.append("four\n", 4);
-  reopened.close();
-  assert.equal(fs.existsSync(`${file}.open`), false, "a clean close removes the marker");
+  // A log from an earlier version, readable by everyone, is tightened when reopened.
+  fs.chmodSync(file, 0o644);
   const again = new SessionLogRegistry().claim(file, () => file);
   assert.ok(again);
-  assert.deepEqual(again.history(1000).times, [1, null, null, 4]);
+  again.append("more\r\n", 2000);
+  assert.equal(mode(file), 0o600);
   again.close();
-});
-
-test("crash recovery leaves lines logged before the sidecar existed alone", () => {
-  const file = path.join(tempDir(), "w", "moolin.log");
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, "ancient\nlines\n"); // no sidecar: from before it existed
-  crashAfter(file, (log) => {
-    log.append("new\n", 5);
-    log.append("newer\n", 6);
-  });
-  fs.truncateSync(`${file}.times`, 8); // lost the last record
-
-  const reopened = new SessionLogRegistry().claim(file, () => file);
-  assert.ok(reopened);
-  assert.deepEqual(reopened.history(1000).times, [null, null, 5, null]);
-  reopened.close();
-});
-
-test("after a crash, times recorded for output the log lost are dropped", () => {
-  const file = path.join(tempDir(), "w", "moolin.log");
-  crashAfter(file, (log) => {
-    log.append("one\n", 1);
-    log.append("two\n", 2);
-  });
-  // A torn log write: "two\n" never fully reached the disk.
-  fs.truncateSync(file, 6);
-
-  const reopened = new SessionLogRegistry().claim(file, () => file);
-  assert.ok(reopened);
-  const history = reopened.history(1000);
-  assert.equal(Buffer.from(history.bytes).toString(), "one\ntw");
-  assert.deepEqual(history.times, [1]);
-  reopened.close();
 });

@@ -7,7 +7,7 @@ Pepper, an experienced player on social servers such as LambdaMOO, who decided
 what it should do and how it should feel to use.
 
 A desktop client for MOOs, MUSHes, MUCKs and MUDs, with buttery-smooth
-scrollback. Built on Electron and xterm.js (WebGL-rendered), for Linux,
+scrollback. Built on Electron, with its own DOM-based scrollback, for Linux,
 Windows and macOS.
 
 Moolin merges two earlier clients: moolin v1, which this repository's history
@@ -74,11 +74,21 @@ from source never check at startup.
 
 - **One window per connection.** Connecting from a window that already has a
   connection opens the new one in a window of its own. All windows run in one
-  process; launching Moolin again just opens another window.
+  process; launching Moolin again just opens another window. A freshly
+  opened window (not one opened this way, which instead cascades from the
+  window it came from) sizes itself to show 80x25 characters at its starting
+  font, centered on screen; if that wouldn't fit the screen, it falls back to
+  75% of it instead.
 - **Worlds and characters.** Save worlds (host, port, TLS) and the characters
   you play on each, then connect to a world, or to a world as a character.
+- **Word wrap.** Off by default; turn it on in the Worlds dialog's Global
+  Settings tab (with a World or Character able to override it) to wrap long
+  server lines at word boundaries instead of at the last column, mid-word.
+  See [Word wrap](#word-wrap) below.
 - **Auto-login.** Connecting as a character can send a login command built
-  from a per-world template, e.g. `co "{{character}}" {{password}}\r`.
+  from a per-world template, e.g. `co "{{character}}" {{password}}\r`. It is
+  sent once the server has sent a whole line (its welcome), so a server that
+  sends none until it is spoken to won't get it.
 - **TLS, explicitly.** Each world either uses TLS or doesn't; Moolin never
   guesses, so a connection can't be silently downgraded. Certificates are
   verified unless the world opts into accepting untrusted (e.g. self-signed)
@@ -87,45 +97,52 @@ from source never check at startup.
   with a question mark for an untrusted certificate the world accepts, red
   with a cross for plaintext. Hover over it for the protocol, cipher, key
   exchange and the certificate chain's details.
-- **Scrollback that survives a reload.** 100,000 lines, with clickable URLs.
+- **Scrollback that survives a reload.** 20,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
-  the window (Ctrl+R) or a renderer crash doesn't lose it.
+  the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
+- **Pueblo.** On a world that speaks it, links are clickable (right-click
+  one with several commands to choose), and the status bar shows what a link
+  will send or open while the pointer is on it. See
+  [PROTOCOLS.md](PROTOCOLS.md#pueblo).
+- **Encryption (optional).** Moolin can encrypt your characters' passwords
+  and your session logs with a key phrase or a key file, which it offers the
+  first time it runs. Off by default; see [Encryption](#encryption).
 - **Persistent logs.** Everything a window shows, colors included, is appended
   to `~/Documents/Moolin/<world>/<character>/moolin.log` (just `<world>/` when
   connecting without a character). Each folder's name starts with 8
   characters of the world's or character's id, as in
   `3f2a9c1e.LambdaMOO/7b0d44aa.Cowpernica/`, so worlds with the same name (or
   names differing only in case) get folders of their own, and renaming a
-  world or character renames its folder to match. Folders from before the
-  ids were added are renamed the first time their world or character
-  connects. Connecting pre-populates the scrollback with the last 2 MiB of
-  the log. A log belongs to one window at a time: the first window to
-  connect to a world and character reads and writes it until it
-  disconnects (its last line is the "disconnected" one), and other windows
-  connected meanwhile don't log. The status bar shows which: a scroll beside
+  world or character renames its folder to match. Connecting pre-populates
+  the scrollback with the last 2 MiB of the log. A log belongs to one window
+  at a time: the first window to connect to a world and character reads and
+  writes it until it disconnects (its last line is the "disconnected" one),
+  and other windows connected meanwhile don't log. The status bar shows which: a scroll beside
   the security shield when the window is logging, a red "no" sign when
-  another window has the log. The log grows without bound for now, as does
-  the `moolin.log.times` file beside it (see timestamps, below); delete or
-  prune the two together. While a window has the log open there's also a
-  small `moolin.log.open` file beside it, which lets Moolin repair the
-  timestamps if it crashes.
+  another window has the log. The log grows without bound for now; delete or
+  prune it as a whole. It isn't plain text: its first line says what it is
+  (`MOOLIN-LOG 1 plain`), and every line after it is a numbered base64 record
+  holding what was shown and when each line arrived, so a server that sends
+  escape sequences can't make a terminal act on them if you `cat` the log. A
+  file named `moolin.log` that doesn't start that way isn't touched: Moolin
+  reports that it isn't logging rather than write to it.
 - **Line timestamps.** View > Show Timestamps adds a gutter showing when each
   line from the server arrived, with the date wherever the day changes. The
   times are display-only: they never appear in copied text or in the log,
-  and are kept in `moolin.log.times` so logged history keeps its times on
+  and are kept in the log so logged history keeps its times on
   reconnect. The last setting chosen is remembered for new windows (see
   [Preferences](#preferences)).
-- **Scrollback search.** Edit > Find (Ctrl+F) opens a find box at the top
+- **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
   right of the window, with match-case, whole-word and regular-expression
   toggles. Every match is highlighted, and marked beside the scrollbar, and
-  the matches update as new output arrives.
+  the matches update as new output arrives (the newest 1,000 are kept).
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
   own undo/redo (coalesced typing, and atomic steps for cut/paste).
 - **Cut, copy and paste** that work against either the scrollback selection or
   the input area, whichever was selected last.
-- **Recent connections** on the Worlds menu, Ctrl+1 to Ctrl+5.
+- **Recent connections** on the Worlds menu, Ctrl+1 to Ctrl+5 (Cmd on macOS).
 
 ## Getting started
 
@@ -149,7 +166,9 @@ sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
 
 `npm start` runs `scripts/start.js`, which clears `ELECTRON_RUN_AS_NODE`
 (set by VS Code's integrated terminal, where it would make Electron behave as
-plain Node).
+plain Node). From a snap-packaged VS Code or VSCodium's terminal it also undoes
+the snap's GTK and data-directory overrides, which otherwise crash Electron's
+native Wayland window on startup.
 
 To launch from a desktop menu on Linux, build once with `npm run build`, then
 copy `moolin.desktop` to `~/.local/share/applications/`. Its paths point at
@@ -168,8 +187,10 @@ npm run dist:mac     # dmg and zip, x64 and arm64
 ```
 
 Each target has to be built on its own OS; `.github/workflows/release.yml`
-does that on every `v*` tag and attaches the results to a GitHub Release. The
-rpm and pacman targets need `rpmbuild` and `bsdtar` installed. Windows builds
+does that on every `v*` tag and attaches the results to a GitHub Release. It
+also builds and tests every push to `dev` and every pull request into `dev` or
+`main` on all three OSes, without releasing anything; the installers are kept
+as the run's artifacts. The rpm and pacman targets need `rpmbuild` and `bsdtar` installed. Windows builds
 are unsigned, and so are macOS builds unless the signing secrets named in the
 workflow are set. `packaging/aur/PKGBUILD` is a draft for an AUR `moolin-bin` package.
 
@@ -192,30 +213,46 @@ something existing users rely on from working, for example:
 New features and fixes that keep everything working only raise the last
 number (0.1.0, 0.1.1, ...). `package.json` holds the version of the next
 release; after a release it's bumped right away, and a release's tag
-(`v0.1.1`) must match it.
+(`v0.1.1`) must match it. [CHANGELOG.md](CHANGELOG.md) lists what changed in
+each release, and what's changed since the last one.
 
 ## Using Moolin
 
-Press **Ctrl+O** to open the Worlds dialog. Its tree has a **Global** root
-(for settings shared by every world; there are none yet), with each world
-(globe icon) under it and each world's characters (silhouette icon) under
-that. **New World** adds a world; fill in its host and port. With a world or
-one of its characters selected, **New Character** adds a character to that
-world (as does right-clicking a world, or Shift+F10). Select a world or
-character and press **Connect** (or Enter, or double-click).
+The first time Moolin runs (no worlds file yet — see below), it starts with
+one world already set up: LambdaMOO, with a Guest character, ready to
+connect to. Deleting it is permanent, the same as deleting anything else you
+add.
+
+Press **Ctrl+O** (**Cmd+O** on macOS) to open the Worlds dialog. Its tree has a **Global** root,
+with each world (globe icon) under it and each world's characters (silhouette
+icon) under that. **New World** adds a world; fill in its host and port. With
+a world or one of its characters selected, **New Character** adds a character
+to that world (as does right-clicking a world, or Shift+F10). Select a world
+or character and press **Connect** (or Enter, or double-click).
 
 The selected item's details are in tabs to the right of the tree; for now
 there is just **Settings**, with more (such as triggers) to come. When the
 tabs don't fit on one row, ‹ › buttons at the right end scroll through them.
 
-A connection keeps the settings its world had when it connected: changes
-saved in the Worlds dialog, including **Echo typed commands into the
-scrollback** and the world's name, apply to windows already connected to that
+Global's Settings tab holds three app-wide defaults — **Wrap long lines at
+word boundaries**, **Echo typed commands into the scrollback** and **Clear
+the screen when a Pueblo server asks** — that a World or a Character can each
+override: their own Settings tab offers **Inherit** (use whatever the level
+above resolves to), **On** or **Off** for each. Character wins over World
+wins over Global. Word-wrap wraps long server lines at word boundaries
+instead of mid-word — see [Word wrap](#word-wrap) below. A Pueblo server's
+clear is ignored by default, as most clients do: some servers send one at
+the end of their login output, which would scroll the room description away.
+
+A connection keeps the settings its world and character had when it
+connected: changes saved in the Worlds dialog, including these cascading
+settings and the world's name, apply to windows already connected to that
 world only once they reconnect.
 
 Type commands in the input area at the bottom; the scrollback above is output
 only. The status bar below the input area shows what the window is connected
-to; the input area is disabled while it isn't connected.
+to, plus the terminal's current size in characters (e.g. `80x25`); the input
+area is disabled while it isn't connected.
 
 ### Auto-login templates
 
@@ -233,7 +270,19 @@ sends the world's login command once connected. In the template:
 Nothing else is added, so end the template with `\r` (most servers) or
 `\r\n`. The default is `co "{{character}}" {{password}}\r`.
 
+### Word wrap
+
+By default a line that's too long for the window wraps at the last column,
+mid-word if that's where it lands, as a terminal does. Turning word wrap on
+(Global, World or Character — see [Using Moolin](#using-moolin) above)
+wraps at the last word boundary that fits instead. Either way it's only how
+the line is shown: it is still one line, so selecting and copying it gives
+back exactly the text you selected, and resizing the window re-wraps
+everything at once.
+
 ### Keyboard shortcuts
+
+On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 
 | Keys                     | Action                                                  |
 | ------------------------ | ------------------------------------------------------- |
@@ -241,6 +290,7 @@ Nothing else is added, so end the template with `\r` (most servers) or
 | Ctrl+N                   | New world                                               |
 | Ctrl+K                   | Disconnect (asks first)                                 |
 | Ctrl+W                   | Close the window                                        |
+| Ctrl+,                   | Open the Preferences dialog                             |
 | Ctrl+1 … Ctrl+5          | Connect to a recent world or character                  |
 | Enter / Shift+Enter      | Send / insert a newline                                 |
 | Up / Down                | Previous / next command, from the first / last line     |
@@ -249,9 +299,10 @@ Nothing else is added, so end the template with `\r` (most servers) or
 | Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
 | Ctrl+F                   | Find in the scrollback                                  |
 | F3 / Shift+F3            | Next / previous match                                   |
+| Ctrl+A                   | Select all of the input line, or of the scrollback if something there is selected |
 | Ctrl+X / Ctrl+C / Ctrl+V | Cut / copy the selection / paste into the input area    |
 | Ctrl+Z                   | Undo in the input area                                  |
-| Ctrl+Shift+Z / Ctrl+Y    | Redo in the input area                                  |
+| Ctrl+Shift+Z / Ctrl+Y    | Redo in the input area (Ctrl+Y only on Windows/Linux)   |
 | Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default font size                    |
 | Ctrl+R                   | Reload the window (the connection and scrollback stay)  |
 
@@ -271,8 +322,8 @@ selected tab's fields, then Connect.
 | Delete                            | In the tree: delete the world or character (asks first)       |
 | Shift+F10                         | In the tree: open the context menu                            |
 | Left / Right, Home / End          | On the tabs: previous / next, first / last tab                |
-| Ctrl+Page Down / Ctrl+Page Up     | Next / previous tab, from anywhere in the dialog              |
-| Ctrl+Tab / Ctrl+Shift+Tab         | Next / previous tab, likewise                                 |
+| Ctrl+Page Down / Ctrl+Page Up     | Next / previous tab, from anywhere in the dialog (Cmd on macOS) |
+| Ctrl+Tab / Ctrl+Shift+Tab         | Next / previous tab, likewise (Cmd on macOS)                   |
 | F6 / Shift+F6                     | Jump between the tree, the tabs and the selected tab's fields |
 | Alt+N / Alt+H / Alt+C / Alt+S     | New World / New Character / Connect / the Settings tab        |
 | Escape                            | Close the dialog (as does a click outside it)                 |
@@ -293,7 +344,12 @@ Moolin runs as a single process, so this only takes effect for the first
 launch: launching again while Moolin is running opens a new window that uses
 the running instance's worlds file, whatever path is passed.
 
-Character passwords are stored in this file **in plain text**.
+If the file doesn't exist yet, Moolin creates it with one world already in
+it — LambdaMOO, with a Guest character — rather than starting empty.
+
+Character passwords are stored in this file **in plain text**, unless you
+turn on [encryption](#encryption), which seals them (see also
+[What Moolin stores, and who can read it](#what-moolin-stores-and-who-can-read-it)).
 
 Writes are atomic (write to a temporary file, then rename), and each one
 first copies the previous version to `worlds.bak` beside it. If the file
@@ -304,11 +360,139 @@ from hand-editing never costs you anything. If the backup can't be read
 either, the dialog says so and Moolin refuses to save at all. Malformed
 individual entries are skipped with a warning.
 
+### Encryption
+
+Moolin can encrypt the two things it keeps that are worth protecting: your
+characters' **passwords** (in the worlds file) and your **session logs**. It is
+off unless you turn it on, and the first time Moolin runs (or when it is
+off and you haven't said otherwise) it offers to. Choosing **Not now** with
+**Don't ask me again** ticked stops the offer; **Worlds → Encryption…** is
+always there to set it up later.
+
+**Turning it on.** Enter a key phrase (twice; up to 1024
+characters, and the box says so when it is full), or choose a **key file**:
+any file at all, of any size, which stands in for a phrase by a hash of its
+contents. Moolin makes a random data key, seals your passwords with it,
+converts every existing log (this can take a while with a lot of them, and
+needs every window disconnected), and keeps the data key itself only wrapped by your phrase or
+file. From then on new logs are written sealed too.
+
+**Unlocking.** Each time Moolin starts it is *locked*: it asks for the phrase
+or file before it shows your worlds or connects, and a padlock in the status
+bar shows the state (amber while locked). A key file's *path* (never its
+contents) is remembered in `preferences.json`, so while the file is in place,
+say on a USB stick, Moolin unlocks by itself, and asks when it isn't.
+
+**Changing it.** **Worlds → Encryption… → Change key phrase or file…** (or click
+the padlock) gives the same data key a new phrase or file. Nothing is
+re-encrypted, so it is instant, and the old phrase or file stops working on
+your files as they are now. The data key itself is not replaced, so a copy of
+the worlds file or a log from before the change (a backup, a sync's history)
+still opens with the old phrase or file. You can switch between a phrase and
+a file this way.
+
+**Stopping.** **Stop using encryption…** (after a confirmation) converts the
+logs and passwords back to plain and removes the lock. It won't offer
+encryption again.
+
+> **There is no recovery.** If you lose the key phrase or the key file, your
+> passwords and logs cannot be read again, by you or anyone: Moolin keeps
+> nothing that could unlock them. Keep the phrase somewhere safe (a password
+> manager), or the key file backed up.
+
+What it protects, and what it doesn't. It keeps your passwords and logs
+unreadable to anyone who gets at your files without the key: another user
+on the machine, a cloud sync of your Documents folder, a backup, a lost
+disk. It does **not** protect against software running as you while Moolin
+is unlocked, which could read the key from memory or the text from the
+window. The following are not encrypted, and stay visible: world and
+character names (the log folders are named after them), hosts and ports,
+the size, record lengths, record numbers and modification time of each log,
+and your preferences.
+
+**File formats.** Each tells you what it is, so nothing is mistaken for plain
+text:
+
+- The worlds file gains an `"encryption"` block (the key-derivation
+  settings, `"keySource"`, the wrapped data key, and a key id), and each
+  character's `"password"` becomes `"passwordEncrypted"`. A key phrase is
+  stretched with scrypt and the data key is wrapped with AES-256-GCM; a
+  password is sealed with that data key, bound to its character. `worlds.bak`
+  is kept in step, so it never holds a plain password after you turn
+  encryption on.
+- A session log (`moolin.log`) is one file whatever the mode: a first line
+  `MOOLIN-LOG 1 plain` or `MOOLIN-LOG 1 encrypted <key id> <file id>` (the
+  file id is random), then one record per line: a number (0, 1, 2…) and
+  base64. In an encrypted log each record is sealed with the data key
+  (AES-256-GCM, with a fresh random nonce, and the first line and the
+  record's number as its context). A record moved into another log, repeated
+  or put out of order doesn't open in its new place, and is left out when the
+  log is read. Deleting records, or cutting off the end of a log, can't be
+  detected. Either way the file is plain printable text, so `cat`ing it never
+  makes a terminal act on what a server sent.
+
+If you turn encryption on while a conversion is cut short (the app is
+stopped part-way), nothing is lost: each log says which mode it is in, and
+the next time you unlock, Moolin finishes converting the rest. If a log
+can't be converted back when you stop using encryption (damaged, or sealed
+with some other key), encryption is left on and the dialog names the log:
+turning it off would otherwise throw away the only key that opens it.
+
+### What Moolin stores, and who can read it
+
+Moolin keeps two things on disk that you should treat as private:
+
+- **Passwords.** The worlds file, and its `worlds.bak` copy, hold every
+  character's password **in plain text** unless you turn on
+  [encryption](#encryption), which seals them.
+- **Logs.** Each `moolin.log` holds everything a window showed (readable only
+  with the key, if encryption is on): what the
+  world sent you, private messages included, and the commands you typed, as
+  Moolin echoed them. If you type a password into a command yourself
+  (`connect Name secret`), the echo puts it in the log; turn off **Echo typed
+  commands** for that world, or use auto-login, which is never logged. With
+  encryption on, the echo is sealed with the rest of the log.
+
+On macOS and Linux, Moolin writes these files readable by you alone (mode
+`600`, and `700` for the folders it creates), and tightens a file made by an
+earlier version the next time it writes it. Folders that already existed are
+left as they were. On Windows it relies on your user folder's own permissions.
+
+Beyond that, it's up to you:
+
+- `~/Documents` is synced to the cloud on many systems (iCloud Drive,
+  OneDrive), which would copy your passwords and logs with it. Keep them out
+  of a synced folder by passing the worlds file's path on the command line,
+  or exclude the `Moolin` folder from the sync.
+- Backups of your home folder include them too.
+- A log is base64 text, so `cat`ing it is safe whatever the server sent. It
+  also isn't readable as it is; Moolin shows its tail when you reconnect. The
+  files `worlds.unreadable-<date>` that Moolin sets aside are copies of a
+  worlds file as it was, so they are as plain or as sealed as it was.
+- Without TLS, anything you send, an auto-login's password included, can be
+  read by anyone on the network path. The shield in the status bar says which
+  you have.
+
 ## Preferences
 
-App-wide settings (whether new windows show timestamps, and whether to check
-for updates at startup) are kept in `preferences.json` in the usual per-app
-config folder:
+Worlds → Preferences… (Ctrl+,, Cmd+, on macOS) opens a dialog for app-wide settings: whether to show
+timestamps, whether to check for updates at startup, and the terminal's
+default font and size. The default is Iosevka Moolin, a custom build of
+[Iosevka](https://typeof.net/Iosevka/) bundled with the app (see
+[`npm run build:font`](#commands)), so there's a deliberately-chosen
+monospace font out of the box rather than whatever happens to be installed.
+Each curated font is shown with a live sample highlighting characters that
+commonly look alike in a monospace font (`0O`, `1lI`, `rn` vs `m`, and so
+on), so you can judge it before picking it; one that isn't actually
+installed (everything but Iosevka Moolin relies on the system already
+having it) just falls back to the next one in its CSS stack, which the
+sample makes obvious. Changes save and apply immediately:
+showTimestamps is this window's own setting too (same as the View menu's
+checkbox), while the font/size and update-check setting also become the
+default for windows opened after. There's no Save or Cancel — like the
+Worlds dialog, it saves as you go.
+
+Settings are kept in `preferences.json` in the usual per-app config folder:
 
 | OS      | Location                                          |
 | ------- | ------------------------------------------------- |
@@ -327,31 +511,76 @@ A missing or unreadable file just means the defaults.
 
 ## Development
 
+### Branches
+
+- `main` matches the latest release.
+- `dev` collects finished work that isn't released yet; it's the branch to
+  build and try for the current state of things. CI builds every push to it.
+- Each feature or fix gets a branch of its own from `dev` (`feature/...`,
+  `fix/...`), holding just that one change. When it's done it's merged
+  straight into `dev`, and pushing `dev` has CI build and test it on Linux,
+  Windows and macOS.
+- A release is a pull request from `dev` into `main`, so it gets a full CI
+  run and a record of its own before merging, followed by a version tag on
+  `main` (see [Versioning](#versioning)). The product owner, Pepper, may
+  instead merge `dev` straight into `main`.
+
+### Commit dates
+
+Commits are dated in UTC. `npm install` turns on the git hooks in
+`.githooks/` (via `scripts/install-hooks.js`): `post-commit` and
+`post-merge` rewrite a new commit's dates to the same moment in UTC, leaving
+names and emails alone, and `pre-push` refuses to push a commit that isn't in
+UTC. Annotated tags carry their own date, so create them with
+`TZ=UTC git tag -a ...`.
+
+### Commands
+
 | Command             | Does                                                    |
 | ------------------- | ------------------------------------------------------- |
 | `npm run build`     | Typecheck, then bundle main, preload and renderer into `dist/` |
 | `npm run dev`       | Rebuild on change (reload the window to pick it up)      |
 | `npm test`          | Run the unit tests (`src/*.test.ts`, Node's test runner) |
-| `npm run smoke`     | Build, then drive the real app through focus and typing checks (Linux; see below) |
+| `npm run smoke`     | Build, then drive the real app through focus, typing, copy and link checks (see below) |
 | `npm run typecheck` | Typecheck only                                          |
 | `npm run lint`      | Lint `src/` with [Biome](https://biomejs.dev/) (`npm run lint:fix` to apply safe fixes) |
 | `npm run format`    | Format `src/` with Biome (`npm run format:check` to check without writing) |
+| `npm run build:font` | Rebuild the bundled default font from `font/private-build-plans.toml` (see below) |
 
 The TLS tests generate a throwaway certificate with `openssl`, which must be
 on the `PATH`.
+
+`npm run build:font` (`scripts/build-font.mjs`) rebuilds Iosevka Moolin, the
+custom [Iosevka](https://typeof.net/Iosevka/) build Moolin bundles as its
+default font (`font/`). It's not part of `npm run build`: it clones the full
+[be5invis/Iosevka](https://github.com/be5invis/Iosevka) build toolchain
+(much heavier than anything else this project needs) into
+`font/.iosevka-src/` the first time it's run, reusing it on later runs, and
+only needs rerunning when `private-build-plans.toml` changes. Set
+`IOSEVKA_SRC` to point at a checkout of your own instead of letting it
+clone one. The four built faces (Regular, Bold, Italic, BoldItalic — what
+the scrollback switches between for SGR bold/italic) are committed, along
+with the font's SIL Open Font License text (`font/LICENSE-IosevkaMoolin.md`).
 
 `npm run smoke` (`scripts/smoke.mjs`) covers what the unit tests can't
 reach: the renderer in a real window. It launches Moolin in a throwaway
 sandbox (its own config folder, worlds file and Documents folder, so it
 leaves a Moolin you have running and your logs alone), connects it to a
 local test server, and drives it over the Chrome DevTools Protocol:
-clicking, selecting and typing, and checking where keyboard focus goes and
-that typed commands reach the server. Its windows appear on screen while it
-runs (a few seconds). Linux only for now, and it needs a display (use
-`xvfb-run` without one). To check a packaged build instead, point
+clicking, selecting, copying and typing, and checking where keyboard focus
+goes, that typed commands reach the server, what copying a wrapped or
+partial selection gives, Clear Screen, a Pueblo world's links, and the
+encryption flows (the first-run offer, turning it on, unlocking, logging
+encrypted, changing the key phrase, the phrase length limit, and unlocking in
+one window while another waits). The key file picker and the stop
+confirmation are native dialogs it can't drive, so unit tests cover those.
+Its windows appear on screen while it runs (a few seconds), so it needs a real
+display; on headless Linux use `xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
+work but hasn't been tried. To check a packaged build instead, point
 `MOOLIN_SMOKE_APP` at its executable, e.g.
 `MOOLIN_SMOKE_APP=release/linux-unpacked/moolin node scripts/smoke.mjs`
-(the AppImage works too).
+(the AppImage works too; on macOS, the binary inside the `.app`'s
+`Contents/MacOS/`).
 
 ### Layout
 
@@ -366,13 +595,35 @@ runs (a few seconds). Linux only for now, and it needs a display (use
 | `src/worlds.ts`           | Reading, validating and writing the worlds file                           |
 | `src/worlds-types.ts`     | The World, Character and MRU types shared by main and renderer            |
 | `src/preferences.ts`      | Reading and writing app-wide preferences                                  |
+| `src/fonts.ts`            | The curated monospace font list, size bounds and sample text              |
 | `src/world-utils.ts`      | World helpers shared by main and renderer (defaults, labels, login templates) |
+| `src/update-check.ts`     | Asking GitHub whether a newer release exists                              |
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
-| `src/session-log.ts`      | Persistent per-world/character logs, their `.times` sidecar, and which window owns each |
+| `src/ipc-validate.ts`     | Checks on every message the window sends the main process (sizes, addresses, text, ...) |
+| `src/file-modes.ts`       | The owner-only permissions for the worlds file and session logs            |
+| `src/session-log.ts`      | Persistent per-world/character logs and which window owns each              |
+| `src/security-limits.ts`  | The longest key phrase, shared by the dialog and the check on what it sends |
+| `src/security.ts`         | Whether encryption is on, locked or unlocked; turning it on, off or changing the key |
+| `src/encryption-dialog.ts` | The dialog for the first-run offer, unlocking and managing encryption  |
+| `src/log-convert.ts`      | Converting every log to encrypted or plain, and finishing a stopped conversion |
+| `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting between modes |
+| `src/key-file.ts`         | Reading a key file, and unlocking with the one Moolin remembers            |
+| `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
-| `src/renderer.ts`         | The terminal window's page: scrollback, gutter, input area, status bar, keys |
+| `src/renderer.ts`         | The terminal window's page: wires the scrollback, gutter, input area, status bar and keys together |
+| `src/scrollback-view.ts`  | The scrollback's DOM: draws lines, keeps to the bottom, trims, measures its size |
+| `src/line-stream.ts`      | What the scrollback shows: text in, lines with arrival times out (no DOM)  |
+| `src/ansi-parser.ts`      | Streaming parser for colour and attribute sequences, and how a style looks |
+| `src/line-builder.ts`     | Builds lines (their text, styled runs and time) from the parser's output   |
+| `src/held-selection.ts`   | Keeps the scrollback's selection, and its highlight, after focus moves away |
+| `src/timestamp-gutter.ts` | The per-line timestamp column                                              |
+| `src/linkify.ts`          | Finding web addresses in text                                              |
+| `src/pueblo.ts`           | Pueblo: the greeting, and reading its links, line breaks and clears        |
+| `src/link-menu.ts`        | The popup that lists a Pueblo link's commands                              |
+| `src/scrollback-search.ts`| Finding matches in the lines, and which match is current                   |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
+| `src/preferences-dialog.ts` | The Preferences dialog                                                  |
 | `src/tabs.ts`             | Tab strips (the Worlds dialog's), with ‹ › scrolling when they overflow   |
 | `src/find-widget.ts`      | The scrollback find box                                                   |
 | `src/live-replay.ts`      | Merging a window's scrollback replay with its live output, without repeats |
@@ -389,3 +640,7 @@ MIT; see [LICENSE](LICENSE).
 The icon is a remix of "Woman with roses" by j4p4n from
 [OpenClipart](https://openclipart.org/), dedicated to the public domain under
 [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
+
+The bundled default font, Iosevka Moolin (`font/`), is a custom build of
+[Iosevka](https://typeof.net/Iosevka/) by Belleve Invis, licensed under the
+[SIL Open Font License 1.1](font/LICENSE-IosevkaMoolin.md).

@@ -1,3 +1,4 @@
+import { GreetingDetector } from "./pueblo";
 import { TelnetSession, type TlsInfo } from "./telnet";
 import type { ConnectTarget } from "./worlds-types";
 import { expandLoginTemplate, isConnectable, targetLabel, worldLabel } from "./world-utils";
@@ -6,6 +7,16 @@ import type { LogLevel } from "./logger";
 type LogFn = (level: Exclude<LogLevel, "none">, ...args: unknown[]) => void;
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected";
+
+// The cascading settings (see world-utils.ts's resolveTriState) resolved for
+// one connection, snapshotted at connect time — same timing as everything
+// else a World/Character setting controls (see README's "a connection keeps
+// the settings its world had when it connected").
+export interface ResolvedSettings {
+  wordWrap: boolean;
+  echoCommands: boolean;
+  honorClear: boolean;
+}
 
 // What the renderer is told about its window's connection.
 export interface ConnectionState {
@@ -17,6 +28,11 @@ export interface ConnectionState {
   // The TLS handshake's details once connected over TLS; null on a
   // plaintext connection, and while connecting or disconnected.
   tls: TlsInfo | null;
+  // Resolved from Global/World/Character at connect time; false while
+  // disconnected.
+  wordWrap: boolean;
+  // Whether to act on a Pueblo server's clear; resolved the same way.
+  honorClear: boolean;
 }
 
 // What the renderer is told about its window: the connection, plus whether
@@ -45,11 +61,26 @@ export interface ConnectionManagerHandlers {
   // written through onMessage — the point to stop recording the window's
   // output for that target.
   onDisconnected: () => void;
+  // The server's Pueblo greeting no longer counts: a line has been sent to it
+  // (see ConnectionManager.isGreetingOpen).
+  onGreetingClosed: () => void;
 }
 
-const yellow = (text: string): string => `\x1b[33m[${text}]\x1b[0m\r\n`;
-const green = (text: string): string => `\x1b[32m[${text}]\x1b[0m\r\n`;
-const red = (text: string): string => `\x1b[31m[${text}]\x1b[0m\r\n`;
+// What Pueblo clients send on seeing the server's greeting (see pueblo.ts); a
+// Pueblo world waits for it before sending its tags.
+export const PUEBLO_CLIENT_REPLY = "PUEBLOCLIENT 2.01\r\n";
+
+// Moolin's status lines go through the same parser as the server's output, and
+// some of what they say comes from outside (a certificate's host names in an
+// error, say, or a world's name from a hand-edited file), so control
+// characters, escape included, are made harmless before they are interpolated.
+export function plain(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, " ");
+}
+
+const yellow = (text: string): string => `\x1b[33m[${plain(text)}]\x1b[0m\r\n`;
+const green = (text: string): string => `\x1b[32m[${plain(text)}]\x1b[0m\r\n`;
+const red = (text: string): string => `\x1b[31m[${plain(text)}]\x1b[0m\r\n`;
 
 // Owns one window's TelnetSession plus the "what are we connected to, and
 // how" bookkeeping (see TerminalWindow, which holds one of these each).
@@ -62,6 +93,26 @@ export class ConnectionManager {
   private target: ConnectTarget | null = null;
   private connected = false;
   private tlsInfo: TlsInfo | null = null;
+  private resolved: ResolvedSettings | null = null;
+  // Whether the server has greeted this connection as a Pueblo world. Kept
+  // after the connection ends, until the next one begins, so the scrollback
+  // that holds its tags is still read that way.
+  private pueblo = false;
+  // Why this side is ending the connection, for the status line, until the
+  // session reports it ended.
+  private disconnectReason: string | null = null;
+  // Whether the server's Pueblo greeting still counts. It does from the start
+  // of a connection until the first line is sent to the server, typed or an
+  // auto-login: the greeting comes with the server's welcome, before anyone has
+  // spoken, while a player could say the same words later and, were it taken
+  // for a greeting, turn their text into links that run commands when clicked.
+  private greetingOpen = false;
+  // The auto-login, held until the server has sent a whole line (see connect).
+  private pendingLogin: string | null = null;
+  // Whether the server has sent a line feed yet on this connection.
+  private sawLineFeed = false;
+  private readonly greeting = new GreetingDetector();
+  private greetingDecoder = new TextDecoder();
   // The window's current size, applied to each new session so NAWS reports
   // it from the start rather than the 80x24 default.
   private cols = 80;
@@ -83,7 +134,34 @@ export class ConnectionManager {
       label: this.target ? targetLabel(this.target.world, this.target.character) : null,
       address: this.target ? `${this.target.world.host.trim()}:${this.target.world.port}` : null,
       tls: this.connected ? this.tlsInfo : null,
+      wordWrap: this.resolved?.wordWrap ?? false,
+      honorClear: this.resolved?.honorClear ?? false,
     };
+  }
+
+  // Whether this connection should echo typed commands (see the telnetInput
+  // IPC handler in main.ts); resolved from Global/World/Character at connect
+  // time, same as wordWrap in getState().
+  echoCommandsEnabled(): boolean {
+    return this.resolved?.echoCommands ?? true;
+  }
+
+  // Whether the server has greeted this connection as a Pueblo world, and
+  // Moolin answered it (see ScrollbackReplay.pueblo for why the renderer
+  // needs to know).
+  isPueblo(): boolean {
+    return this.pueblo;
+  }
+
+  // Whether the server's greeting could still switch Pueblo on (see greetingOpen).
+  isGreetingOpen(): boolean {
+    return this.greetingOpen;
+  }
+
+  private closeGreeting(): void {
+    if (!this.greetingOpen) return;
+    this.greetingOpen = false;
+    this.handlers.onGreetingClosed();
   }
 
   // Whether the telnet session is fully established (not just "a connect
@@ -99,7 +177,10 @@ export class ConnectionManager {
     return this.session !== null;
   }
 
-  connect(target: ConnectTarget): void {
+  connect(
+    target: ConnectTarget,
+    resolved: ResolvedSettings = { wordWrap: false, echoCommands: true, honorClear: false },
+  ): void {
     const { world, character } = target;
     this.session?.disconnect();
     const label = targetLabel(world, character);
@@ -110,6 +191,13 @@ export class ConnectionManager {
     this.target = target;
     this.connected = false;
     this.tlsInfo = null;
+    this.resolved = resolved;
+    this.pueblo = false;
+    this.greetingOpen = true;
+    this.pendingLogin = null;
+    this.sawLineFeed = false;
+    this.greeting.reset();
+    this.greetingDecoder = new TextDecoder();
     const host = world.host.trim();
     const port = world.port;
     this.log("info", "connecting to", `${host}:${port}`, `(${label})`, world.tls ? "over TLS" : "");
@@ -127,24 +215,45 @@ export class ConnectionManager {
           this.handlers.onConnected(target);
           this.handlers.onStateChange();
           this.handlers.onMessage(green(`connected to ${label}${secure ? ", securely (TLS)" : ""}`));
+          // Held until the server has sent a whole line, so its greeting is seen
+          // before anything is sent (see greetingOpen): a network read can end
+          // in the middle of the greeting, and the login closes the window for
+          // it. A server that sends no line until it is spoken to never gets
+          // the login.
           if (character && world.autoLogin) {
-            this.log("debug", "sending auto-login for", label);
-            session.sendRaw(expandLoginTemplate(world.loginTemplate, character.name, character.password));
+            this.pendingLogin = expandLoginTemplate(world.loginTemplate, character.name, character.password);
           }
         },
         onData: (data) => {
           if (this.session !== session) return;
           this.handlers.onData(data);
+          this.watchForPuebloGreeting(session, data);
+          if (data.includes(0x0a)) this.sawLineFeed = true;
+          if (this.pendingLogin !== null && this.sawLineFeed) {
+            this.log("debug", "sending auto-login for", label);
+            const login = this.pendingLogin;
+            this.pendingLogin = null;
+            this.closeGreeting();
+            session.sendRaw(login);
+          }
         },
         onDisconnect: (reason, certificateRejected) => {
           if (this.session !== session) return;
+          const ourReason = this.disconnectReason;
+          this.disconnectReason = null;
           this.log(reason ? "error" : "info", reason ? `connection error: ${reason}` : "disconnected");
           this.session = null;
+          this.pendingLogin = null;
           this.target = null;
           this.connected = false;
           this.tlsInfo = null;
+          this.resolved = null;
           this.handlers.onStateChange();
-          this.handlers.onMessage(reason ? red(`connection error: ${reason}`) : yellow("disconnected"));
+          this.handlers.onMessage(
+            reason
+              ? red(`connection error: ${reason}`)
+              : yellow(ourReason ? `disconnected: ${ourReason}` : "disconnected"),
+          );
           if (certificateRejected) {
             this.handlers.onMessage(
               yellow(`to connect anyway, turn on "Accept untrusted certificates" for ${worldLabel(world)}`),
@@ -174,12 +283,37 @@ export class ConnectionManager {
     this.handlers.onStateChange();
   }
 
-  disconnect(): void {
-    this.session?.disconnect();
+  // Answers a Pueblo greeting, once. Neither the reply nor its effect goes
+  // through the scrollback or the log: it is the client's half of the greeting,
+  // not something typed.
+  private watchForPuebloGreeting(session: TelnetSession, data: Uint8Array): void {
+    if (this.pueblo || !this.greetingOpen) return;
+    if (this.greeting.feed(this.greetingDecoder.decode(data, { stream: true })) < 0) return;
+    this.pueblo = true;
+    this.log("debug", "Pueblo greeting seen; answering");
+    session.sendRaw(PUEBLO_CLIENT_REPLY);
+  }
+
+  // Ends the connection. `reason` is shown in the status line ("disconnected:
+  // the computer is going to sleep"); `graceful` closes it properly, telling
+  // the server, rather than dropping it.
+  disconnect(reason?: string, graceful = false): void {
+    if (!this.session) return;
+    this.disconnectReason = reason ?? null;
+    if (reason) this.log("info", "ending the connection:", reason);
+    this.session.disconnect(graceful);
+  }
+
+  // The computer is about to sleep, which will cut the connection off with no
+  // notice to either side: say goodbye now, while the network is still up,
+  // rather than leave a window that looks live but isn't.
+  disconnectForSleep(): void {
+    this.disconnect("the computer is going to sleep", true);
   }
 
   sendLine(text: string): { echoed: boolean } {
     if (!this.session) return { echoed: false };
+    this.closeGreeting();
     return this.session.sendLine(text);
   }
 

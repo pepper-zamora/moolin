@@ -18,6 +18,9 @@ export const IpcChannels = {
   terminalGetScrollback: "terminal:getScrollback",
   // main -> renderer: the scrollback was replaced; clear and write these chunks.
   terminalReset: "terminal:reset",
+  // main -> renderer: the server's Pueblo greeting no longer counts, with the
+  // output sequence number it falls at.
+  terminalGreetingClosed: "terminal:greetingClosed",
   terminalZoom: "terminal:zoom",
   terminalContextMenu: "terminal:contextMenu",
   terminalCopyRequested: "terminal:copyRequested",
@@ -34,10 +37,29 @@ export const IpcChannels = {
   terminalClearScreenRequested: "terminal:clearScreenRequested",
   // main -> renderer: show or hide the per-line timestamp gutter.
   terminalToggleTimestamps: "terminal:toggleTimestamps",
+  // main -> renderer: apply a newly chosen default font/size to this window.
+  terminalSetFont: "terminal:setFont",
+  // renderer -> main: this window's measured content size for an 80x25
+  // terminal at its starting font, for sizing a freshly opened window.
+  terminalInitialSize: "terminal:initialSize",
+  // main -> renderer: open the Preferences dialog with the current settings.
+  preferencesOpen: "preferences:open",
+  // renderer -> main: save changed preferences (merged over the current ones).
+  preferencesSave: "preferences:save",
   connectionGetState: "connection:getState",
   connectionState: "connection:state",
   clipboardWriteText: "clipboard:writeText",
   clipboardReadText: "clipboard:readText",
   shellOpenExternal: "shell:openExternal",
   logEmit: "log:emit",
+  securityGetState: "security:getState",
+  securitySetup: "security:setup",
+  securityUnlock: "security:unlock",
+  securityChange: "security:change",
+  securityDisable: "security:disable",
+  securityDecline: "security:decline",
+  // main -> renderer: open the encryption dialog in a mode (offer, unlock, manage).
+  securityOpen: "security:open",
+  // main -> renderer: encryption was turned on or off, locked or unlocked.
+  securityStateChanged: "security:stateChanged",
 } as const;

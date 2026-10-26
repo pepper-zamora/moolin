@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none';"
     />
     <title>Moolin</title>
-    <!-- Bundled by esbuild from renderer.ts's CSS imports (xterm's and styles.css). -->
+    <!-- Bundled by esbuild from renderer.ts's CSS import (styles.css). -->
     <link rel="stylesheet" href="../dist/renderer.css" />
   </head>
   <body>
@@ -17,6 +17,8 @@
              part of its buffer, kept scroll-synced in renderer.ts. -->
         <div id="gutter" hidden></div>
         <div id="terminal"></div>
+        <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
+        <canvas id="search-ruler" hidden></canvas>
         <!-- Scrollback search (Ctrl+F), floating over the terminal's top
              right; driven by find-widget.ts. -->
         <div id="find-widget" role="search" hidden>
@@ -33,9 +35,11 @@
         </div>
       </div>
       <hr id="divider" />
-      <textarea id="input-area" rows="1" spellcheck="false" disabled></textarea>
+      <textarea id="input-area" rows="1" spellcheck="true" disabled></textarea>
       <div id="status-bar" data-status="disconnected">
         <span id="status-text">Not connected</span>
+        <!-- The terminal's current size, in characters (cols x rows). -->
+        <span id="screen-size" title="Terminal size, in characters"></span>
         <!-- Whether this window is writing the session log: a scroll when it
              is, a "no" sign when another window connected to the same
              world/character already owns the log. -->
@@ -47,6 +51,15 @@
           <svg class="logging-off" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
             <circle cx="8" cy="8" r="5.9" />
             <path d="M3.8 3.8 L12.2 12.2" />
+          </svg>
+        </span>
+        <!-- Whether passwords and logs are encrypted: a padlock, amber while
+             locked (waiting for the key phrase or file), grey once unlocked.
+             Hidden when encryption is off. Click to unlock or manage it. -->
+        <span id="encryption-status" role="button" tabindex="-1" hidden>
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <rect x="3" y="7" width="10" height="7" rx="1.2" />
+            <path d="M5.2 7 V5 a2.8 2.8 0 0 1 5.6 0 V7" />
           </svg>
         </span>
         <!-- Connection security, far right: a shield whose color and mark
@@ -68,7 +81,7 @@
       <div id="security-popup" hidden></div>
     </div>
 
-    <dialog id="worlds-dialog">
+    <dialog id="worlds-dialog" class="app-dialog">
       <div class="worlds-layout">
         <div class="worlds-sidebar">
           <ul id="worlds-tree" role="tree" aria-label="Worlds" tabindex="0"></ul>
@@ -100,12 +113,14 @@
               </p>
             </div>
 
-            <div id="global-pane" class="pane" hidden>
-              <p class="placeholder">
+            <form id="global-pane" class="pane" hidden>
+              <p class="hint">
                 Settings here apply to every world and character unless the world or character sets its own.
-                There are no global settings yet.
               </p>
-            </div>
+              <label class="check"><input name="wordWrap" type="checkbox" /> Wrap long lines at word boundaries</label>
+              <label class="check"><input name="echoCommands" type="checkbox" /> Echo typed commands into the scrollback</label>
+              <label class="check"><input name="honorClear" type="checkbox" /> Clear the screen when a Pueblo server asks</label>
+            </form>
 
             <form id="world-pane" class="pane" hidden>
               <label>Name <input name="name" type="text" spellcheck="false" /></label>
@@ -121,7 +136,27 @@
                 {{character}} and {{password}} are replaced with the character's name and password. \r sends a
                 carriage return, \n a line feed, \\ a backslash.
               </p>
-              <label class="check"><input name="echoCommands" type="checkbox" /> Echo typed commands into the scrollback</label>
+              <label>Echo typed commands into the scrollback
+                <select name="echoCommands">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label>Wrap long lines at word boundaries
+                <select name="wordWrap">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label>Clear the screen when a Pueblo server asks
+                <select name="honorClear">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
             </form>
 
             <form id="character-pane" class="pane" hidden>
@@ -133,6 +168,27 @@
                   <button id="show-password-btn" type="button">Show</button>
                 </span>
               </label>
+              <label>Echo typed commands into the scrollback
+                <select name="echoCommands">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label>Wrap long lines at word boundaries
+                <select name="wordWrap">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label>Clear the screen when a Pueblo server asks
+                <select name="honorClear">
+                  <option value="inherit">Inherit</option>
+                  <option value="on">On</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
             </form>
 
           </div>
@@ -142,6 +198,51 @@
           </div>
         </div>
       </div>
+    </dialog>
+
+    <dialog id="preferences-dialog" class="app-dialog">
+      <div class="prefs-layout">
+        <label class="check"><input id="pref-show-timestamps" type="checkbox" /> Show timestamps</label>
+        <label class="check"><input id="pref-check-updates" type="checkbox" /> Check for updates at startup</label>
+        <label class="check">
+          Font size <input id="pref-font-size" type="number" min="8" max="32" step="2" />
+        </label>
+        <ul id="pref-font-list" role="radiogroup" aria-label="Font"></ul>
+      </div>
+    </dialog>
+
+    <!-- Encryption of passwords and logs: the first-run offer, unlocking, and
+         managing it. One form whose parts are shown by encryption-dialog.ts. -->
+    <dialog id="encryption-dialog" class="app-dialog">
+      <form id="enc-form" class="enc-layout" autocomplete="off">
+        <h2 id="enc-title"></h2>
+        <p id="enc-intro"></p>
+        <div id="enc-new" hidden>
+          <label>Key phrase <input id="enc-phrase" type="password" autocomplete="off" spellcheck="false" /></label>
+          <label>Again <input id="enc-confirm" type="password" autocomplete="off" spellcheck="false" /></label>
+          <p id="enc-hint" class="enc-note">Use a long phrase: it is all that stands between your files and anyone who gets them.</p>
+        </div>
+        <div id="enc-unlock" hidden>
+          <label>Key phrase <input id="enc-unlock-phrase" type="password" autocomplete="off" spellcheck="false" /></label>
+        </div>
+        <div id="enc-file-row" hidden>
+          <button id="enc-file-btn" type="button">Use a key file…</button>
+        </div>
+        <div id="enc-manage" hidden>
+          <button id="enc-change-btn" type="button">Change key phrase or file…</button>
+          <button id="enc-stop-btn" type="button">Stop using encryption…</button>
+        </div>
+        <label id="enc-never-row" class="check" hidden>
+          <input id="enc-never" type="checkbox" /> Don't ask me again
+        </label>
+        <p id="enc-error" role="alert" hidden></p>
+        <ul id="enc-warnings" hidden></ul>
+        <p id="enc-working" role="status" hidden>Working… this can take a while if you have a lot of logs.</p>
+        <div class="enc-buttons">
+          <button id="enc-primary" type="submit" class="primary"></button>
+          <button id="enc-cancel" type="button"></button>
+        </div>
+      </form>
     </dialog>
 
     <script src="../dist/renderer.js"></script>

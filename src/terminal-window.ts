@@ -63,6 +63,8 @@ export class TerminalWindow {
         preload: options.preloadPath,
         contextIsolation: true,
         nodeIntegration: false,
+        // The default since Electron 20, stated so that it stays so.
+        sandbox: true,
         additionalArguments: options.rendererArgs,
       },
     });
@@ -84,9 +86,17 @@ export class TerminalWindow {
         onConnected: (target) => handlers.onConnected(target),
         // After the "disconnected" line, so the log ends with it.
         onDisconnected: () => this.sessionLog.release(),
+        onGreetingClosed: () => this.send(IpcChannels.terminalGreetingClosed, ++this.seq),
       },
       (level, ...args) => log(level, `telnet:${id}`, ...args),
     );
+
+    // The page is local and never navigates or opens windows of its own; a
+    // link in the scrollback is opened through the main process, http(s) only.
+    // (A reload is not a navigation, so View > Reload still works.)
+    this.window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    this.window.webContents.on("will-navigate", (event) => event.preventDefault());
+    this.window.webContents.on("will-attach-webview", (event) => event.preventDefault());
 
     this.window.webContents.on("console-message", ({ level, message, lineNumber, sourceId }) => {
       log("debug", `console:${id}`, `level=${level} ${sourceId}:${lineNumber} ${message}`);
@@ -142,16 +152,19 @@ export class TerminalWindow {
   // (see getState).
   private startLog(target: ConnectTarget): void {
     let history: LogHistory = { bytes: new Uint8Array(), times: [] };
+    let unavailable: string | null = null;
     try {
       history = this.sessionLog.open(target.world, target.character, MAX_SCROLLBACK_BYTES);
     } catch (error) {
       // Couldn't find or rename its folder; connect anyway, without a log.
-      log("error", "main", `window ${this.window.id} log unavailable:`, (error as Error).message);
+      unavailable = (error as Error).message;
+      log("error", "main", `window ${this.window.id} log unavailable:`, unavailable);
     }
     log("debug", "main", `window ${this.window.id} log`, this.sessionLog.file ?? "owned by another window");
     this.scrollback.reset(history.bytes.length > 0 ? [history.bytes] : [], history.times);
     this.seq++;
     this.send(IpcChannels.terminalReset, this.getScrollback());
+    if (unavailable) this.writeStatus(`\x1b[33m[not logging: ${unavailable}]\x1b[0m\r\n`);
   }
 
   // Server output, timestamped with its arrival time (the only lines that get
@@ -182,6 +195,12 @@ export class TerminalWindow {
   }
 
   getScrollback(): ScrollbackReplay {
-    return { chunks: this.scrollback.snapshot(), times: this.scrollback.snapshotTimes(), seq: this.seq };
+    return {
+      chunks: this.scrollback.snapshot(),
+      times: this.scrollback.snapshotTimes(),
+      seq: this.seq,
+      pueblo: this.connection.isPueblo(),
+      greetingOpen: this.connection.isGreetingOpen(),
+    };
   }
 }

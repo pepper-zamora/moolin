@@ -1,3 +1,6 @@
 node_modules/
 dist/
 release/
+# Iosevka's own build toolchain, cloned on demand by "npm run build:font";
+# the font it produces is committed under font/, this working copy isn't.
+/font/.iosevka-src/

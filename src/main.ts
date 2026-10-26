@@ -1,23 +1,51 @@
-import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, shell } from "electron";
+import { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, powerMonitor, shell } from "electron";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   backupPathFor,
+  parseGlobalSettings,
   parseWorld,
   readWorldsFile,
   resolveWorldsPath,
   saveWorlds,
+  seedDefaultWorlds,
   updateMru as updateMruState,
 } from "./worlds";
 import { WindowManager } from "./window-manager";
 import type { TerminalWindow } from "./terminal-window";
-import { configureLogger, getCliLogLevel, log, type LogLevel } from "./logger";
+import { configureLogger, getCliLogLevel, log } from "./logger";
 import { SessionLogRegistry } from "./session-log";
 import { IpcChannels } from "./ipc-channels";
-import { preferencesPath, readPreferences, writePreferences } from "./preferences";
+import {
+  preferencesPath,
+  readPreferences,
+  sanitizePreferences,
+  writePreferences,
+  type Preferences,
+} from "./preferences";
 import type { ConnectTarget, MruEntry, World, WorldsLoadResult } from "./worlds-types";
-import { targetLabel } from "./world-utils";
-import type { WindowState } from "./connection-manager";
+import { DEFAULT_GLOBAL_SETTINGS, resolveTriState, targetLabel } from "./world-utils";
+import type { ResolvedSettings, WindowState } from "./connection-manager";
 import { checkForUpdate } from "./update-check";
+import { fontFamilyFor } from "./fonts";
+import { normalizePhrase, type KeySource } from "./crypto-keys";
+import { readKeyFile, unlockWithKeyFile } from "./key-file";
+import { Security, type Outcome, type SecurityPageState } from "./security";
+import {
+  parseSecurityDecline,
+  parseSecurityRequest,
+  parseBooleanPair,
+  parseClipboardText,
+  parseConfirmText,
+  parseConnectRequest,
+  parseContextMenuOptions,
+  parseExternalUrl,
+  parseInitialSize,
+  parseInputText,
+  parseLogCall,
+  parseMenuItems,
+  parseSize,
+} from "./ipc-validate";
 
 function cliArgs(): string[] {
   return app.isPackaged ? process.argv.slice(1) : process.argv.slice(2);
@@ -27,12 +55,28 @@ function getCliWorldsArg(): string | undefined {
   return cliArgs().find((arg) => !arg.startsWith("-"));
 }
 
+// A throwaway test run (scripts/smoke.mjs) that needs its config and log
+// directories isolated from the real ones sets these explicitly, since
+// Electron only honors XDG_CONFIG_HOME/user-dirs.dirs on Linux — on macOS
+// and Windows app.getPath("userData"/"documents") ignores them. Must happen
+// before anything below reads either path.
+if (process.env.MOOLIN_CONFIG_DIR) {
+  app.setPath("userData", process.env.MOOLIN_CONFIG_DIR);
+}
+if (process.env.MOOLIN_DOCUMENTS_DIR) {
+  app.setPath("documents", process.env.MOOLIN_DOCUMENTS_DIR);
+}
+
 const logLevel = getCliLogLevel(process.argv);
 configureLogger(logLevel);
 // Renderer/preload processes are separate OS processes with their own argv
 // (Chromium's internal --type=renderer flags, not ours) — hand the level
-// down explicitly so preload.ts can compute the same value.
-const rendererArgs = [`--log-level=${logLevel}`];
+// down explicitly so preload.ts can compute the same value. Computed fresh
+// per window (not a fixed array) since the font prefs it carries can change
+// at runtime via the Preferences dialog.
+function rendererArgs(): string[] {
+  return [`--log-level=${logLevel}`, `--font-id=${prefs.fontId}`, `--font-size=${prefs.fontSize}`];
+}
 
 const worldsPath = resolveWorldsPath(getCliWorldsArg());
 
@@ -44,6 +88,19 @@ if (!isPrimaryInstance) {
   app.quit();
 } else {
   log("info", "main", "starting, worldsPath =", worldsPath);
+  // A first-ever launch gets LambdaMOO and its Guest character already set
+  // up, rather than an empty Worlds dialog with nothing to click. Written
+  // once, immediately, rather than left to a read-time fallback, so the ids
+  // it hands out are stable from the very first read (the Worlds dialog's
+  // load, an early connect's MRU update, ...).
+  if (!fs.existsSync(worldsPath)) {
+    try {
+      saveWorlds(worldsPath, seedDefaultWorlds());
+      log("info", "main", "seeded the default world (LambdaMOO) at", worldsPath);
+    } catch (err) {
+      log("warn", "main", "could not seed the default world:", (err as Error).message);
+    }
+  }
 }
 
 const MAX_MRU = 5;
@@ -55,14 +112,24 @@ const APP_ICON = path.join(__dirname, "..", "icons", "icon-512.png");
 const INDEX_HTML = path.join(__dirname, "..", "src", "index.html");
 const PRELOAD_PATH = path.join(__dirname, "preload.js");
 
+const LOG_ROOT = path.join(app.getPath("documents"), "Moolin");
+const logRegistry = new SessionLogRegistry(
+  (file, error) => log("error", "main", "session log failed", file, error.message),
+  () => security.logMode(),
+);
+// Whether passwords and logs are encrypted, and the key while unlocked (see security.ts).
+const security = new Security(worldsPath, LOG_ROOT, logRegistry);
+// Whether to offer setting up encryption: once a run, to the first window to ask.
+let offerPending = prefs.encryptionPrompt === "ask" && security.state() === "off";
+
 const windowManager = new WindowManager(
   {
     appIcon: APP_ICON,
     preloadPath: PRELOAD_PATH,
     rendererArgs,
     indexHtmlPath: INDEX_HTML,
-    logRoot: path.join(app.getPath("documents"), "Moolin"),
-    logs: new SessionLogRegistry((file, error) => log("error", "main", "session log failed", file, error.message)),
+    logRoot: LOG_ROOT,
+    logs: logRegistry,
   },
   {
     onStateChange: (terminal) => buildMenu(terminal),
@@ -86,8 +153,14 @@ function updateMru(target: ConnectTarget): void {
   const entry: MruEntry = target.character
     ? { worldId: target.world.id, characterId: target.character.id }
     : { worldId: target.world.id };
-  const updated = updateMruState(worldsPath, (mru) =>
-    [entry, ...mru.filter((e) => e.worldId !== entry.worldId || e.characterId !== entry.characterId)].slice(0, MAX_MRU),
+  const updated = updateMruState(
+    worldsPath,
+    (mru) =>
+      [entry, ...mru.filter((e) => e.worldId !== entry.worldId || e.characterId !== entry.characterId)].slice(
+        0,
+        MAX_MRU,
+      ),
+    security.dataKey,
   );
   log("debug", "worlds", "mru updated:", updated);
   rebuildAllMenus();
@@ -95,7 +168,7 @@ function updateMru(target: ConnectTarget): void {
 
 // MRU entries whose world (and character, if any) still exist.
 function mruTargets(): ConnectTarget[] {
-  const { state } = readWorldsFile(worldsPath);
+  const { state } = readWorldsFile(worldsPath, security.dataKey);
   const targets: ConnectTarget[] = [];
   for (const entry of state.mru) {
     const world = state.worlds.find((w) => w.id === entry.worldId);
@@ -110,14 +183,48 @@ function mruTargets(): ConnectTarget[] {
   return targets.slice(0, MAX_MRU);
 }
 
+// Resolves Global/World/Character into what this connection actually uses,
+// snapshotted once at connect time (see ConnectionManager.connect).
+function resolveConnectionSettings(target: ConnectTarget): ResolvedSettings {
+  const { state } = readWorldsFile(worldsPath, security.dataKey);
+  return {
+    wordWrap: resolveTriState(
+      state.globalSettings.wordWrap,
+      target.character?.wordWrap ?? "inherit",
+      target.world.wordWrap,
+    ),
+    echoCommands: resolveTriState(
+      state.globalSettings.echoCommands,
+      target.character?.echoCommands ?? "inherit",
+      target.world.echoCommands,
+    ),
+    honorClear: resolveTriState(
+      state.globalSettings.honorClear,
+      target.character?.honorClear ?? "inherit",
+      target.world.honorClear,
+    ),
+  };
+}
+
 // A window holds at most one connection. Connecting from a window that
 // already has one opens the new connection in a window of its own.
 function connectOrNewWindow(terminal: TerminalWindow, target: ConnectTarget): void {
+  if (!requireUnlocked(terminal)) return;
+  const resolved = resolveConnectionSettings(target);
   if (terminal.connection.isActive()) {
-    newTerminalWindow(terminal).connection.connect(target);
+    newTerminalWindow(terminal).connection.connect(target, resolved);
   } else {
-    terminal.connection.connect(target);
+    terminal.connection.connect(target, resolved);
   }
+}
+
+// While encryption is on and not yet unlocked, nothing connects (the passwords
+// can't be read, and a log can't be written): the window is asked to unlock.
+function requireUnlocked(terminal: TerminalWindow): boolean {
+  if (security.state() !== "locked") return true;
+  terminal.writeStatus("\x1b[33m[locked: unlock Moolin to connect]\x1b[0m\r\n");
+  terminal.send(IpcChannels.securityOpen, "unlock");
+  return false;
 }
 
 // Asks before doing something; Cancel is the default, so a stray Enter
@@ -156,17 +263,27 @@ async function confirmDisconnect(terminal: TerminalWindow): Promise<void> {
 // reuses the dialog's own create logic rather than main owning a duplicate
 // worlds list; the dialog finishes loading the list before creating.
 function openWorldsDialog(terminal: TerminalWindow, createNew: boolean): void {
+  if (!requireUnlocked(terminal)) return;
   log("debug", "main", "opening worlds dialog, createNew =", createNew);
   terminal.window.focus();
   terminal.send(IpcChannels.worldsOpen, { createNew });
 }
 
+// Worlds > Encryption…: unlock when locked, manage when on, set up when off.
+function openEncryption(terminal: TerminalWindow): void {
+  terminal.window.focus();
+  const state = security.state();
+  terminal.send(IpcChannels.securityOpen, state === "locked" ? "unlock" : state === "unlocked" ? "manage" : "setup");
+}
+
 function openPreferences(terminal: TerminalWindow): void {
-  void dialog.showMessageBox(terminal.window, {
-    type: "info",
-    message: "Preferences",
-    detail: "Not yet implemented.",
-  });
+  terminal.window.focus();
+  // showTimestamps is per-window state (see the View menu's checkbox below);
+  // the dialog edits this window's actual value, which may have drifted from
+  // the stored default if only this window's checkbox was toggled.
+  // The encryption settings are the encryption dialog's business, not this one's.
+  const { encryptionPrompt: _prompt, keyFilePath: _keyFile, ...visible } = prefs;
+  terminal.send(IpcChannels.preferencesOpen, { ...visible, showTimestamps: terminal.showTimestamps });
 }
 
 // How long after startup the automatic update check runs, so it doesn't
@@ -214,7 +331,7 @@ function buildMenu(terminal: TerminalWindow): void {
   log("debug", "main", "rebuilding menu for window", terminal.window.id, "connected =", connected);
   const mruItems: Electron.MenuItemConstructorOptions[] = mruTargets().map((target, index) => ({
     label: targetLabel(target.world, target.character),
-    accelerator: `Ctrl+${index + 1}`,
+    accelerator: `CmdOrCtrl+${index + 1}`,
     click: () => connectOrNewWindow(terminal, target),
   }));
 
@@ -222,32 +339,33 @@ function buildMenu(terminal: TerminalWindow): void {
     {
       label: "&Worlds",
       submenu: [
-        { label: "&New World…", accelerator: "Ctrl+N", click: () => openWorldsDialog(terminal, true) },
-        { label: "&Open World…", accelerator: "Ctrl+O", click: () => openWorldsDialog(terminal, false) },
+        { label: "&New World…", accelerator: "CmdOrCtrl+N", click: () => openWorldsDialog(terminal, true) },
+        { label: "&Open World…", accelerator: "CmdOrCtrl+O", click: () => openWorldsDialog(terminal, false) },
         {
           label: "&Disconnect",
-          accelerator: "Ctrl+K",
+          accelerator: "CmdOrCtrl+K",
           enabled: connected,
           click: () => void confirmDisconnect(terminal),
         },
         {
           label: "Close &Window",
-          accelerator: "Ctrl+W",
+          accelerator: "CmdOrCtrl+W",
           click: () => terminal.window.close(),
         },
         ...(mruItems.length > 0 ? ([{ type: "separator" }, ...mruItems] as Electron.MenuItemConstructorOptions[]) : []),
         { type: "separator" },
-        { label: "&Preferences…", click: () => openPreferences(terminal) },
+        { label: "&Preferences…", accelerator: "CmdOrCtrl+,", click: () => openPreferences(terminal) },
+        { label: "&Encryption…", click: () => openEncryption(terminal) },
         { type: "separator" },
         { role: "quit", label: "&Quit" },
       ],
     },
     {
       // Not the built-in "editMenu" role: its items rely on Chromium's
-      // native edit commands against the focused DOM selection, which don't
-      // reliably reach into xterm.js's canvas/WebGL-rendered selection (for
-      // Cut/Copy/Paste), and whose native undo stack is unusable here anyway
-      // (see input-undo.ts). Every item below carries a display-only
+      // native edit commands against the focused DOM selection, which is
+      // usually in the input area rather than the scrollback (so Cut/Copy/Paste
+      // would miss a scrollback selection), and whose native undo stack is
+      // unusable here anyway (see input-undo.ts). Every item below carries a display-only
       // accelerator (`registerAccelerator: false`): the shortcut text shows
       // up for discoverability, matching the Worlds/View menus, but the key
       // itself is never actually bound here — that would intercept it
@@ -320,9 +438,10 @@ function buildMenu(terminal: TerminalWindow): void {
     {
       label: "&View",
       // Not the built-in "viewMenu" role: it bundles Zoom In/Out/Reset as a
-      // CSS page zoom, which breaks the WebGL-rendered scrollback (canvas
-      // vs. CSS-scaled mismatch). These items instead resize the terminal's
-      // actual font size, handled renderer-side via "terminal:zoom".
+      // CSS page zoom, which would scale the scrollbar and leave the columns
+      // and rows the server was told out of step with what is shown. These
+      // items instead resize the terminal's actual font size, handled
+      // renderer-side via "terminal:zoom".
       submenu: [
         { role: "reload", label: "&Reload" },
         { role: "forceReload", label: "&Force Reload" },
@@ -348,7 +467,7 @@ function buildMenu(terminal: TerminalWindow): void {
           // Rebound from the terminal convention of Ctrl+Y, which is now
           // the input box's redo shortcut (see renderer.ts).
           label: "&Clear Screen",
-          accelerator: "Ctrl+L",
+          accelerator: "CmdOrCtrl+L",
           registerAccelerator: false,
           click: () => terminal.send(IpcChannels.terminalClearScreenRequested),
         },
@@ -367,6 +486,13 @@ function buildMenu(terminal: TerminalWindow): void {
           },
         },
         { type: "separator" },
+        // Shows twice on macOS Tahoe — one row with fn+F, one with
+        // Ctrl+Cmd+F. That's an open Electron bug, not ours: AppKit injects
+        // its own hidden duplicate for this role, carrying the system
+        // shortcut, and Electron then makes every item visible, exposing it
+        // (electron/electron#52821, fix PR #53137 still unmerged). Leave it
+        // as-is until that lands — every app-side workaround tried costs the
+        // working fn+F shortcut; see TODO.md for the full matrix.
         { role: "togglefullscreen", label: "Toggle &Full Screen" },
       ],
     },
@@ -390,15 +516,30 @@ function buildMenu(terminal: TerminalWindow): void {
   terminal.setMenu(Menu.buildFromTemplate(template));
 }
 
-// Every IPC handler below acts on the terminal window the message came from.
+// Every IPC handler below acts on the terminal window the message came from,
+// and only for a message from that window's own page: not from a frame inside
+// it, nor from a window that isn't one of ours. What the page sends is checked
+// before it is used (see ipc-validate.ts), since the page displays whatever
+// servers send.
 function terminalFor(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): TerminalWindow | undefined {
   const terminal = windowManager.terminalFor(event.sender);
-  if (!terminal) log("warn", "main", "IPC from an unknown window, ignoring");
+  if (!terminal || event.senderFrame !== event.sender.mainFrame) {
+    log("warn", "main", "IPC from an unknown window or frame, ignoring");
+    return undefined;
+  }
   return terminal;
 }
 
-ipcMain.handle(IpcChannels.worldsLoad, (): WorldsLoadResult => {
-  const { state, error, recovered } = readWorldsFile(worldsPath);
+function ignoreBad(channel: string, value: unknown): void {
+  log("warn", "main", `ignoring a malformed ${channel} message:`, JSON.stringify(value)?.slice(0, 200));
+}
+
+ipcMain.handle(IpcChannels.worldsLoad, (event): WorldsLoadResult => {
+  if (!terminalFor(event)) {
+    return { worlds: [], globalSettings: DEFAULT_GLOBAL_SETTINGS, error: "Not a Moolin window" };
+  }
+  const { state, error, recovered, locked } = readWorldsFile(worldsPath, security.dataKey);
+  if (locked) return { worlds: [], globalSettings: state.globalSettings, locked: true };
   if (error) log("error", "worlds", error);
   else log("debug", "worlds", "loaded", state.worlds.length, "world(s) from", worldsPath);
   const warning = recovered
@@ -406,13 +547,22 @@ ipcMain.handle(IpcChannels.worldsLoad, (): WorldsLoadResult => {
       `instead. The next change is saved as ${path.basename(worldsPath)}, and the unreadable file is kept ` +
       `beside it, renamed to ${path.basename(worldsPath)}.unreadable-<date>.`
     : undefined;
-  return { worlds: state.worlds, error, warning };
+  return { worlds: state.worlds, globalSettings: state.globalSettings, error, warning };
 });
 
-ipcMain.handle(IpcChannels.worldsSave, (event, rawWorlds: unknown[]): { error?: string } => {
+ipcMain.handle(IpcChannels.worldsSave, (event, rawWorlds: unknown, rawGlobalSettings: unknown): { error?: string } => {
+  if (!terminalFor(event)) return { error: "Not a Moolin window" };
+  if (!Array.isArray(rawWorlds)) {
+    ignoreBad(IpcChannels.worldsSave, rawWorlds);
+    return { error: "Could not save: the worlds list was malformed" };
+  }
   const worlds = rawWorlds.map(parseWorld).filter((w): w is World => w !== null);
+  if (worlds.length !== rawWorlds.length) {
+    log("warn", "worlds", `dropping ${rawWorlds.length - worlds.length} malformed world(s) from a save request`);
+  }
+  const globalSettings = parseGlobalSettings(rawGlobalSettings);
   try {
-    saveWorlds(worldsPath, worlds);
+    saveWorlds(worldsPath, worlds, globalSettings, security.dataKey);
   } catch (err) {
     const error = `Could not save ${worldsPath}: ${(err as Error).message}`;
     log("error", "worlds", error);
@@ -427,14 +577,18 @@ ipcMain.handle(IpcChannels.worldsSave, (event, rawWorlds: unknown[]): { error?: 
 });
 
 // The Worlds dialog's delete confirmations.
-ipcMain.handle(IpcChannels.dialogConfirm, (event, message: string, detail?: string): Promise<boolean> => {
+ipcMain.handle(IpcChannels.dialogConfirm, (event, message: unknown, detail?: unknown): Promise<boolean> => {
+  const text = parseConfirmText(message, detail);
+  if (!terminalFor(event) || !text) return Promise.resolve(false);
   const sourceWindow = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-  return confirmAction(sourceWindow, message, "Delete", detail);
+  return confirmAction(sourceWindow, text.message, "Delete", text.detail);
 });
 
 // Native popup menu for the Worlds dialog. Resolves with the chosen item's
 // id, or null.
-ipcMain.handle(IpcChannels.menuPopup, (event, items: Array<{ id: string; label: string }>) => {
+ipcMain.handle(IpcChannels.menuPopup, (event, rawItems: unknown) => {
+  const items = parseMenuItems(rawItems);
+  if (!terminalFor(event) || !items) return Promise.resolve(null);
   const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   return new Promise<string | null>((resolve) => {
     let chosen: string | null = null;
@@ -453,17 +607,21 @@ ipcMain.handle(IpcChannels.menuPopup, (event, items: Array<{ id: string; label: 
 
 // The dialog sends its in-memory copy of the world, so edits not yet saved
 // still apply; it's validated like a record read from disk.
-ipcMain.on(IpcChannels.connectRequest, (event, request: { world: unknown; characterId: string | null }) => {
+ipcMain.on(IpcChannels.connectRequest, (event, rawRequest: unknown) => {
   const terminal = terminalFor(event);
+  const request = parseConnectRequest(rawRequest);
+  if (!request) return ignoreBad(IpcChannels.connectRequest, rawRequest);
   const world = parseWorld(request.world);
   if (!terminal || !world) return;
   const character = world.characters.find((c) => c.id === request.characterId) ?? null;
   connectOrNewWindow(terminal, { world, character });
 });
 
-ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
+ipcMain.on(IpcChannels.telnetInput, (event, rawText: unknown) => {
   const terminal = terminalFor(event);
+  const text = parseInputText(rawText);
   if (!terminal) return;
+  if (text === null) return ignoreBad(IpcChannels.telnetInput, typeof rawText);
   if (!terminal.connection.isConnected()) {
     log("debug", "main", "input while not connected, ignoring:", JSON.stringify(text));
     terminal.writeStatus("\x1b[90m[not connected]\x1b[0m\r\n");
@@ -473,61 +631,222 @@ ipcMain.on(IpcChannels.telnetInput, (event, text: string) => {
   // not at all while the server has taken over echoing (password prompts), nor
   // for a world set to not echo commands (one that echoes input itself).
   const { echoed } = terminal.connection.sendLine(text);
-  const echoCommands = terminal.connection.getConnected()?.world.echoCommands ?? true;
-  if (echoed && echoCommands) {
+  if (echoed && terminal.connection.echoCommandsEnabled()) {
     terminal.writeStatus(`\x1b[36m${text.replace(/\n/g, "\r\n")}\x1b[0m\r\n`);
   }
 });
 
-ipcMain.on(IpcChannels.telnetResize, (event, { cols, rows }: { cols: number; rows: number }) => {
-  log("debug", "main", "terminal resized to", `${cols}x${rows}`);
-  terminalFor(event)?.connection.resize(cols, rows);
+ipcMain.on(IpcChannels.telnetResize, (event, rawSize: unknown) => {
+  const size = parseSize(rawSize);
+  if (!size) return ignoreBad(IpcChannels.telnetResize, rawSize);
+  log("debug", "main", "terminal resized to", `${size.cols}x${size.rows}`);
+  terminalFor(event)?.connection.resize(size.cols, size.rows);
 });
 
 // Keeps the Edit menu's Undo/Redo items' enabled state in sync with the
 // renderer's input-undo stack.
-ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, canUndo: boolean, canRedo: boolean) => {
+ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, rawCanUndo: unknown, rawCanRedo: unknown) => {
   const terminal = terminalFor(event);
-  if (!terminal) return;
-  if (terminal.setUndoState(canUndo, canRedo)) buildMenu(terminal);
+  const state = parseBooleanPair(rawCanUndo, rawCanRedo);
+  if (!terminal || !state) return;
+  if (terminal.setUndoState(state[0], state[1])) buildMenu(terminal);
 });
 
 ipcMain.handle(
   IpcChannels.terminalGetScrollback,
-  (event) => terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0 },
+  (event) =>
+    terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0, pueblo: false, greetingOpen: false },
 );
+
+// A freshly opened (non-cascaded) window's one-shot report of how big its
+// content needs to be to show an 80x25 terminal at its starting font.
+ipcMain.on(IpcChannels.terminalInitialSize, (event, rawSize: unknown) => {
+  const size = parseInitialSize(rawSize);
+  if (!terminalFor(event) || !size) return;
+  windowManager.applyInitialSize(event.sender, size);
+});
+
+// The Preferences dialog's changes save and apply immediately: showTimestamps
+// is this window's own per-window state (same as the View menu's checkbox),
+// while checkForUpdates and the font/size also become the default for new
+// windows; the font change additionally re-renders this window's terminal.
+ipcMain.handle(IpcChannels.preferencesSave, (event, rawPartial: unknown) => {
+  if (!terminalFor(event)) return;
+  if (typeof rawPartial !== "object" || rawPartial === null) return ignoreBad(IpcChannels.preferencesSave, rawPartial);
+  const partial = rawPartial as Partial<Preferences>;
+  const merged = sanitizePreferences(partial, prefs);
+  prefs.showTimestamps = merged.showTimestamps;
+  prefs.checkForUpdates = merged.checkForUpdates;
+  prefs.fontId = merged.fontId;
+  prefs.fontSize = merged.fontSize;
+  writePreferences(prefsPath, prefs);
+  const terminal = terminalFor(event);
+  if (terminal) {
+    if (partial.showTimestamps !== undefined) {
+      terminal.showTimestamps = prefs.showTimestamps;
+      terminal.send(IpcChannels.terminalToggleTimestamps, terminal.showTimestamps);
+      buildMenu(terminal); // keep the View menu's checkbox in sync
+    }
+    if (partial.fontId !== undefined || partial.fontSize !== undefined) {
+      terminal.send(IpcChannels.terminalSetFont, { fontFamily: fontFamilyFor(prefs.fontId), fontSize: prefs.fontSize });
+    }
+  }
+});
 
 ipcMain.handle(
   IpcChannels.connectionGetState,
   (event): WindowState =>
-    terminalFor(event)?.getState() ?? { status: "disconnected", label: null, address: null, tls: null, logging: false },
+    terminalFor(event)?.getState() ?? {
+      status: "disconnected",
+      label: null,
+      address: null,
+      tls: null,
+      wordWrap: false,
+      honorClear: false,
+      logging: false,
+    },
 );
 
 // The clipboard module is unavailable to the sandboxed preload/renderer
 // contexts, so writes/reads are proxied through the main process instead.
-ipcMain.on(IpcChannels.clipboardWriteText, (_event, text: string) => clipboard.writeText(text));
-ipcMain.handle(IpcChannels.clipboardReadText, (): Promise<string> => clipboard.readText());
+ipcMain.on(IpcChannels.clipboardWriteText, (event, rawText: unknown) => {
+  const text = parseClipboardText(rawText);
+  if (terminalFor(event) && text !== null) clipboard.writeText(text);
+});
+ipcMain.handle(
+  IpcChannels.clipboardReadText,
+  async (event): Promise<string> => (terminalFor(event) ? await clipboard.readText() : ""),
+);
 
 // Restricted to http(s) so a malicious server can't trick a click into
 // opening e.g. a file:// or custom-protocol URI on the user's machine.
-ipcMain.on(IpcChannels.shellOpenExternal, (_event, url: string) => {
-  if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+ipcMain.on(IpcChannels.shellOpenExternal, (event, rawUrl: unknown) => {
+  const url = parseExternalUrl(rawUrl);
+  if (terminalFor(event) && url) void shell.openExternal(url);
 });
 
-ipcMain.on(IpcChannels.terminalContextMenu, (event, options: { hasSelection: boolean }) => {
+ipcMain.on(IpcChannels.terminalContextMenu, (event, rawOptions: unknown) => {
+  const options = parseContextMenuOptions(rawOptions);
+  if (!terminalFor(event) || !options) return;
   const window = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const template: Electron.MenuItemConstructorOptions[] = [
     { label: "Cut", enabled: options.hasSelection, click: () => event.sender.send(IpcChannels.terminalCutRequested) },
-    { label: "Copy", enabled: options.hasSelection, click: () => event.sender.send(IpcChannels.terminalCopyRequested) },
+    {
+      label: "Copy",
+      enabled: options.hasSelection,
+      click: () => event.sender.send(IpcChannels.terminalCopyRequested),
+    },
     { label: "Paste", click: () => event.sender.send(IpcChannels.terminalPasteRequested) },
     { type: "separator" },
-    { label: "Select All", click: () => event.sender.send(IpcChannels.terminalSelectAllRequested) },
+    {
+      label: "Select All",
+      click: () => event.sender.send(IpcChannels.terminalSelectAllRequested, options.selectAllTarget),
+    },
   ];
   Menu.buildFromTemplate(template).popup({ window });
 });
 
-ipcMain.on(IpcChannels.logEmit, (_event, level: Exclude<LogLevel, "none">, scope: string, args: unknown[]) => {
-  log(level, scope, ...args);
+// --- Encryption ------------------------------------------------------------
+// Key phrases cross IPC here once and are never logged, so a malformed request
+// is reported without its contents.
+
+function broadcastSecurity(): void {
+  for (const terminal of windowManager.all()) terminal.send(IpcChannels.securityStateChanged, security.info());
+  rebuildAllMenus();
+}
+
+// The secret a request stands for: the phrase typed, or the file the user picks
+// (the page never names a path). null when the picker was cancelled.
+async function secretFor(
+  request: { source: "phrase"; phrase: string } | { source: "file" },
+  parent: BrowserWindow | undefined,
+): Promise<{ secret: Buffer; source: KeySource; keyFile: string | null } | { error: string } | null> {
+  if (request.source === "phrase") return { secret: normalizePhrase(request.phrase), source: "phrase", keyFile: null };
+  const options: Electron.OpenDialogOptions = { title: "Choose a key file", properties: ["openFile"] };
+  const chosen = parent ? await dialog.showOpenDialog(parent, options) : await dialog.showOpenDialog(options);
+  const file = chosen.filePaths[0];
+  if (chosen.canceled || !file) return null;
+  const read = await readKeyFile(file);
+  return "error" in read ? read : { secret: read.secret, source: "file", keyFile: file };
+}
+
+// Runs one encryption operation for a window: resolves its secret, does it,
+// remembers or forgets the key file's path, and tells every window.
+async function securityOperation(
+  event: Electron.IpcMainInvokeEvent,
+  channel: string,
+  rawRequest: unknown,
+  run: (secret: Buffer, source: KeySource) => Promise<Outcome>,
+): Promise<Outcome> {
+  const terminal = terminalFor(event);
+  const request = parseSecurityRequest(rawRequest);
+  if (!terminal) return { ok: false, error: "Not a Moolin window" };
+  if (!request) {
+    ignoreBad(channel, "<hidden>");
+    return { ok: false, error: "That request was malformed" };
+  }
+  const resolved = await secretFor(request, terminal.window);
+  if (resolved === null) return { ok: false }; // cancelled: nothing to say
+  if ("error" in resolved) return { ok: false, error: resolved.error };
+  const outcome = await run(resolved.secret, resolved.source);
+  if (outcome.ok) {
+    prefs.keyFilePath = resolved.keyFile;
+    writePreferences(prefsPath, prefs);
+    broadcastSecurity();
+  }
+  return outcome;
+}
+
+ipcMain.handle(IpcChannels.securityGetState, (event): SecurityPageState => {
+  const info = security.info();
+  const offer = !!terminalFor(event) && offerPending && info.state === "off";
+  if (offer) offerPending = false;
+  return { ...info, offer };
+});
+
+ipcMain.handle(IpcChannels.securitySetup, (event, request: unknown) =>
+  securityOperation(event, IpcChannels.securitySetup, request, (secret, source) => security.enable(secret, source)),
+);
+ipcMain.handle(IpcChannels.securityUnlock, (event, request: unknown) =>
+  securityOperation(event, IpcChannels.securityUnlock, request, (secret) => security.unlock(secret)),
+);
+ipcMain.handle(IpcChannels.securityChange, (event, request: unknown) =>
+  securityOperation(event, IpcChannels.securityChange, request, (secret, source) => security.change(secret, source)),
+);
+
+ipcMain.handle(IpcChannels.securityDisable, async (event): Promise<Outcome> => {
+  const terminal = terminalFor(event);
+  if (!terminal) return { ok: false, error: "Not a Moolin window" };
+  const confirmed = await confirmAction(
+    terminal.window,
+    "Stop using encryption?",
+    "Stop encrypting",
+    "Passwords and logs will be stored unencrypted again, readable by anyone who can read your files.",
+  );
+  if (!confirmed) return { ok: false };
+  const outcome = await security.disable();
+  if (outcome.ok) {
+    prefs.keyFilePath = null;
+    prefs.encryptionPrompt = "never"; // they chose to turn it off: don't offer it back
+    writePreferences(prefsPath, prefs);
+    broadcastSecurity();
+  }
+  return outcome;
+});
+
+// "Not now" on the offer; with "don't ask me again" it is not offered again.
+ipcMain.on(IpcChannels.securityDecline, (event, raw: unknown) => {
+  const never = parseSecurityDecline(raw);
+  if (!terminalFor(event) || never === null) return;
+  if (never && prefs.encryptionPrompt !== "never") {
+    prefs.encryptionPrompt = "never";
+    writePreferences(prefsPath, prefs);
+  }
+});
+
+ipcMain.on(IpcChannels.logEmit, (event, level: unknown, scope: unknown, args: unknown) => {
+  const call = parseLogCall(level, scope, args);
+  if (terminalFor(event) && call) log(call.level, call.scope, ...call.args);
 });
 
 if (isPrimaryInstance) {
@@ -539,8 +858,10 @@ if (isPrimaryInstance) {
     newTerminalWindow();
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     log("debug", "main", "app ready");
+    const unlocked = await unlockWithKeyFile(security, prefs.keyFilePath);
+    if (unlocked) log("info", "security", unlocked);
     newTerminalWindow();
 
     // Only in packaged builds: running from source shouldn't prompt about
@@ -554,6 +875,15 @@ if (isPrimaryInstance) {
 
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) newTerminalWindow();
+    });
+
+    // A sleeping computer cuts every connection off without telling anyone;
+    // on waking, a window would still look connected and only fail on the next
+    // line sent. Closing them properly as it goes to sleep, with a message,
+    // leaves the windows saying what happened.
+    powerMonitor.on("suspend", () => {
+      log("info", "main", "the computer is going to sleep; disconnecting every window");
+      for (const terminal of windowManager.all()) terminal.connection.disconnectForSleep();
     });
   });
 

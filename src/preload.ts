@@ -1,9 +1,14 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { World, WorldsLoadResult } from "./worlds-types";
+import type { GlobalSettings, World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
 import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
 import type { ScrollbackReplay } from "./scrollback-buffer";
+import type { SelectAllTarget } from "./select-all";
 import { IpcChannels } from "./ipc-channels";
+import { parseFontArgs } from "./fonts";
+import type { Preferences } from "./preferences";
+import type { SecurityRequest } from "./ipc-validate";
+import type { Outcome, SecurityDialogMode, SecurityInfo, SecurityPageState } from "./security";
 
 // Preload runs in the renderer's process, but main.ts appends
 // "--log-level=..." to its argv (additionalArguments), so it can gate log
@@ -13,7 +18,8 @@ const currentLogLevel = getCliLogLevel(process.argv);
 contextBridge.exposeInMainWorld("moolin", {
   worlds: {
     load: (): Promise<WorldsLoadResult> => ipcRenderer.invoke(IpcChannels.worldsLoad),
-    save: (worlds: World[]): Promise<{ error?: string }> => ipcRenderer.invoke(IpcChannels.worldsSave, worlds),
+    save: (worlds: World[], globalSettings: GlobalSettings): Promise<{ error?: string }> =>
+      ipcRenderer.invoke(IpcChannels.worldsSave, worlds, globalSettings),
     onOpen: (callback: (options: { createNew: boolean }) => void): void => {
       ipcRenderer.on(IpcChannels.worldsOpen, (_event, options: { createNew: boolean }) => callback(options));
     },
@@ -35,6 +41,9 @@ contextBridge.exposeInMainWorld("moolin", {
   onTerminalReset: (callback: (replay: ScrollbackReplay) => void): void => {
     ipcRenderer.on(IpcChannels.terminalReset, (_event, replay: ScrollbackReplay) => callback(replay));
   },
+  onGreetingClosed: (callback: (seq: number) => void): void => {
+    ipcRenderer.on(IpcChannels.terminalGreetingClosed, (_event, seq: number) => callback(seq));
+  },
   getConnectionState: (): Promise<WindowState> => ipcRenderer.invoke(IpcChannels.connectionGetState),
   onTelnetData: (callback: (data: string | Uint8Array, time: number | null, seq: number) => void): void => {
     ipcRenderer.on(IpcChannels.telnetData, (_event, data: string | Uint8Array, time: number | null, seq: number) =>
@@ -54,7 +63,7 @@ contextBridge.exposeInMainWorld("moolin", {
     readText: (): Promise<string> => ipcRenderer.invoke(IpcChannels.clipboardReadText),
   },
   openExternal: (url: string): void => ipcRenderer.send(IpcChannels.shellOpenExternal, url),
-  showContextMenu: (options: { hasSelection: boolean }): void => {
+  showContextMenu: (options: { hasSelection: boolean; selectAllTarget: SelectAllTarget }): void => {
     ipcRenderer.send(IpcChannels.terminalContextMenu, options);
   },
   onCopyRequested: (callback: () => void): void => {
@@ -66,8 +75,8 @@ contextBridge.exposeInMainWorld("moolin", {
   onPasteRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalPasteRequested, () => callback());
   },
-  onSelectAllRequested: (callback: () => void): void => {
-    ipcRenderer.on(IpcChannels.terminalSelectAllRequested, () => callback());
+  onSelectAllRequested: (callback: (target?: SelectAllTarget) => void): void => {
+    ipcRenderer.on(IpcChannels.terminalSelectAllRequested, (_event, target?: SelectAllTarget) => callback(target));
   },
   onUndoRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalUndoRequested, () => callback());
@@ -85,6 +94,42 @@ contextBridge.exposeInMainWorld("moolin", {
   },
   onToggleTimestamps: (callback: (show: boolean) => void): void => {
     ipcRenderer.on(IpcChannels.terminalToggleTimestamps, (_event, show: boolean) => callback(show));
+  },
+  onSetFont: (callback: (font: { fontFamily: string; fontSize: number }) => void): void => {
+    ipcRenderer.on(IpcChannels.terminalSetFont, (_event, font: { fontFamily: string; fontSize: number }) =>
+      callback(font),
+    );
+  },
+  // The font/size a freshly opened window's scrollback should start with,
+  // read from argv (see parseFontArgs) so it's available before the first
+  // paint rather than arriving a tick late over IPC.
+  initialFont: parseFontArgs(process.argv),
+  // Set only for a window opened without an existing one to cascade from
+  // (see WindowManager); such a window reports its measured content size
+  // once so main.ts can size it to fit an 80x25 terminal before centering it.
+  fitToContentOnLoad: process.argv.includes("--fit-to-content"),
+  reportInitialSize: (size: { width: number; height: number }): void => {
+    ipcRenderer.send(IpcChannels.terminalInitialSize, size);
+  },
+  preferences: {
+    onOpen: (callback: (prefs: Preferences) => void): void => {
+      ipcRenderer.on(IpcChannels.preferencesOpen, (_event, prefs: Preferences) => callback(prefs));
+    },
+    save: (partial: Partial<Preferences>): Promise<void> => ipcRenderer.invoke(IpcChannels.preferencesSave, partial),
+  },
+  security: {
+    getState: (): Promise<SecurityPageState> => ipcRenderer.invoke(IpcChannels.securityGetState),
+    setup: (request: SecurityRequest): Promise<Outcome> => ipcRenderer.invoke(IpcChannels.securitySetup, request),
+    unlock: (request: SecurityRequest): Promise<Outcome> => ipcRenderer.invoke(IpcChannels.securityUnlock, request),
+    change: (request: SecurityRequest): Promise<Outcome> => ipcRenderer.invoke(IpcChannels.securityChange, request),
+    disable: (): Promise<Outcome> => ipcRenderer.invoke(IpcChannels.securityDisable),
+    decline: (never: boolean): void => ipcRenderer.send(IpcChannels.securityDecline, { never }),
+    onOpen: (callback: (mode: SecurityDialogMode) => void): void => {
+      ipcRenderer.on(IpcChannels.securityOpen, (_event, mode: SecurityDialogMode) => callback(mode));
+    },
+    onStateChanged: (callback: (info: SecurityInfo) => void): void => {
+      ipcRenderer.on(IpcChannels.securityStateChanged, (_event, info: SecurityInfo) => callback(info));
+    },
   },
   reportUndoState: (canUndo: boolean, canRedo: boolean): void => {
     ipcRenderer.send(IpcChannels.terminalUndoStateChanged, canUndo, canRedo);
