@@ -522,7 +522,8 @@ A missing or unreadable file just means the defaults.
   Windows and macOS.
 - A release is a pull request from `dev` into `main`, so it gets a full CI
   run and a record of its own before merging, followed by a version tag on
-  `main` (see [Versioning](#versioning)).
+  `main` (see [Versioning](#versioning)). The product owner, Pepper, may
+  instead merge `dev` straight into `main`.
 
 ### Commit dates
 
