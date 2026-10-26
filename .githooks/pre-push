@@ -7,17 +7,14 @@ zero=0000000000000000000000000000000000000000
 bad=0
 while read -r local_ref local_sha remote_ref remote_sha; do
   [[ $local_sha == "$zero" ]] && continue   # deleting a branch
-  if [[ $remote_sha == "$zero" ]]; then
-    range=("$local_sha" --not --remotes)
-  else
-    range=("$remote_sha..$local_sha")
-  fi
+  # Only commits on no remote branch yet, so merging in another branch's
+  # history (such as main into dev) doesn't trip over its older commits.
   while read -r sha az cz; do
     if [[ $az != +0000 || $cz != +0000 ]]; then
       echo "pre-push: $sha has a non-UTC date (author $az, committer $cz)" >&2
       bad=1
     fi
-  done < <(git log --format='%h %ad %cd' --date=format:%z "${range[@]}")
+  done < <(git log --format='%h %ad %cd' --date=format:%z "$local_sha" --not --remotes)
 done
 
 if (( bad )); then
