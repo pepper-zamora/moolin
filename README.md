@@ -524,6 +524,15 @@ A missing or unreadable file just means the defaults.
   run and a record of its own before merging, followed by a version tag on
   `main` (see [Versioning](#versioning)).
 
+### Commit dates
+
+Commits are dated in UTC. `npm install` turns on the git hooks in
+`.githooks/` (via `scripts/install-hooks.js`): `post-commit` and
+`post-merge` rewrite a new commit's dates to the same moment in UTC, leaving
+names and emails alone, and `pre-push` refuses to push a commit that isn't in
+UTC. Annotated tags carry their own date, so create them with
+`TZ=UTC git tag -a ...`.
+
 ### Commands
 
 | Command             | Does                                                    |
