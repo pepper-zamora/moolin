@@ -10,6 +10,8 @@ renames that section to the new version and date.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-06
+
 ### Added
 
 - Preferences can now choose the terminal font's weight (Light, Regular,
@@ -200,7 +202,8 @@ The first public release.
   portable exe) and macOS (dmg and zip, Apple silicon and Intel). The
   Windows and macOS builds are unsigned.
 
-[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/pepper-zamora/moolin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/pepper-zamora/moolin/compare/v0.1.1...v0.3.0
 [0.1.1]: https://github.com/pepper-zamora/moolin/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pepper-zamora/moolin/releases/tag/v0.1.0
