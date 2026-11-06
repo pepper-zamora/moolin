@@ -1,3 +1,4 @@
+import { applyFontStyle, type FontStyle } from "./fonts";
 import { appearance } from "./ansi-parser";
 import { HeldSelection } from "./held-selection";
 import type { Line, Run } from "./line-builder";
@@ -29,6 +30,7 @@ export interface ScrollbackViewOptions {
   maxLines: number;
   fontFamily: string;
   fontSize: number;
+  fontStyle: FontStyle;
   // Wrap at word boundaries (otherwise at the last column, mid-word).
   wordWrap: boolean;
   // The view's size in character cells changed (sent to the server as NAWS).
@@ -85,6 +87,7 @@ export class ScrollbackView {
     el.append(this.linesEl, this.probe);
     el.style.fontFamily = options.fontFamily;
     el.style.fontSize = `${this.size}px`;
+    applyFontStyle(el, options.fontStyle);
     el.classList.toggle("wrap-words", options.wordWrap);
     this.held = new HeldSelection(el, options.onPointerDown, options.onPointerUp);
 
@@ -158,10 +161,11 @@ export class ScrollbackView {
     return this.size;
   }
 
-  setFont(fontFamily: string, fontSize: number): void {
+  setFont(fontFamily: string, fontSize: number, fontStyle: FontStyle): void {
     this.size = fontSize;
     this.el.style.fontFamily = fontFamily;
     this.el.style.fontSize = `${fontSize}px`;
+    applyFontStyle(this.el, fontStyle);
     this.refit();
     this.emitChange();
   }

@@ -1,7 +1,16 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { log } from "./logger";
-import { clampFontSize, DEFAULT_FONT_ID, DEFAULT_FONT_SIZE, isValidFontId } from "./fonts";
+import {
+  clampFontSize,
+  DEFAULT_FONT_ID,
+  DEFAULT_FONT_SIZE,
+  DEFAULT_FONT_STYLE,
+  type FontWidth,
+  isValidFontId,
+  isValidFontWeight,
+  isValidFontWidth,
+} from "./fonts";
 
 // App-wide settings that outlive a session. Unlike the worlds file (which
 // lives under Documents so it is easy to find and hand-edit), these live in
@@ -16,6 +25,10 @@ export interface Preferences {
   // The default font and size new windows' terminals start with (see fonts.ts).
   fontId: string;
   fontSize: number;
+  // The weight, slant and width the text is drawn in (see FontStyle).
+  fontWeight: number;
+  fontItalic: boolean;
+  fontWidth: FontWidth;
   // Whether to offer to set up encryption (a key phrase or file) when it is
   // off; "never" once the user has said not to ask again, or turned it off.
   encryptionPrompt: "ask" | "never";
@@ -29,6 +42,9 @@ const DEFAULTS: Preferences = {
   checkForUpdates: true,
   fontId: DEFAULT_FONT_ID,
   fontSize: DEFAULT_FONT_SIZE,
+  fontWeight: DEFAULT_FONT_STYLE.weight,
+  fontItalic: DEFAULT_FONT_STYLE.italic,
+  fontWidth: DEFAULT_FONT_STYLE.width,
   encryptionPrompt: "ask",
   keyFilePath: null,
 };
@@ -51,6 +67,9 @@ function sanitize(record: Record<string, unknown>, fallback: Preferences): Prefe
       typeof record.fontSize === "number" && Number.isFinite(record.fontSize)
         ? clampFontSize(record.fontSize)
         : fallback.fontSize,
+    fontWeight: isValidFontWeight(record.fontWeight) ? record.fontWeight : fallback.fontWeight,
+    fontItalic: typeof record.fontItalic === "boolean" ? record.fontItalic : fallback.fontItalic,
+    fontWidth: isValidFontWidth(record.fontWidth) ? record.fontWidth : fallback.fontWidth,
     encryptionPrompt:
       record.encryptionPrompt === "ask" || record.encryptionPrompt === "never"
         ? record.encryptionPrompt

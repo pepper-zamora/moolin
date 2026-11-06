@@ -630,6 +630,27 @@ try {
     }
   });
 
+  // The first window to connect to a world has its log; a second window
+  // connected to the same world doesn't log until the first lets go of it.
+  await check("a window that couldn't log starts when the window holding the log closes", async () => {
+    const logging = (page) => page.evaluate("document.getElementById('logging-status').dataset.logging");
+    await second.evaluate(
+      `window.moolin.connect(${JSON.stringify({ id: "smoke", name: "Smoke Test", host: "127.0.0.1", port: serverPort, tls: false, tlsAllowUntrusted: false, autoLogin: false, loginTemplate: "", echoCommands: "on", wordWrap: "off", characters: [] })}, null)`,
+    );
+    await waitFor("the second window to connect", async () =>
+      (await second.evaluate("document.getElementById('status-text').textContent")).startsWith("Connected"),
+    );
+    expectEqual(await logging(main), "on", "the first window logs");
+    expectEqual(await logging(second), "off", "the second doesn't");
+    await main.evaluate("window.close()");
+    await waitFor("logging to resume in the second window", async () => (await logging(second)) === "on", 5000);
+    expectEqual(
+      await second.evaluate("document.getElementById('terminal').textContent.includes('logging resumed')"),
+      true,
+      "the window says so",
+    );
+  });
+
   // --- Encryption: the offer, setting it up, locking, unlocking --------------
   // The app is restarted for each, in the same sandbox, since lock and unlock
   // are what happens when it starts. The phase-one connection above left a plain
@@ -801,6 +822,61 @@ try {
     await enc.evaluate("document.getElementById('enc-primary').click()");
     await waitFor("unlocking", async () => !(await dialogOpen(enc)), 5000);
     await waitFor("the other window's form to close", async () => !(await dialogOpen(other)), 3000);
+  });
+
+  console.log("smoke: preferences");
+  await check("the font size slider moves in zoom's steps, applies to the window and is remembered", async () => {
+    const slider = "document.getElementById('pref-font-size')";
+    const attrs = await enc.evaluate(`[${slider}.min, ${slider}.max, ${slider}.step, ${slider}.type].join()`);
+    expectEqual(attrs, "8,32,2,range", "the slider's range");
+    await enc.evaluate("document.getElementById('preferences-dialog').showModal()");
+    await enc.evaluate(`${slider}.value = "20"; ${slider}.dispatchEvent(new Event("input", { bubbles: true }))`);
+    expectEqual(await text(enc, "pref-font-size-value"), "20 px", "the readout follows the slider");
+    await enc.evaluate(`${slider}.dispatchEvent(new Event("change", { bubbles: true }))`);
+    await waitFor("the size to be saved", () => JSON.parse(fs.readFileSync(preferencesFile, "utf8")).fontSize === 20, 3000);
+    await waitFor("the terminal to use it", async () =>
+      (await enc.evaluate("getComputedStyle(document.getElementById('input-area')).fontSize")) === "20px",
+    );
+    enc = await restartApp();
+    expectEqual(await enc.evaluate("window.moolin.initialFont.fontSize"), 20, "the size after a restart");
+  });
+
+  await check("the font weight, italic and width choices apply to the window and are remembered", async () => {
+    const choose = (id, value) =>
+      enc.evaluate(
+        `(() => { const el = document.getElementById(${JSON.stringify(id)}); el.value = ${JSON.stringify(value)}; el.dispatchEvent(new Event("change", { bubbles: true })); })()`,
+      );
+    const style = (id) =>
+      enc.evaluate(
+        `(() => { const s = getComputedStyle(document.getElementById(${JSON.stringify(id)})); return [s.fontWeight, s.fontStyle, s.fontStretch].join(); })()`,
+      );
+    expectEqual(await enc.evaluate("document.getElementById('pref-font-weight').options.length"), 4, "weights offered");
+    expectEqual(await enc.evaluate("document.getElementById('pref-font-width').options.length"), 3, "widths offered");
+    await enc.evaluate("document.getElementById('preferences-dialog').showModal()");
+    await choose("pref-font-weight", "300");
+    await choose("pref-font-width", "condensed");
+    await enc.evaluate("document.getElementById('pref-font-italic').click()");
+    await waitFor("the choices to be saved", () => {
+      const saved = JSON.parse(fs.readFileSync(preferencesFile, "utf8"));
+      return saved.fontWeight === 300 && saved.fontWidth === "condensed" && saved.fontItalic === true;
+    }, 3000);
+    await waitFor("the terminal to use them", async () => (await style("terminal")) === "300,italic,75%");
+    expectEqual(await style("input-area"), "300,italic,75%", "the input line follows");
+    // The width faces are real: expanded text is wider than condensed.
+    const probeWidth = () => enc.evaluate("document.querySelector('#terminal .probe').getBoundingClientRect().width");
+    await sleep(500); // the face loads on first use
+    const condensed = await probeWidth();
+    await choose("pref-font-width", "expanded");
+    await waitFor("the wider face", async () => (await probeWidth()) > condensed * 1.3, 5000);
+    await choose("pref-font-width", "condensed");
+    await waitFor("the narrow face again", async () => (await probeWidth()) <= condensed + 0.5, 5000);
+    enc = await restartApp();
+    expectEqual(
+      JSON.stringify(await enc.evaluate("window.moolin.initialFont.fontStyle")),
+      JSON.stringify({ weight: 300, italic: true, width: "condensed" }),
+      "the style after a restart",
+    );
+    await waitFor("the terminal to start in it", async () => (await style("terminal")) === "300,italic,75%");
   });
 } catch (error) {
   results.push({ name: "setup", ok: false });

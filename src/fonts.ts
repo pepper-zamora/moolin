@@ -48,6 +48,49 @@ export const MIN_FONT_SIZE = 8;
 export const MAX_FONT_SIZE = 32;
 export const FONT_SIZE_STEP = 2;
 
+// Weight, slant and width of the terminal's text, chosen in Preferences. They
+// are the base the server's bold and italic (SGR) are drawn on top of: bold is
+// 300 heavier than the weight chosen, so it stays distinct (see styles.css).
+export type FontWidth = "condensed" | "normal" | "expanded";
+
+export interface FontStyle {
+  weight: number;
+  italic: boolean;
+  width: FontWidth;
+}
+
+export const FONT_WEIGHTS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 300, label: "Light" },
+  { value: 400, label: "Regular" },
+  { value: 500, label: "Medium" },
+  { value: 700, label: "Bold" },
+];
+
+// `percent` is CSS font-stretch, which picks among a font's width faces.
+export const FONT_WIDTHS: ReadonlyArray<{ value: FontWidth; label: string; percent: number }> = [
+  { value: "condensed", label: "Condensed", percent: 75 },
+  { value: "normal", label: "Normal", percent: 100 },
+  { value: "expanded", label: "Expanded", percent: 125 },
+];
+
+export const DEFAULT_FONT_STYLE: FontStyle = { weight: 400, italic: false, width: "normal" };
+
+export function isValidFontWeight(weight: unknown): weight is number {
+  return FONT_WEIGHTS.some((w) => w.value === weight);
+}
+
+export function isValidFontWidth(width: unknown): width is FontWidth {
+  return FONT_WIDTHS.some((w) => w.value === width);
+}
+
+// Sets `el`'s text to `style`. --font-weight is what bold is worked out from.
+export function applyFontStyle(el: HTMLElement, style: FontStyle): void {
+  el.style.fontWeight = String(style.weight);
+  el.style.fontStyle = style.italic ? "italic" : "normal";
+  el.style.fontStretch = `${FONT_WIDTHS.find((w) => w.value === style.width)?.percent ?? 100}%`;
+  el.style.setProperty("--font-weight", String(style.weight));
+}
+
 export function clampFontSize(size: number): number {
   return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, size));
 }
@@ -62,15 +105,25 @@ export const FONT_SAMPLE_LINES = [
   "abcdefghijklmnopqrstuvwxyz 0123456789",
 ];
 
-// "--font-id=..." and "--font-size=..." reach the renderer via main.ts's
+// "--font-id=...", "--font-size=...", "--font-weight=...", "--font-italic=..."
+// and "--font-width=..." reach the renderer via main.ts's
 // additionalArguments (see getCliLogLevel in logger.ts for the same trick),
 // so a freshly opened window can construct its Terminal with the right font
 // from the start rather than flashing the wrong one and re-rendering.
-export function parseFontArgs(argv: string[]): { fontId: string; fontSize: number } {
-  const idFlag = argv.find((arg) => arg.startsWith("--font-id="))?.slice("--font-id=".length);
-  const sizeFlag = argv.find((arg) => arg.startsWith("--font-size="))?.slice("--font-size=".length);
-  const fontId = idFlag !== undefined && isValidFontId(idFlag) ? idFlag : DEFAULT_FONT_ID;
-  const parsedSize = sizeFlag !== undefined ? Number(sizeFlag) : Number.NaN;
-  const fontSize = Number.isFinite(parsedSize) ? clampFontSize(parsedSize) : DEFAULT_FONT_SIZE;
-  return { fontId, fontSize };
+export function parseFontArgs(argv: string[]): { fontId: string; fontSize: number; fontStyle: FontStyle } {
+  const flag = (name: string): string | undefined =>
+    argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const idFlag = flag("font-id");
+  const parsedSize = flag("font-size") !== undefined ? Number(flag("font-size")) : Number.NaN;
+  const weight = Number(flag("font-weight"));
+  const width = flag("font-width");
+  return {
+    fontId: idFlag !== undefined && isValidFontId(idFlag) ? idFlag : DEFAULT_FONT_ID,
+    fontSize: Number.isFinite(parsedSize) ? clampFontSize(parsedSize) : DEFAULT_FONT_SIZE,
+    fontStyle: {
+      weight: isValidFontWeight(weight) ? weight : DEFAULT_FONT_STYLE.weight,
+      italic: flag("font-italic") === "true",
+      width: isValidFontWidth(width) ? width : DEFAULT_FONT_STYLE.width,
+    },
+  };
 }

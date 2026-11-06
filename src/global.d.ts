@@ -2,6 +2,7 @@ import type { GlobalSettings, World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { SelectAllTarget } from "./select-all";
+import type { FontStyle } from "./fonts";
 import type { LogLevel } from "./logger";
 import type { Preferences } from "./preferences";
 import type { SecurityRequest } from "./ipc-validate";
@@ -45,8 +46,8 @@ declare global {
       onFindRequested(callback: (action: "open" | "next" | "previous") => void): void;
       onClearScreenRequested(callback: () => void): void;
       onToggleTimestamps(callback: (show: boolean) => void): void;
-      onSetFont(callback: (font: { fontFamily: string; fontSize: number }) => void): void;
-      initialFont: { fontId: string; fontSize: number };
+      onSetFont(callback: (font: { fontFamily: string; fontSize: number; fontStyle: FontStyle }) => void): void;
+      initialFont: { fontId: string; fontSize: number; fontStyle: FontStyle };
       fitToContentOnLoad: boolean;
       reportInitialSize(size: { width: number; height: number }): void;
       preferences: {

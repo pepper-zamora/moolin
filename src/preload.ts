@@ -5,7 +5,7 @@ import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { SelectAllTarget } from "./select-all";
 import { IpcChannels } from "./ipc-channels";
-import { parseFontArgs } from "./fonts";
+import { type FontStyle, parseFontArgs } from "./fonts";
 import type { Preferences } from "./preferences";
 import type { SecurityRequest } from "./ipc-validate";
 import type { Outcome, SecurityDialogMode, SecurityInfo, SecurityPageState } from "./security";
@@ -95,9 +95,10 @@ contextBridge.exposeInMainWorld("moolin", {
   onToggleTimestamps: (callback: (show: boolean) => void): void => {
     ipcRenderer.on(IpcChannels.terminalToggleTimestamps, (_event, show: boolean) => callback(show));
   },
-  onSetFont: (callback: (font: { fontFamily: string; fontSize: number }) => void): void => {
-    ipcRenderer.on(IpcChannels.terminalSetFont, (_event, font: { fontFamily: string; fontSize: number }) =>
-      callback(font),
+  onSetFont: (callback: (font: { fontFamily: string; fontSize: number; fontStyle: FontStyle }) => void): void => {
+    ipcRenderer.on(
+      IpcChannels.terminalSetFont,
+      (_event, font: { fontFamily: string; fontSize: number; fontStyle: FontStyle }) => callback(font),
     );
   },
   // The font/size a freshly opened window's scrollback should start with,

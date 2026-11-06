@@ -12,7 +12,7 @@ import { LinkMenu } from "./link-menu";
 import { LiveReplay } from "./live-replay";
 import { linkCommands } from "./pueblo";
 import type { ScrollbackReplay } from "./scrollback-buffer";
-import { fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
+import { applyFontStyle, type FontStyle, fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
 import { chooseSelectAllTarget, type SelectAllTarget } from "./select-all";
 import { ScrollbackView } from "./scrollback-view";
 import { TimestampGutter } from "./timestamp-gutter";
@@ -36,6 +36,7 @@ const MAX_INPUT_LINES = 8;
 const initialFont = window.moolin.initialFont;
 let preferredFontSize = initialFont.fontSize;
 let fontFamily = fontFamilyFor(initialFont.fontId);
+let fontStyle = initialFont.fontStyle;
 
 // Lines kept in the scrollback; the oldest are dropped past this.
 const SCROLLBACK_LINES = 20000;
@@ -89,6 +90,7 @@ const view = new ScrollbackView(terminalContainer, {
   maxLines: SCROLLBACK_LINES,
   fontFamily,
   fontSize: initialFont.fontSize,
+  fontStyle,
   wordWrap: false, // set from the connection once it's known (applyConnectionState)
   onResize: (cols, rows) => {
     window.moolin.log("debug", "renderer", "terminal resized to", `${cols}x${rows}`);
@@ -142,12 +144,14 @@ const gutter = new TimestampGutter(gutterElement, view);
 // Keeps the input area and gutter's font matched to the scrollback's, since
 // neither shares its element; used at startup and whenever the font changes
 // (terminal-native zoom, or a new default saved in the Preferences dialog).
-function applyFont(family: string, size: number): void {
+function applyFont(family: string, size: number, style: FontStyle = fontStyle): void {
   fontFamily = family;
+  fontStyle = style;
   inputArea.style.fontFamily = family;
   inputArea.style.fontSize = `${size}px`;
-  view.setFont(family, size);
-  gutter.setFont(family, size);
+  applyFontStyle(inputArea, style);
+  view.setFont(family, size, style);
+  gutter.setFont(family, size, style);
   resizeInput();
 }
 applyFont(fontFamily, initialFont.fontSize);
@@ -605,9 +609,9 @@ window.moolin.onZoom((direction) => {
 
 // A new default font/size saved in the Preferences dialog; applies
 // immediately to this window, same as zoom, but can also change the family.
-window.moolin.onSetFont(({ fontFamily: family, fontSize }) => {
+window.moolin.onSetFont(({ fontFamily: family, fontSize, fontStyle: style }) => {
   preferredFontSize = fontSize;
-  applyFont(family, fontSize);
+  applyFont(family, fontSize, style);
 });
 
 resizeInput();

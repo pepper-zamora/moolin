@@ -1,30 +1,176 @@
 /* Moolin's own Iosevka build (see font/private-build-plans.toml and "npm run
-   font:build"), bundled with the app so it's available without installing
-   anything. Four faces cover what the scrollback switches between (SGR bold
-   and italic); the build also has Condensed/Extended widths, unused here. */
+   build:font"), bundled with the app so it's available without installing
+   anything. Every combination of the weights (Light, Regular, Medium, Bold),
+   widths (Condensed, Normal, Expanded) and slopes (upright, italic) that
+   Preferences offers, so each choice has a real face rather than a browser
+   imitation of one. A face is only loaded once something uses it. */
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-stretch: 100%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-LightItalic.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-stretch: 100%;
+}
 @font-face {
   font-family: "Iosevka Moolin";
   src: url("../font/IosevkaMoolin-Regular.ttf") format("truetype");
   font-weight: 400;
   font-style: normal;
-}
-@font-face {
-  font-family: "Iosevka Moolin";
-  src: url("../font/IosevkaMoolin-Bold.ttf") format("truetype");
-  font-weight: 700;
-  font-style: normal;
+  font-stretch: 100%;
 }
 @font-face {
   font-family: "Iosevka Moolin";
   src: url("../font/IosevkaMoolin-Italic.ttf") format("truetype");
   font-weight: 400;
   font-style: italic;
+  font-stretch: 100%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-stretch: 100%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-MediumItalic.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-stretch: 100%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: 100%;
 }
 @font-face {
   font-family: "Iosevka Moolin";
   src: url("../font/IosevkaMoolin-BoldItalic.ttf") format("truetype");
   font-weight: 700;
   font-style: italic;
+  font-stretch: 100%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-CondensedLight.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-stretch: 75%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-CondensedLightItalic.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-stretch: 75%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Condensed.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-stretch: 75%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-CondensedItalic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-stretch: 75%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-CondensedMedium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-stretch: 75%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-CondensedMediumItalic.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-stretch: 75%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-CondensedBold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: 75%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-CondensedBoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-stretch: 75%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-ExtendedLight.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-stretch: 125%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-ExtendedLightItalic.ttf") format("truetype");
+  font-weight: 300;
+  font-style: italic;
+  font-stretch: 125%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-Extended.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-stretch: 125%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-ExtendedItalic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-stretch: 125%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-ExtendedMedium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-stretch: 125%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-ExtendedMediumItalic.ttf") format("truetype");
+  font-weight: 500;
+  font-style: italic;
+  font-stretch: 125%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-ExtendedBold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-stretch: 125%;
+}
+@font-face {
+  font-family: "Iosevka Moolin";
+  src: url("../font/IosevkaMoolin-ExtendedBoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-stretch: 125%;
 }
 
 :root {
@@ -227,7 +373,7 @@ html, body {
 .f15 { color: var(--c15); } .b15 { background-color: var(--c15); }
 .fbg { color: var(--bg); }
 .bfg { background-color: var(--fg); }
-.bd { font-weight: bold; }
+.bd { font-weight: calc(var(--font-weight, 400) + 300); }
 .dm { opacity: 0.6; }
 .it { font-style: italic; }
 .ul { text-decoration: underline; }
@@ -927,8 +1073,26 @@ html, body {
   overflow: hidden; /* only the font list scrolls */
 }
 
+.font-size-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 #pref-font-size {
-  width: 64px;
+  flex: 1;
+}
+
+.font-style-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+#pref-font-size-value {
+  min-width: 4ch;
+  text-align: right;
 }
 
 #pref-font-list {

@@ -117,9 +117,12 @@ from source never check at startup.
   the scrollback with the last 2 MiB of the log. A log belongs to one window
   at a time: the first window to connect to a world and character reads and
   writes it until it disconnects (its last line is the "disconnected" one),
-  and other windows connected meanwhile don't log. The status bar shows which: a scroll beside
-  the security shield when the window is logging, a red "no" sign when
-  another window has the log. The log grows without bound for now; delete or
+  and other windows connected meanwhile don't log. When the window holding
+  the log disconnects or closes, a window that was waiting for it (the
+  first, if several) takes it over and logs from then on, saying so in its
+  scrollback; what it showed while it wasn't logging isn't added. The status
+  bar shows which: a scroll beside the security shield when the window is
+  logging, a red "no" sign when another window has the log. The log grows without bound for now; delete or
   prune it as a whole. It isn't plain text: its first line says what it is
   (`MOOLIN-LOG 1 plain`), and every line after it is a numbered base64 record
   holding what was shown and when each line arrived, so a server that sends
@@ -475,9 +478,17 @@ Beyond that, it's up to you:
 
 ## Preferences
 
-Worlds → Preferences… (Ctrl+,, Cmd+, on macOS) opens a dialog for app-wide settings: whether to show
-timestamps, whether to check for updates at startup, and the terminal's
-default font and size. The default is Iosevka Moolin, a custom build of
+Worlds → Preferences… (Ctrl+,, Cmd+, on macOS) opens a dialog for app-wide settings: whether to check
+for updates at startup, whether to show timestamps, and the terminal's
+default font, size (a slider that moves in the steps Ctrl+= and Ctrl+-
+do), weight (Light, Regular, Medium or Bold), width (Condensed, Normal or
+Expanded) and Italic. The weight and italic are the base the server's own
+bold and italic are drawn on: bold is 300 heavier than the weight chosen
+(Regular gives 700), so it still stands out, and what the server sends in
+italic shows the same as italic text when Italic is on. Only Iosevka Moolin
+has every weight and width, as real faces; another font uses the closest
+weight it has installed, and its width choice is disabled because it keeps
+its normal width. The default is Iosevka Moolin, a custom build of
 [Iosevka](https://typeof.net/Iosevka/) bundled with the app (see
 [`npm run build:font`](#commands)), so there's a deliberately-chosen
 monospace font out of the box rather than whatever happens to be installed.
@@ -558,9 +569,12 @@ default font (`font/`). It's not part of `npm run build`: it clones the full
 `font/.iosevka-src/` the first time it's run, reusing it on later runs, and
 only needs rerunning when `private-build-plans.toml` changes. Set
 `IOSEVKA_SRC` to point at a checkout of your own instead of letting it
-clone one. The four built faces (Regular, Bold, Italic, BoldItalic — what
-the scrollback switches between for SGR bold/italic) are committed, along
-with the font's SIL Open Font License text (`font/LICENSE-IosevkaMoolin.md`).
+clone one. The 24 built faces (Light, Regular, Medium and Bold, each upright
+and italic, in Condensed, Normal and Expanded widths: what Preferences offers
+and what the scrollback switches between for the server's bold and italic)
+are committed, about 40 MB in all, along with the font's SIL Open Font
+License text (`font/LICENSE-IosevkaMoolin.md`). A face is only loaded when
+something uses it.
 
 `npm run smoke` (`scripts/smoke.mjs`) covers what the unit tests can't
 reach: the renderer in a real window. It launches Moolin in a throwaway
@@ -569,14 +583,15 @@ leaves a Moolin you have running and your logs alone), connects it to a
 local test server, and drives it over the Chrome DevTools Protocol:
 clicking, selecting, copying and typing, and checking where keyboard focus
 goes, that typed commands reach the server, what copying a wrapped or
-partial selection gives, Clear Screen, a Pueblo world's links, and the
-encryption flows (the first-run offer, turning it on, unlocking, logging
+partial selection gives, Clear Screen, a Pueblo world's links, the
+Preferences font size slider and its weight, width and italic choices, and
+the encryption flows (the first-run offer, turning it on, unlocking, logging
 encrypted, changing the key phrase, the phrase length limit, and unlocking in
 one window while another waits). The key file picker and the stop
 confirmation are native dialogs it can't drive, so unit tests cover those.
 Its windows appear on screen while it runs (a few seconds), so it needs a real
-display; on headless Linux use `xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
-work but hasn't been tried. To check a packaged build instead, point
+display; on headless Linux use `xvfb-run`. Runs on Linux and macOS; on
+Windows the same mechanism should work but hasn't been tried. To check a packaged build instead, point
 `MOOLIN_SMOKE_APP` at its executable, e.g.
 `MOOLIN_SMOKE_APP=release/linux-unpacked/moolin node scripts/smoke.mjs`
 (the AppImage works too; on macOS, the binary inside the `.app`'s

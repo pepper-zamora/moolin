@@ -10,6 +10,36 @@ renames that section to the new version and date.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-06
+
+### Added
+
+- Preferences can now choose the terminal font's weight (Light, Regular,
+  Medium, Bold), width (Condensed, Normal, Expanded) and Italic, applied to
+  the scrollback, the input line and the timestamps, and remembered. The
+  server's bold is drawn 300 heavier than the weight chosen. Iosevka Moolin
+  now bundles all 24 faces for this (about 40 MB more); other fonts use
+  their closest installed weight and keep their width.
+- The Preferences dialog's font size is now a slider that moves in the steps
+  Ctrl+= and Ctrl+- do (8 to 32, by 2), with the chosen size shown beside it.
+  It is remembered between sessions, as the size was before.
+
+### Changed
+
+- Preferences now lists Check for updates before Show timestamps.
+
+### Fixed
+
+- A window that wasn't logging because another window had the same world's
+  log now starts logging when that window disconnects or closes, instead of
+  staying unlogged until it reconnects. It says "[logging resumed]" in its
+  scrollback, and the earlier output it showed isn't added to the log.
+- On macOS, closing the last window and then choosing Open World (Cmd+O) or
+  another Worlds menu item crashed the app with "Object has been destroyed":
+  the menu bar kept the closed window's menu. With no window open it now has
+  a Worlds menu (New World, Open World, Preferences, Encryption, Quit) whose
+  items open a new window first.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added
@@ -172,7 +202,8 @@ The first public release.
   portable exe) and macOS (dmg and zip, Apple silicon and Intel). The
   Windows and macOS builds are unsigned.
 
-[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/pepper-zamora/moolin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/pepper-zamora/moolin/compare/v0.1.1...v0.3.0
 [0.1.1]: https://github.com/pepper-zamora/moolin/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pepper-zamora/moolin/releases/tag/v0.1.0
