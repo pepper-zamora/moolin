@@ -13,6 +13,8 @@ export interface GlobalSettings {
   wordWrap: boolean;
   // Echo typed commands back into the scrollback (in cyan).
   echoCommands: boolean;
+  // Act on a Pueblo server's request to clear the screen.
+  honorClear: boolean;
 }
 
 export interface Character {
@@ -21,6 +23,7 @@ export interface Character {
   password: string;
   echoCommands: TriState;
   wordWrap: TriState;
+  honorClear: TriState;
 }
 
 export interface World {
@@ -40,6 +43,7 @@ export interface World {
   // servers that echo your input themselves, to avoid seeing it twice.
   echoCommands: TriState;
   wordWrap: TriState;
+  honorClear: TriState;
   characters: Character[];
 }
 

@@ -421,6 +421,7 @@ function fillWorldPane(world: World): void {
   field(worldPane, "loginTemplate").value = world.loginTemplate;
   field(worldPane, "echoCommands").value = world.echoCommands;
   field(worldPane, "wordWrap").value = world.wordWrap;
+  field(worldPane, "honorClear").value = world.honorClear;
   updateDependentFields(world);
 }
 
@@ -439,11 +440,13 @@ function fillCharacterPane(character: Character): void {
   showPasswordBtn.textContent = "Show";
   field(characterPane, "echoCommands").value = character.echoCommands;
   field(characterPane, "wordWrap").value = character.wordWrap;
+  field(characterPane, "honorClear").value = character.honorClear;
 }
 
 function fillGlobalPane(): void {
   field(globalPane, "wordWrap").checked = globalSettings.wordWrap;
   field(globalPane, "echoCommands").checked = globalSettings.echoCommands;
+  field(globalPane, "honorClear").checked = globalSettings.honorClear;
 }
 
 function updateButtons(): void {
@@ -493,6 +496,7 @@ worldPane.addEventListener("input", (event) => {
       break;
     case "echoCommands":
     case "wordWrap":
+    case "honorClear":
       world[el.name] = el.value as World["echoCommands"];
       break;
     case "name":
@@ -510,14 +514,15 @@ characterPane.addEventListener("input", (event) => {
   if (!character) return;
   const el = event.target as HTMLInputElement;
   if (el.name === "name" || el.name === "password") character[el.name] = el.value;
-  else if (el.name === "echoCommands" || el.name === "wordWrap")
+  else if (el.name === "echoCommands" || el.name === "wordWrap" || el.name === "honorClear")
     character[el.name] = el.value as Character["echoCommands"];
   if (el.name === "name") renderTree();
 });
 
 globalPane.addEventListener("input", (event) => {
   const el = event.target as HTMLInputElement;
-  if (el.name === "wordWrap" || el.name === "echoCommands") globalSettings[el.name] = el.checked;
+  if (el.name === "wordWrap" || el.name === "echoCommands" || el.name === "honorClear")
+    globalSettings[el.name] = el.checked;
 });
 
 worldPane.addEventListener("change", save);

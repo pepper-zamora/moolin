@@ -251,6 +251,11 @@ function resolveConnectionSettings(target: ConnectTarget): ResolvedSettings {
       target.character?.echoCommands ?? "inherit",
       target.world.echoCommands,
     ),
+    honorClear: resolveTriState(
+      state.globalSettings.honorClear,
+      target.character?.honorClear ?? "inherit",
+      target.world.honorClear,
+    ),
   };
 }
 
@@ -758,6 +763,7 @@ ipcMain.handle(
       address: null,
       tls: null,
       wordWrap: false,
+      honorClear: false,
       logging: false,
     },
 );

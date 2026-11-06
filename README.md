@@ -237,16 +237,18 @@ The selected item's details are in tabs to the right of the tree; for now
 there is just **Settings**, with more (such as triggers) to come. When the
 tabs don't fit on one row, ‹ › buttons at the right end scroll through them.
 
-Global's Settings tab holds two app-wide defaults — **Wrap long lines at
-word boundaries** and **Echo typed commands into the scrollback** — that a
-World or a Character can each override: their own Settings tab offers
-**Inherit** (use whatever the level above resolves to), **On** or **Off** for
-both. Character wins over World wins over Global. Word-wrap wraps long
-server lines at word boundaries instead of mid-word — see
-[Word wrap](#word-wrap) below.
+Global's Settings tab holds three app-wide defaults — **Wrap long lines at
+word boundaries**, **Echo typed commands into the scrollback** and **Clear
+the screen when a Pueblo server asks** — that a World or a Character can each
+override: their own Settings tab offers **Inherit** (use whatever the level
+above resolves to), **On** or **Off** for each. Character wins over World
+wins over Global. Word-wrap wraps long server lines at word boundaries
+instead of mid-word — see [Word wrap](#word-wrap) below. A Pueblo server's
+clear is ignored by default, as most clients do: some servers send one at
+the end of their login output, which would scroll the room description away.
 
 A connection keeps the settings its world and character had when it
-connected: changes saved in the Worlds dialog, including these two cascading
+connected: changes saved in the Worlds dialog, including these cascading
 settings and the world's name, apply to windows already connected to that
 world only once they reconnect.
 
@@ -531,7 +533,17 @@ A missing or unreadable file just means the defaults.
   Windows and macOS.
 - A release is a pull request from `dev` into `main`, so it gets a full CI
   run and a record of its own before merging, followed by a version tag on
-  `main` (see [Versioning](#versioning)).
+  `main` (see [Versioning](#versioning)). The product owner, Pepper, may
+  instead merge `dev` straight into `main`.
+
+### Commit dates
+
+Commits are dated in UTC. `npm install` turns on the git hooks in
+`.githooks/` (via `scripts/install-hooks.js`): `post-commit` and
+`post-merge` rewrite a new commit's dates to the same moment in UTC, leaving
+names and emails alone, and `pre-push` refuses to push a commit that isn't in
+UTC. Annotated tags carry their own date, so create them with
+`TZ=UTC git tag -a ...`.
 
 ### Commands
 

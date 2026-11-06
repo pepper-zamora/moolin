@@ -15,6 +15,7 @@ export type ConnectionStatus = "disconnected" | "connecting" | "connected";
 export interface ResolvedSettings {
   wordWrap: boolean;
   echoCommands: boolean;
+  honorClear: boolean;
 }
 
 // What the renderer is told about its window's connection.
@@ -30,6 +31,8 @@ export interface ConnectionState {
   // Resolved from Global/World/Character at connect time; false while
   // disconnected.
   wordWrap: boolean;
+  // Whether to act on a Pueblo server's clear; resolved the same way.
+  honorClear: boolean;
 }
 
 // What the renderer is told about its window: the connection, plus whether
@@ -132,6 +135,7 @@ export class ConnectionManager {
       address: this.target ? `${this.target.world.host.trim()}:${this.target.world.port}` : null,
       tls: this.connected ? this.tlsInfo : null,
       wordWrap: this.resolved?.wordWrap ?? false,
+      honorClear: this.resolved?.honorClear ?? false,
     };
   }
 
@@ -173,7 +177,10 @@ export class ConnectionManager {
     return this.session !== null;
   }
 
-  connect(target: ConnectTarget, resolved: ResolvedSettings = { wordWrap: false, echoCommands: true }): void {
+  connect(
+    target: ConnectTarget,
+    resolved: ResolvedSettings = { wordWrap: false, echoCommands: true, honorClear: false },
+  ): void {
     const { world, character } = target;
     this.session?.disconnect();
     const label = targetLabel(world, character);

@@ -111,10 +111,17 @@ function parseCharacter(value: unknown): Character | null {
   const password = optional(value.password, isString, "");
   const echoCommands = optional(value.echoCommands, isTriState, "inherit");
   const wordWrap = optional(value.wordWrap, isTriState, "inherit");
-  if (name === undefined || password === undefined || echoCommands === undefined || wordWrap === undefined) {
+  const honorClear = optional(value.honorClear, isTriState, "inherit");
+  if (
+    name === undefined ||
+    password === undefined ||
+    echoCommands === undefined ||
+    wordWrap === undefined ||
+    honorClear === undefined
+  ) {
     return null;
   }
-  return { id: value.id, name, password, echoCommands, wordWrap };
+  return { id: value.id, name, password, echoCommands, wordWrap, honorClear };
 }
 
 // Pre-tri-state worlds stored echoCommands as a plain boolean; map it
@@ -141,6 +148,7 @@ export function parseWorld(value: unknown): World | null {
   const loginTemplate = optional(value.loginTemplate, isString, DEFAULT_LOGIN_TEMPLATE);
   const echoCommands = migrateEchoCommands(value.echoCommands);
   const wordWrap = optional(value.wordWrap, isTriState, "inherit");
+  const honorClear = optional(value.honorClear, isTriState, "inherit");
   const rawCharacters = value.characters === undefined ? [] : value.characters;
   if (
     name === undefined ||
@@ -151,6 +159,7 @@ export function parseWorld(value: unknown): World | null {
     loginTemplate === undefined ||
     echoCommands === undefined ||
     wordWrap === undefined ||
+    honorClear === undefined ||
     !Array.isArray(rawCharacters)
   ) {
     return null;
@@ -173,6 +182,7 @@ export function parseWorld(value: unknown): World | null {
     loginTemplate,
     echoCommands,
     wordWrap,
+    honorClear,
     characters,
   };
 }
@@ -187,6 +197,8 @@ export function parseGlobalSettings(value: unknown): GlobalSettings {
     echoCommands:
       optional(obj.echoCommands, isBoolean, DEFAULT_GLOBAL_SETTINGS.echoCommands) ??
       DEFAULT_GLOBAL_SETTINGS.echoCommands,
+    honorClear:
+      optional(obj.honorClear, isBoolean, DEFAULT_GLOBAL_SETTINGS.honorClear) ?? DEFAULT_GLOBAL_SETTINGS.honorClear,
   };
 }
 
@@ -233,8 +245,16 @@ export function seedDefaultWorlds(): World[] {
       loginTemplate: DEFAULT_LOGIN_TEMPLATE,
       echoCommands: "inherit",
       wordWrap: "inherit",
+      honorClear: "inherit",
       characters: [
-        { id: crypto.randomUUID(), name: "Guest", password: "guest", echoCommands: "inherit", wordWrap: "inherit" },
+        {
+          id: crypto.randomUUID(),
+          name: "Guest",
+          password: "guest",
+          echoCommands: "inherit",
+          wordWrap: "inherit",
+          honorClear: "inherit",
+        },
       ],
     },
   ];

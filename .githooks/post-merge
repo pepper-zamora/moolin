@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# git merge doesn't run post-commit, so give a new merge commit the same UTC
+# treatment. A fast-forward (HEAD isn't a merge commit) or a merge commit that's
+# already on a remote is left alone.
+set -euo pipefail
+
+git rev-parse -q --verify HEAD^2 >/dev/null || exit 0
+[[ -z $(git branch -r --contains HEAD) ]] || exit 0
+
+exec "$(dirname "$0")/post-commit"

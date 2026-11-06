@@ -27,6 +27,7 @@ test("logPathFor nests character under world, or omits it, each prefixed by its 
       password: "",
       echoCommands: "inherit",
       wordWrap: "inherit",
+      honorClear: "inherit",
     }),
     path.join("/r", "3f2a9c1e.LambdaMOO", "c.Cowpernica", "moolin.log"),
   );
@@ -148,6 +149,7 @@ const cowpernica = {
   password: "",
   echoCommands: "inherit" as const,
   wordWrap: "inherit" as const,
+  honorClear: "inherit" as const,
 };
 
 test("locateLogFile creates nothing, and names new folders by id and label", () => {

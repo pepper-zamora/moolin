@@ -45,6 +45,9 @@ export class LineStream {
   // login output, so what was shown scrolls away when the next output
   // arrives; see TODO.md.)
   private clearPending = false;
+  // Whether a server's clear is acted on (the connection's resolved setting).
+  // Off by default: most clients ignore Pueblo's clears.
+  honorClear = false;
 
   // `log` is told what the stream decides that could explain odd output (Pueblo
   // turning on, a server's clear, tags it doesn't act on).
@@ -150,6 +153,10 @@ export class LineStream {
         this.link = token.link;
         break;
       case "clear":
+        if (!this.honorClear) {
+          this.log("pueblo: ignored the server's request to clear the screen");
+          break;
+        }
         this.clearPending = true;
         this.log("pueblo: the server asked to clear the screen; it will when more output follows");
         break;

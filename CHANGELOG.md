@@ -21,8 +21,34 @@ renames that section to the new version and date.
 - The Preferences dialog's font size is now a slider that moves in the steps
   Ctrl+= and Ctrl+- do (8 to 32, by 2), with the chosen size shown beside it.
   It is remembered between sessions, as the size was before.
+
+### Changed
+
+- Preferences now lists Check for updates before Show timestamps.
+
+### Fixed
+
+- A window that wasn't logging because another window had the same world's
+  log now starts logging when that window disconnects or closes, instead of
+  staying unlogged until it reconnects. It says "[logging resumed]" in its
+  scrollback, and the earlier output it showed isn't added to the log.
+- On macOS, closing the last window and then choosing Open World (Cmd+O) or
+  another Worlds menu item crashed the app with "Object has been destroyed":
+  the menu bar kept the closed window's menu. With no window open it now has
+  a Worlds menu (New World, Open World, Preferences, Encryption, Quit) whose
+  items open a new window first.
+
+## [0.3.0] - 2026-10-26
+
+### Added
+
+- A "Clear the screen when a Pueblo server asks" setting (Global, with World
+  and Character able to override it). A Pueblo server's
+  `<xch_page clear=text>` is now ignored by default, since some servers send
+  one at the end of their login output and it scrolled the room description
+  away; turn the setting on to honour it again.
 - A Preferences dialog (Worlds → Preferences…, or Ctrl+,/Cmd+,), replacing
-  the placeholder: check for updates at startup, show timestamps, and the
+  the placeholder: show timestamps, check for updates at startup, and the
   terminal's default font and size, with a live sample of each curated font.
 - A freshly opened window now sizes itself to show 80x25 characters at its
   starting font, centered on screen, instead of a fixed size.
@@ -45,8 +71,9 @@ renames that section to the new version and date.
   answered with `PUEBLOCLIENT 2.01`, and its `<a xch_cmd>`, `<send>` and
   `<a href>` links become clickable in the scrollback (right-click a link
   with several commands to choose one; the status bar shows what a link will
-  do while the pointer is on it), with `<br>` and `<xch_page clear=text>`
-  honoured (a clear waits until something follows it) and other HTML tags
+  do while the pointer is on it), with `<br>` honoured,
+  `<xch_page clear=text>` honoured if the setting for it is on (a clear waits
+  until something follows it), and other HTML tags
   dropped; text that only looks like a tag, such as `<name>`, is shown as
   sent. `--log-level=debug` says what was dropped or cleared. See
   [PROTOCOLS.md](PROTOCOLS.md).
@@ -100,15 +127,6 @@ renames that section to the new version and date.
 
 ### Fixed
 
-- A window that wasn't logging because another window had the same world's
-  log now starts logging when that window disconnects or closes, instead of
-  staying unlogged until it reconnects. It says "[logging resumed]" in its
-  scrollback, and the earlier output it showed isn't added to the log.
-- On macOS, closing the last window and then choosing Open World (Cmd+O) or
-  another Worlds menu item crashed the app with "Object has been destroyed":
-  the menu bar kept the closed window's menu. With no window open it now has
-  a Worlds menu (New World, Open World, Preferences, Encryption, Quit) whose
-  items open a new window first.
 - `npm start` from a snap-packaged VS Code or VSCodium's integrated terminal
   no longer crashes on a Wayland desktop: it undoes the snap's GTK and
   data-directory overrides before launching Electron.
@@ -149,6 +167,13 @@ renames that section to the new version and date.
 - Keyboard shortcuts now use Cmd instead of Ctrl on macOS, matching that
   platform's convention.
 
+## [0.1.1] - 2026-10-07
+
+### Fixed
+
+- The pacman package now installs on Arch: it no longer depends on
+  http-parser, which Arch has dropped, and lists the libraries Moolin needs.
+
 ## [0.1.0] - 2026-10-04
 
 The first public release.
@@ -175,5 +200,7 @@ The first public release.
   portable exe) and macOS (dmg and zip, Apple silicon and Intel). The
   Windows and macOS builds are unsigned.
 
-[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/pepper-zamora/moolin/compare/v0.1.1...v0.3.0
+[0.1.1]: https://github.com/pepper-zamora/moolin/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/pepper-zamora/moolin/releases/tag/v0.1.0
