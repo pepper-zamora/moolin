@@ -154,16 +154,16 @@ function setup(logLines: number) {
   };
   const view = new FakeView();
   const warnings: string[] = [];
-  const live: LiveReplay = new LiveReplay(
-    (replay) => {
-      view.reset();
-      view.write(linesOf(replay.chunks));
-      paging.replayed(replay);
-    },
-    (event) => {
-      if (event.kind === "data" && paging.showsLive) view.write(linesOf([event.data]));
-    },
-  );
+  // As the renderer does with a replay, and with live output and resets.
+  const replay = (replay: ScrollbackReplay): void => {
+    view.reset();
+    view.write(linesOf(replay.chunks));
+    paging.replayed(replay);
+  };
+  const live: LiveReplay = new LiveReplay(replay, (event) => {
+    if (event.kind === "data" && paging.showsLive) view.write(linesOf([event.data]));
+    else if (event.kind === "reset") replay(event.replay);
+  });
   const paging: HistoryWindow = new HistoryWindow(view, source, live, (message) => warnings.push(message));
   view.onChange = () => paging.linesAdded();
   // Output from the server: logged, then sent to the window live.
@@ -180,7 +180,7 @@ function setup(logLines: number) {
     paging.scrolled();
     await settle();
   };
-  return { log, view, paging, source, output, start, scrollTo, warnings, makeStale: () => (stale = true) };
+  return { log, view, paging, source, live, output, start, scrollTo, warnings, makeStale: () => (stale = true) };
 }
 
 async function settle(): Promise<void> {
@@ -335,4 +335,45 @@ test("a view that holds all the history there is has nothing more to search", as
   await start();
   assert.equal(paging.holdsAll, true);
   assert.equal(await paging.olderCursor(), null);
+});
+
+test("a reset while paging forward replaces everything, and the page fetched for before it isn't added", async () => {
+  const { log, view, paging, source, live, output, start, scrollTo } = setup(80000);
+  await start();
+  for (let i = 0; i < 4; i++) await scrollTo(0);
+  assert.equal(paging.showsLive, false);
+  output("said while far back");
+  // The reconnect's reset arrives while the next page is being fetched.
+  const getPage = source.getHistoryPage;
+  let reset = false;
+  source.getHistoryPage = async (request) => {
+    const page = await getPage(request);
+    if ("after" in request && !reset) {
+      reset = true;
+      live.receive({ kind: "reset", replay: await source.getScrollback() });
+    }
+    return page;
+  };
+  await scrollTo(view.lineCount);
+  assert.ok(reset, "a page was fetched forward");
+  assert.equal(paging.showsLive, true);
+  assert.equal(view.lines.at(-1), "said while far back");
+  assertRun(view.lines, log);
+});
+
+test("output that arrives while the page reaching live output is fetched is shown after it", async () => {
+  const { log, view, paging, source, output, start, scrollTo } = setup(80000);
+  await start();
+  for (let i = 0; i < 4; i++) await scrollTo(0);
+  assert.equal(paging.showsLive, false);
+  const getPage = source.getHistoryPage;
+  source.getHistoryPage = async (request) => {
+    const page = await getPage(request);
+    if ("after" in request && page.after === null) output("said during the fetch");
+    return page;
+  };
+  for (let i = 0; i < 20 && !paging.showsLive; i++) await scrollTo(view.lineCount);
+  assert.equal(paging.showsLive, true);
+  assert.equal(view.lines.at(-1), "said during the fetch");
+  assertRun(view.lines, log);
 });

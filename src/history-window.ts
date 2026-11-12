@@ -259,6 +259,7 @@ export class HistoryWindow {
   private async loadNewer(): Promise<void> {
     while (!this.live && this.view.nearBottom()) {
       const after = this.pages[this.pages.length - 1].after;
+      const mine = this.replays;
       // Live output is held while the page is fetched, so the page that reaches
       // the end can be gone on from without losing or repeating any.
       this.events.hold();
@@ -275,14 +276,18 @@ export class HistoryWindow {
         return;
       }
       if (page.after === null) {
-        // If a reset came first, it has replaced everything already.
-        if (this.events.catchUp(page.seq, () => this.view.catchUp(page.chunks, page.times))) {
+        // If a reset came first, it has replaced everything already. Live output
+        // is shown again before the output held meanwhile is let through.
+        const caughtUp = this.events.catchUp(page.seq, () => {
+          this.view.catchUp(page.chunks, page.times);
           this.live = { before: after };
-          this.enforceCap("front");
-        }
+        });
+        if (caughtUp) this.enforceCap("front");
         return;
       }
       this.events.resume();
+      // A reset held meanwhile has just replaced everything, page and all.
+      if (this.replays !== mine) return;
       const lines = page.chunks.length > 0 ? this.view.append(page.chunks, page.times) : 0;
       if (lines === 0 && sameCursor(page.after, after)) {
         await this.startOver(false);
