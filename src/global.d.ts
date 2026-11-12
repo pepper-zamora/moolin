@@ -47,6 +47,7 @@ declare global {
       onRedoRequested(callback: () => void): void;
       onFindRequested(callback: (action: "open" | "next" | "previous") => void): void;
       onClearScreenRequested(callback: () => void): void;
+      onHistoryPaneRequested(callback: () => void): void;
       onToggleTimestamps(callback: (show: boolean) => void): void;
       onSetFont(callback: (font: { fontFamily: string; fontSize: number }) => void): void;
       initialFont: { fontId: string; fontSize: number };

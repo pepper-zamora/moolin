@@ -101,13 +101,15 @@ from source never check at startup.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
 - **History pane.** Scroll up past the top of the scrollback (the mouse
-  wheel, or Page Up) and the window splits: a history pane opens above it, at
+  wheel, or Page Up), or choose View > History Pane (Ctrl+Shift+H), and the
+  window splits: a history pane opens above it, at
   the lines just before the scrollback's oldest, read from the character's log,
   and pages further back, 5,000 lines at a time, as far as the log goes. The
   scrollback below carries on as it was, with new output and the input line,
   so you can keep playing while you read. Drag the bar between them to share
-  the height. Escape, End, the bar's close button, or scrolling down past the
-  end of the log close the pane. Page Up and Page Down scroll it while it's
+  the height; every window opens the pane at the height it was last left at.
+  Escape, End, Ctrl+Shift+H again, the bar's close button, or scrolling down
+  past the end of the log close the pane. Page Up and Page Down scroll it while it's
   open. It holds at most 30,000 lines, letting go of those furthest from where
   you are reading and paging them in again as you scroll back. A page starts
   in the default colour, so a colour a server turned on in an earlier page and
@@ -328,6 +330,7 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Page Up / Page Down      | Scroll the scrollback, or the history pane while it's open; Page Up at the top opens it |
 | End                      | To the newest line, closing the history pane, when not there already (otherwise the end of the input line); Ctrl+End always |
 | Escape                   | Close the find box, else the history pane               |
+| Ctrl+Shift+H             | Open or close the history pane (View > History Pane)    |
 | Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
 | Ctrl+F                   | Find, in the scrollback and the log                     |
 | F3 / Shift+F3            | Next older / newer match (also Cmd+G / Cmd+Shift+G on macOS) |

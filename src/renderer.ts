@@ -456,6 +456,14 @@ window.moolin.onFindRequested((action) => {
   else findWidget.findFromMenu(action === "next" ? "older" : "newer");
 });
 window.moolin.onClearScreenRequested(() => clearToOffscreen());
+window.moolin.onHistoryPaneRequested(() => toggleHistoryPane());
+
+// View > History Pane (Ctrl+Shift+H): opens the history pane at the history
+// before the scrollback's oldest line, or closes it.
+function toggleHistoryPane(): void {
+  if (historyPane.isOpen) historyPane.close();
+  else void historyPane.openAbove();
+}
 window.moolin.onToggleTimestamps((show) => {
   // The gutter takes its width from the scrollback when shown (and gives it
   // back when hidden); the view refits itself when its width changes.
@@ -515,6 +523,8 @@ document.addEventListener(
       redoInput();
     } else if (mod && !event.shiftKey && key === "l") {
       clearToOffscreen();
+    } else if (mod && event.shiftKey && key === "h") {
+      toggleHistoryPane();
     } else if (event.key === "PageUp" || event.key === "PageDown") {
       // The history pane's while it's open; Page Up at the top of the live
       // scrollback opens it.

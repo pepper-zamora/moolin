@@ -13,12 +13,14 @@ renames that section to the new version and date.
 ### Added
 
 - **History pane.** Scrolling up past the top of the scrollback (the mouse
-  wheel, or Page Up) splits the window: a history pane opens above, at the lines
-  just before the scrollback's oldest, and pages back through the character's
+  wheel, or Page Up), or View > History Pane (Ctrl+Shift+H), splits the window:
+  a history pane opens above, at the lines just before the scrollback's
+  oldest, and pages back through the character's
   log, 5,000 lines at a time, as far as it goes, instead of stopping at the
   newest 20,000. The scrollback below carries on with new output and the input
-  line. Drag the bar between them to resize; Escape, End, the bar's close
-  button, or scrolling down past the end of the log close the pane. It holds at
+  line. Drag the bar between them to resize (the height is remembered); Escape,
+  End, Ctrl+Shift+H, the bar's close button, or scrolling down past the end of
+  the log close the pane. It holds at
   most 30,000 lines. Only the log can be paged: a window with no log has what
   it had. Pages start in the default colour. Known limit: reloading a window
   just as another window on the same character logs a line this one has not

@@ -283,9 +283,8 @@ currently discards or never negotiates:
     opens when the scrollback is scrolled up past its top, not on any scroll
     up: the scrollback's own 20,000 lines scroll as before, and the pane
     reads further back from the character's log (see README, History pane).
-    Blightmud splits as soon as you scroll back at all.
-  - **Not done.** The pane can't be opened from a menu, and its size isn't
-    remembered between windows or runs.
+    Blightmud splits as soon as you scroll back at all. View > History Pane
+    (Ctrl+Shift+H) opens it too, and the divider's position is remembered.
 
 ## 9. Accessibility
 

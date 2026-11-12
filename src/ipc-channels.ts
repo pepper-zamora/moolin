@@ -39,6 +39,7 @@ export const IpcChannels = {
   // main -> renderer: Edit menu's Find / Find Next / Find Previous.
   terminalFindRequested: "terminal:findRequested",
   terminalClearScreenRequested: "terminal:clearScreenRequested",
+  terminalHistoryPaneRequested: "terminal:historyPaneRequested",
   // main -> renderer: show or hide the per-line timestamp gutter.
   terminalToggleTimestamps: "terminal:toggleTimestamps",
   // main -> renderer: apply a newly chosen default font/size to this window.

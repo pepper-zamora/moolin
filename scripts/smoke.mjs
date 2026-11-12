@@ -766,6 +766,35 @@ try {
     expectEqual(await historyOpen(), false, "the pane, after scrolling down past the end of the log");
   });
 
+  // View > History Pane's key opens and closes it, and the divider's place is
+  // remembered: dragged, closed and opened again, the pane comes back that size.
+  await check("Ctrl+Shift+H opens and closes the history pane, which keeps the size it was dragged to", async () => {
+    const share = () =>
+      main.evaluate(
+        `document.getElementById("history-row").getBoundingClientRect().height / document.getElementById("panes").getBoundingClientRect().height`,
+      );
+    await main.key("H", "KeyH", 72, 2 | 8 /* Ctrl+Shift */);
+    await waitFor("Ctrl+Shift+H to open it", historyOpen, 5000);
+    const divider = await main.evaluate(`(() => {
+      const d = document.getElementById("history-divider").getBoundingClientRect();
+      const p = document.getElementById("panes").getBoundingClientRect();
+      return { x: d.x + 20, y: d.y + d.height / 2, to: p.y + p.height * 0.3 };
+    })()`);
+    await main.mouse("mousePressed", divider);
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", x: divider.x, y: divider.to, button: "left", buttons: 1 });
+    await main.mouse("mouseReleased", { x: divider.x, y: divider.to });
+    const dragged = await share();
+    if (Math.abs(dragged - 0.3) > 0.05) throw new Error(`the pane takes ${dragged.toFixed(2)} of the height after the drag`);
+    await main.key("H", "KeyH", 72, 2 | 8);
+    await waitFor("Ctrl+Shift+H to close it", async () => !(await historyOpen()), 3000);
+    await main.key("H", "KeyH", 72, 2 | 8);
+    await waitFor("Ctrl+Shift+H to open it again", historyOpen, 5000);
+    const again = await share();
+    if (Math.abs(again - dragged) > 0.02) throw new Error(`reopened at ${again.toFixed(2)}, not ${dragged.toFixed(2)}`);
+    await main.key("Escape", "Escape", 27);
+    await waitFor("Escape to close it", async () => !(await historyOpen()), 3000);
+  });
+
   // Find searches the whole log, not just the scrollback: a match only the log
   // holds is counted, and Enter (older) shows it in the history pane.
   await check("Find counts the whole log, and Enter goes older, into the history pane", async () => {

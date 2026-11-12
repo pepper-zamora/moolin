@@ -95,6 +95,9 @@ contextBridge.exposeInMainWorld("moolin", {
       callback(action),
     );
   },
+  onHistoryPaneRequested: (callback: () => void): void => {
+    ipcRenderer.on(IpcChannels.terminalHistoryPaneRequested, () => callback());
+  },
   onClearScreenRequested: (callback: () => void): void => {
     ipcRenderer.on(IpcChannels.terminalClearScreenRequested, () => callback());
   },

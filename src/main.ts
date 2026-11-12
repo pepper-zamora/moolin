@@ -479,6 +479,14 @@ function buildMenu(terminal: TerminalWindow): void {
           click: () => terminal.send(IpcChannels.terminalClearScreenRequested),
         },
         {
+          // Opens the history pane above the scrollback, or closes it; the
+          // window handles the key itself, as with Clear Screen.
+          label: "&History Pane",
+          accelerator: "CmdOrCtrl+Shift+H",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalHistoryPaneRequested),
+        },
+        {
           label: "Show &Timestamps",
           type: "checkbox",
           checked: terminal.showTimestamps,

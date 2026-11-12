@@ -8,6 +8,18 @@ import { TimestampGutter } from "./timestamp-gutter";
 const DEFAULT_FRACTION = 0.5;
 // How small dragging the divider can make either pane, as a share of both.
 const MIN_FRACTION = 0.15;
+// Where the divider was last left, kept in the window's local storage so every
+// window, in this run and later ones, opens the pane at the same height.
+const FRACTION_KEY = "historyPaneFraction";
+
+function clampFraction(fraction: number): number {
+  return Math.min(1 - MIN_FRACTION, Math.max(MIN_FRACTION, fraction));
+}
+
+function storedFraction(): number {
+  const stored = Number(localStorage.getItem(FRACTION_KEY));
+  return Number.isFinite(stored) && stored > 0 ? clampFraction(stored) : DEFAULT_FRACTION;
+}
 
 export interface HistoryPaneElements {
   // The column holding both panes, which the divider divides.
@@ -32,7 +44,7 @@ export class HistoryPane {
   // Counts openings, so a slow one that a close overtook doesn't open after it.
   private opens = 0;
   private opening = false;
-  private fraction = DEFAULT_FRACTION;
+  private fraction = storedFraction();
 
   constructor(
     private readonly els: HistoryPaneElements,
@@ -128,6 +140,8 @@ export class HistoryPane {
 
   private show(): void {
     if (this.isOpen) return;
+    // Another window may have moved the divider since.
+    this.fraction = storedFraction();
     this.els.row.style.flexBasis = `${this.fraction * 100}%`;
     this.els.row.hidden = false;
     this.els.divider.hidden = false;
@@ -145,10 +159,11 @@ export class HistoryPane {
         const box = panes.getBoundingClientRect();
         if (box.height <= 0) return;
         const fraction = (moved.clientY - box.top) / box.height;
-        this.fraction = Math.min(1 - MIN_FRACTION, Math.max(MIN_FRACTION, fraction));
+        this.fraction = clampFraction(fraction);
         row.style.flexBasis = `${this.fraction * 100}%`;
       };
       const done = (): void => {
+        localStorage.setItem(FRACTION_KEY, String(this.fraction));
         divider.removeEventListener("pointermove", move);
         divider.removeEventListener("pointerup", done);
         divider.removeEventListener("pointercancel", done);
