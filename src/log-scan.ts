@@ -48,9 +48,13 @@ export class LogScan {
   // it ends the scan as it is.
   async run(): Promise<void> {
     try {
-      for (let k = 0; !this.cancelled && this.chain.has(k); k++) {
-        const page = await this.chain.page(k);
+      // The next page is asked for before this one is searched, so main reads
+      // it meanwhile.
+      let next = this.chain.has(0) ? this.chain.page(0) : null;
+      for (let k = 0; !this.cancelled && next; k++) {
+        const page = await next;
         if (this.cancelled || !page) break;
+        next = this.chain.has(k + 1) ? this.chain.page(k + 1) : null;
         const lines = this.read(page.chunks, page.times);
         const { matches } = findMatches(lines, this.query, Number.POSITIVE_INFINITY);
         // Newest first: the page's last match is the first found.
