@@ -26,6 +26,7 @@ export interface HistoryView {
   distanceFromBottom(): number;
   scrollToDistanceFromBottom(distance: number): void;
   scrollToBottom(): void;
+  scrollTop(): number;
   isAtBottom(): boolean;
   showHistory(chunks: ReadonlyArray<Uint8Array>, times: ReadonlyArray<number | null>): number;
 }
@@ -140,7 +141,7 @@ export class HistoryWindow {
   async olderCursor(): Promise<LogCursor | null> {
     const cursor = await this.queue(async () => {
       if (!this.fromLog) return null;
-      if (this.pages.length === 0 && this.view.hasTrimmed && !(await this.startOver(true))) return null;
+      if (this.pages.length === 0 && this.view.hasTrimmed && (await this.startOver(true)) === null) return null;
       return this.pages.length > 0 ? this.pages[0].before : (this.live?.before ?? null);
     });
     return cursor ?? null;
@@ -210,9 +211,19 @@ export class HistoryWindow {
   // Adds pages before the oldest line held, for as long as the view is near the
   // top and there is more.
   private async loadOlder(): Promise<void> {
-    // Where the view was before starting over, measured from the bottom, while
-    // the replay is too short to reach it, and where it was put instead.
-    let lost: { want: number; at: number } | null = null;
+    try {
+      await this.loadOlderPages();
+    } finally {
+      // With no pages held after all, the scrollback's own cap applies again.
+      if (this.pages.length === 0 && this.live) this.view.setTrimming(true);
+    }
+  }
+
+  private async loadOlderPages(): Promise<void> {
+    // After starting over from a replay too short to reach the view's place:
+    // how far above the view the place is, and the view's scrollTop then, to
+    // tell whether it has been scrolled since.
+    let lost: { distance: number; scrollTop: number } | null = null;
     while (this.fromLog && this.view.nearTop() && this.olderAvailable()) {
       if (this.pages.length === 0 && this.view.hasTrimmed) {
         // Lines trimmed off the top since the replay are not what its cursor
@@ -220,34 +231,37 @@ export class HistoryWindow {
         // lines than the view did (which trims only once well past its cap,
         // and the replay is limited in bytes too), putting the view's place
         // above its top; the pages before it bring that back.
-        const want = this.view.distanceFromBottom();
-        if (!(await this.startOver(true))) return;
-        const at = this.view.distanceFromBottom();
-        lost = at < want - 1 ? { want, at } : null;
+        const short = await this.startOver(true);
+        if (short === null) return;
+        lost = short > 1 ? { distance: short, scrollTop: this.view.scrollTop() } : null;
         continue;
       }
       const before = this.pages.length > 0 ? this.pages[0].before : (this.live?.before ?? null);
       if (before === null) return;
       const mine = this.replays;
+      // The view stops trimming lines off the top while the page is fetched, so
+      // output meanwhile can't take away the oldest line, which the page is to
+      // meet, or what is on screen.
+      this.view.setTrimming(false);
       const page = await this.source.getHistoryPage({ before });
       if (this.replays !== mine) continue; // a reset or a new replay came first
       if (page.stale) {
         await this.startOver(false);
         return;
       }
+      // Output below doesn't move the view, so a change is the reader scrolling.
+      if (lost && Math.abs(this.view.scrollTop() - lost.scrollTop) > 1) lost = null;
       const lines = page.chunks.length > 0 ? this.view.prepend(page.chunks, page.times) : 0;
       // A page that doesn't move on means there is nothing older to be had.
       const stuck = lines === 0 && sameCursor(page.before, before);
       this.pages.unshift({ lines, before: stuck ? null : page.before, after: before });
       this.view.setTrimming(false);
-      // Back to the place lost, unless the view was scrolled from where it was
-      // put meanwhile (prepending keeps that distance from the bottom).
-      if (lost && Math.abs(this.view.distanceFromBottom() - lost.at) <= 1) {
-        this.view.scrollToDistanceFromBottom(lost.want);
-        const at = this.view.distanceFromBottom();
-        lost = at < lost.want - 1 ? { want: lost.want, at } : null;
-      } else {
-        lost = null;
+      if (lost) {
+        // Up to the place lost, as far as what the page added above allows.
+        const from = this.view.distanceFromBottom();
+        this.view.scrollToDistanceFromBottom(from + lost.distance);
+        const short = lost.distance - (this.view.distanceFromBottom() - from);
+        lost = short > 1 ? { distance: short, scrollTop: this.view.scrollTop() } : null;
       }
       this.enforceCap("back");
     }
@@ -358,18 +372,29 @@ export class HistoryWindow {
 
   // Fetches the replay again and starts from it, either where the view was,
   // measured from the bottom (the newest lines are the same), or at the bottom.
-  private async startOver(keepPlace: boolean): Promise<boolean> {
+  // Returns how far short of the place the replay's top fell (0 if it reached
+  // it, or at the bottom), or null if the replay couldn't be fetched.
+  private async startOver(keepPlace: boolean): Promise<number | null> {
     const distance = this.view.distanceFromBottom();
     this.events.hold();
+    let replay: ScrollbackReplay;
     try {
-      this.events.replay(await this.source.getScrollback());
+      replay = await this.source.getScrollback();
     } catch (error) {
       this.events.resume();
       this.warn(`could not fetch the log again: ${String(error)}`);
-      return false;
+      return null;
     }
-    if (keepPlace) this.view.scrollToDistanceFromBottom(distance);
-    else this.view.scrollToBottom();
-    return true;
+    // The place is measured before the output held meanwhile goes below it.
+    let short = 0;
+    this.events.replay(replay, () => {
+      if (!keepPlace) {
+        this.view.scrollToBottom();
+        return;
+      }
+      this.view.scrollToDistanceFromBottom(distance);
+      short = Math.max(0, distance - this.view.distanceFromBottom());
+    });
+    return short;
   }
 }

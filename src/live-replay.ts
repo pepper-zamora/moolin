@@ -44,10 +44,11 @@ export class LiveReplay {
     for (const event of held) this.apply(event);
   }
 
-  // A replay: the initial one, or one that starts over. Writes it, then
-  // whatever held events it doesn't cover.
-  replay(replay: ScrollbackReplay): void {
+  // A replay: the initial one, or one that starts over. Writes it, calls
+  // `written` (if given), then writes whatever held events it doesn't cover.
+  replay(replay: ScrollbackReplay, written?: () => void): void {
     this.onReplay(replay);
+    written?.();
     this.replayedThrough = replay.seq;
     const held = this.held ?? [];
     this.held = null;

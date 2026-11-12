@@ -87,6 +87,9 @@ class FakeView implements HistoryView {
   isAtBottom(): boolean {
     return this.top + SCREEN >= this.lines.length;
   }
+  scrollTop(): number {
+    return this.top;
+  }
   showHistory(chunks: ReadonlyArray<Uint8Array>): number {
     this.lines = linesOf(chunks);
     this.top = 0;
@@ -188,10 +191,13 @@ async function settle(): Promise<void> {
 }
 
 // The lines are a run of the log, in order, with none missing or repeated.
-function assertRun(lines: string[], log: string[]): void {
+function assertRun(lines: string[], log: string[], where = ""): void {
   const first = log.indexOf(lines[0]);
-  assert.ok(first !== -1, `${lines[0]} is in the log`);
-  assert.deepEqual(lines, log.slice(first, first + lines.length));
+  assert.ok(first !== -1, `${lines[0]} is in the log ${where}`);
+  const broken = lines.findIndex((line, i) => line !== log[first + i]);
+  if (broken !== -1) {
+    assert.fail(`line ${broken} of ${lines.length} is ${lines[broken]}, not ${log[first + broken]} ${where}`);
+  }
 }
 
 test("scrolling to the top pages older history in, and the bottom lets go of it", async () => {
@@ -376,4 +382,93 @@ test("output that arrives while the page reaching live output is fetched is show
   assert.equal(paging.showsLive, true);
   assert.equal(view.lines.at(-1), "said during the fetch");
   assertRun(view.lines, log);
+});
+
+// A small seeded generator, so a failing sequence can be run again.
+function random(seed: number): () => number {
+  let state = seed >>> 0 || 1;
+  return () => {
+    state ^= state << 13;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    return (state >>> 0) / 2 ** 32;
+  };
+}
+
+test("any mix of scrolling, output, resets and End keeps the view a run of the log, and loses no output", async () => {
+  for (let seed = 1; seed <= 30; seed++) {
+    const { log, view, paging, source, live, output, scrollTo } = setup(60000);
+    const rand = random(seed);
+    let said = 0;
+    const say = (): void => output(`said ${seed}.${said++}`);
+    // Output sometimes arrives while a page or the replay is being fetched.
+    const getPage = source.getHistoryPage;
+    source.getHistoryPage = async (request) => {
+      const page = await getPage(request);
+      if (rand() < 0.3) say();
+      return page;
+    };
+    const getScrollback = source.getScrollback;
+    source.getScrollback = async () => {
+      const replay = await getScrollback();
+      if (rand() < 0.3) say();
+      return replay;
+    };
+    live.replay(await source.getScrollback());
+    await settle();
+    const steps: string[] = [];
+    for (let step = 0; step < 60; step++) {
+      const r = rand();
+      if (r < 0.3) {
+        steps.push("top");
+        const onScreen = view.lines[0];
+        await scrollTo(0);
+        assert.equal(view.lines[view.top], onScreen, `what was on screen stays there, seed ${seed}, after ${steps}`);
+      } else if (r < 0.5) {
+        steps.push("bottom");
+        await scrollTo(view.lineCount);
+      } else if (r < 0.6) {
+        steps.push("middle");
+        await scrollTo(Math.floor(rand() * view.lineCount));
+      } else if (r < 0.8) {
+        const count = rand() < 0.2 ? 3000 : 1 + Math.floor(rand() * 20);
+        steps.push(`say ${count}`);
+        for (let i = 0; i < count; i++) say();
+        await settle();
+      } else if (r < 0.84) {
+        // Find showing the page a match is on, anywhere in the log.
+        const at = Math.floor(rand() * log.length);
+        const request =
+          rand() < 0.5 ? { before: { offset: Math.max(1, at), skip: 0 } } : { after: { offset: at, skip: 0 } };
+        steps.push(`show ${JSON.stringify(request)}`);
+        await paging.show(await getPage(request));
+        await settle();
+      } else if (r < 0.86) {
+        steps.push("older cursor");
+        await paging.olderCursor();
+        await settle();
+      } else if (r < 0.88) {
+        steps.push("rewritten");
+        await paging.rewritten();
+        await settle();
+      } else if (r < 0.9) {
+        steps.push("end");
+        await paging.toNewest();
+        await settle();
+      } else {
+        steps.push("reset");
+        live.receive({ kind: "reset", replay: await getScrollback() });
+        await settle();
+      }
+      const where = `seed ${seed}, after ${steps.join(", ")}`;
+      assertRun(view.lines, log, where);
+      assert.ok(view.lineCount <= MAX_HELD_LINES + PAGE_LINES, `${view.lineCount} lines held, ${where}`);
+      if (paging.showsLive) assert.equal(view.lines.at(-1), log.at(-1), `newest line, ${where}`);
+    }
+    await paging.toNewest();
+    await settle();
+    assert.equal(paging.showsLive, true, `seed ${seed}`);
+    assert.equal(view.lines.at(-1), log.at(-1), `seed ${seed}`);
+    assertRun(view.lines, log);
+  }
 });

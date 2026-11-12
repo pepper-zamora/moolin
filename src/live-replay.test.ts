@@ -115,3 +115,12 @@ test("a reset held while catching up wins, and the history is not written", () =
   );
   assert.deepEqual(shown, ["replay:old", "reset:new", "data:after"]);
 });
+
+test("a replay's written callback runs after the replay and before the events held meanwhile", () => {
+  const { live, shown } = recorder();
+  live.replay(replay(["first"], 1));
+  live.hold();
+  live.receive(data("during", 2));
+  live.replay(replay(["again"], 1), () => shown.push("written"));
+  assert.deepEqual(shown, ["replay:first", "replay:again", "written", "data:during"]);
+});
