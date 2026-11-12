@@ -6,8 +6,8 @@
 // Everything runs in a throwaway sandbox: its own config folder (so its own
 // preferences and single-instance lock, apart from a Moolin you have
 // running), worlds file and Documents folder (for session logs), and a local
-// server to connect to. Windows open on screen while it runs (so it needs a
-// real display; on headless Linux use xvfb-run).
+// server to connect to. Its windows need a display; on Linux it opens them in
+// a private one when it can (see below), otherwise on screen.
 //
 // On Linux, the sandbox works by setting XDG_CONFIG_HOME and faking
 // user-dirs.dirs, which Electron's app.getPath("userData"/"documents")
@@ -20,7 +20,7 @@
 // inside Contents/MacOS/).
 //
 // Exits non-zero if any check fails.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as net from "node:net";
@@ -42,6 +42,84 @@ if (packagedApp && !fs.existsSync(packagedApp)) {
 if (!packagedApp && !fs.existsSync(path.join(ROOT, "dist", "main.js"))) {
   console.error("smoke: no build in dist/; run `npm run smoke`, which builds first");
   process.exit(2);
+}
+
+// On Linux, the windows open in a private display of their own, so they don't
+// appear on your desktop and take keyboard focus from whatever you're typing
+// in. MOOLIN_SMOKE_DISPLAY picks which:
+//   xvfb     a virtual X display, through xvfb-run (Arch: xorg-server-xvfb;
+//            Debian/Ubuntu: xvfb), so Electron runs on X11. The default.
+//   weston   a headless Weston, a Wayland compositor, so Electron runs on
+//            Wayland as it does on most Linux desktops now (Arch and
+//            Debian/Ubuntu: weston). It moves no focus between windows, so the
+//            inactive-window check is skipped there.
+//   visible  your own display, to watch the run.
+// Unset, it's xvfb if installed, else weston if installed, else visible. The
+// script re-runs itself in the display chosen, and exits as that run does.
+function onPath(command) {
+  return (process.env.PATH ?? "").split(path.delimiter).some((dir) => dir && fs.existsSync(path.join(dir, command)));
+}
+
+// Runs this script again with `env`, inside `wrapper` (a command and its
+// arguments, or none), and returns its exit status.
+function runNested(wrapper, env) {
+  const [command, ...args] = [...wrapper, process.execPath, import.meta.filename, ...process.argv.slice(2)];
+  const result = spawnSync(command, args, { env: { ...env, MOOLIN_SMOKE_NESTED: "1" }, stdio: "inherit" });
+  if (result.error) console.error(`smoke: couldn't run ${command}: ${result.error.message}`);
+  return result.status ?? 1;
+}
+
+async function runInWeston() {
+  const runtimeDir = process.env.XDG_RUNTIME_DIR;
+  if (!runtimeDir) {
+    console.error("smoke: XDG_RUNTIME_DIR isn't set, so Weston has nowhere to put its socket");
+    return 2;
+  }
+  const socket = `moolin-smoke-${process.pid}`;
+  const weston = spawn("weston", ["--backend=headless", "--no-config", "--idle-time=0", `--socket=${socket}`], {
+    stdio: "ignore",
+  });
+  const exited = new Promise((resolve) => weston.on("exit", resolve));
+  try {
+    const deadline = Date.now() + 10000;
+    while (!fs.existsSync(path.join(runtimeDir, socket))) {
+      if (weston.exitCode !== null || Date.now() > deadline) {
+        console.error("smoke: headless Weston didn't start");
+        return 2;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const env = { ...process.env, WAYLAND_DISPLAY: socket, XDG_SESSION_TYPE: "wayland" };
+    // No X display to fall back to: the app either runs on Wayland or fails.
+    delete env.DISPLAY;
+    return runNested([], env);
+  } finally {
+    weston.kill();
+    await exited;
+  }
+}
+
+if (process.platform === "linux" && !process.env.MOOLIN_SMOKE_NESTED) {
+  const choice =
+    process.env.MOOLIN_SMOKE_DISPLAY ||
+    (onPath("xvfb-run") ? "xvfb" : onPath("weston") ? "weston" : "visible");
+  if (choice === "xvfb") {
+    const env = { ...process.env };
+    // Electron prefers Wayland when it's offered; this is the X display's run.
+    delete env.WAYLAND_DISPLAY;
+    delete env.XDG_SESSION_TYPE;
+    process.exit(runNested(["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24"], env));
+  } else if (choice === "weston") {
+    process.exit(await runInWeston());
+  } else if (choice !== "visible") {
+    console.error(`smoke: MOOLIN_SMOKE_DISPLAY should be xvfb, weston or visible, not ${choice}`);
+    process.exit(2);
+  } else if (!process.env.MOOLIN_SMOKE_DISPLAY) {
+    console.warn(
+      "smoke: neither xvfb-run nor weston is installed, so the windows open on your desktop and take keyboard focus\n" +
+        "       while it runs; install either (Arch: xorg-server-xvfb or weston) to run them off screen.",
+    );
+  }
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

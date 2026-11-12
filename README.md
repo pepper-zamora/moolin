@@ -591,9 +591,20 @@ encryption flows (the first-run offer, turning it on, unlocking, logging
 encrypted, changing the key phrase, the phrase length limit, and unlocking in
 one window while another waits). The key file picker and the stop
 confirmation are native dialogs it can't drive, so unit tests cover those.
-Its windows appear on screen while it runs (a few seconds), so it needs a real
-display; on headless Linux use `xvfb-run`. Runs on Linux and macOS; on Windows the same mechanism should
-work but hasn't been tried. To check a packaged build instead, point
+Its windows need a display. On Linux it runs itself in a private one, so they
+don't open on your desktop or take keyboard focus; `MOOLIN_SMOKE_DISPLAY` picks
+which:
+
+| `MOOLIN_SMOKE_DISPLAY` | Display                                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `xvfb`                 | A virtual X display through `xvfb-run` (Arch: `xorg-server-xvfb`; Debian/Ubuntu: `xvfb`), so Electron runs on X11 |
+| `weston`               | A headless Weston (package `weston`), so Electron runs on Wayland, as on most Linux desktops; nothing moves focus between windows there, so the inactive-window check is skipped |
+| `visible`              | Your own display, to watch the run                                                            |
+
+Unset, it's `xvfb` if installed, else `weston`, else `visible` (with a
+warning). On macOS the windows appear on screen and take focus for the run.
+Runs on Linux and macOS; on Windows the same mechanism should work but hasn't
+been tried. To check a packaged build instead, point
 `MOOLIN_SMOKE_APP` at its executable, e.g.
 `MOOLIN_SMOKE_APP=release/linux-unpacked/moolin node scripts/smoke.mjs`
 (the AppImage works too; on macOS, the binary inside the `.app`'s
