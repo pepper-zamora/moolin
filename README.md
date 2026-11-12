@@ -559,6 +559,7 @@ A missing or unreadable file just means the defaults.
 | `npm run dev`       | Rebuild on change (reload the window to pick it up)      |
 | `npm test`          | Run the unit tests (`src/*.test.ts`, Node's test runner) |
 | `npm run smoke`     | Build, then drive the real app through focus, typing, copy and link checks (see below) |
+| `npm run try-log`   | Build, then open Moolin in a throwaway sandbox on a large made-up log (see below) |
 | `npm run typecheck` | Typecheck only                                          |
 | `npm run lint`      | Lint `src/` with [Biome](https://biomejs.dev/) (`npm run lint:fix` to apply safe fixes) |
 | `npm run format`    | Format `src/` with Biome (`npm run format:check` to check without writing) |
@@ -578,6 +579,18 @@ only needs rerunning when `private-build-plans.toml` changes. Set
 clone one. The four built faces (Regular, Bold, Italic, BoldItalic — what
 the scrollback switches between for SGR bold/italic) are committed, along
 with the font's SIL Open Font License text (`font/LICENSE-IosevkaMoolin.md`).
+
+`npm run try-log` (`scripts/make-test-log.mjs --try`) is for trying scrolling
+and searching on a lot of history. It makes a 50 MB session log out of War and
+Peace (downloaded once from Project Gutenberg into `.cache/`, which git
+ignores), dressed up as MU* output: wrapped lines, speech, poses and channel
+chatter in colour, a few of Moolin's own status lines, and arrival times
+spread over months, with 25 lines saying "wyvern" (a word the book never uses)
+spread evenly through it for a rare search. It opens Moolin in a sandbox of
+its own, with a local server to connect to (the world "Test Log"), and deletes
+the sandbox when Moolin quits. Options go after `--`, e.g.
+`npm run try-log -- --size=500`; `node scripts/make-test-log.mjs --out=FILE`
+just writes the log. See the script for the rest.
 
 `npm run smoke` (`scripts/smoke.mjs`) covers what the unit tests can't
 reach: the renderer in a real window. It launches Moolin in a throwaway
