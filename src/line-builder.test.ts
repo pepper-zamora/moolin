@@ -215,3 +215,37 @@ test("lines added in front leave the open line and what is due to be drawn alone
   assert.equal(b.dirtyCount, 0);
   assert.equal(b.openLine?.text, "prompt> ");
 });
+
+test("newer lines go after the rest, with ids above theirs", () => {
+  const b = build(["one\ntwo\n"], [1, 2]);
+  b.append(build(["three\nfour\n"], [3, 4]).lines);
+  assert.deepEqual(
+    b.lines.map((l) => l.text),
+    ["one", "two", "three", "four"],
+  );
+  const ids = b.lines.map((l) => l.id);
+  assert.ok(
+    ids.every((id, i) => i === 0 || id > ids[i - 1]),
+    "increasing",
+  );
+  assert.equal(b.takeDirty().length, 2, "only the lines it made itself are due to be drawn");
+});
+
+test("dropping the newest lines takes the open line with them", () => {
+  const b = build(["one\ntwo\nprompt> "], [1, 2]);
+  const dropped = b.dropBack(2);
+  assert.deepEqual(
+    dropped.map((l) => [l.text, l.dropped]),
+    [
+      ["two", true],
+      ["prompt> ", true],
+    ],
+  );
+  assert.equal(b.openLine, null);
+  b.feed(parser("more\n"), () => 3);
+  assert.deepEqual(
+    b.lines.map((l) => l.text),
+    ["one", "more"],
+    "what comes next starts a line of its own",
+  );
+});

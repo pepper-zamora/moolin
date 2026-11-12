@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { PLAIN } from "./log-format";
+import { PLAIN, type LogCursor } from "./log-format";
 import { locateLogFile, logPathFor, sanitizePathSegment, SessionLogRegistry, WindowLog } from "./session-log";
 import { newWorld } from "./world-utils";
 
@@ -232,19 +232,20 @@ test("a window leaving writes the unfinished line it and the last other window w
   assert.equal(Buffer.from(history.bytes).toString(), "> more\n", "the prompt both held is written once");
 });
 
-test("a window pages back through the log it holds, and after letting go of it", () => {
+test("a window pages back through the log it holds, and after letting go of it", async () => {
   const root = tempDir();
   const registry = new SessionLogRegistry();
   const world = { ...newWorld("w1"), name: "Moo" };
   const log = new WindowLog(registry, root);
-  assert.equal(log.page(null, { maxBytes: 100 }), null, "nothing to read before a log is opened");
-  log.open(world, null, 1000);
+  assert.equal(await log.page({ before: null }, { maxBytes: 100 }), null, "nothing to read before a log is opened");
+  const opened = log.open(world, null, 1000);
+  assert.deepEqual([opened.bytes.length, opened.before], [0, null]);
   for (let i = 0; i < 6; i++) log.append(`line ${i}\n`, i);
-  const read = () => {
+  const read = async () => {
     const pieces: string[] = [];
-    let before = null as Parameters<typeof log.page>[0];
+    let before: LogCursor | null = null;
     for (let n = 0; n < 20; n++) {
-      const page = log.page(before, { maxBytes: 16, lenient: true });
+      const page = await log.page({ before }, { maxBytes: 16, lenient: true });
       assert.ok(page);
       pieces.unshift(Buffer.from(page.bytes).toString());
       if (!page.before) break;
@@ -253,9 +254,40 @@ test("a window pages back through the log it holds, and after letting go of it",
     return pieces.join("");
   };
   const all = "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\n";
-  assert.equal(read(), all);
+  assert.equal(await read(), all);
   log.release();
-  assert.equal(read(), all, "the file can still be read once the window has let go of it");
+  assert.equal(await read(), all, "the file can still be read once the window has let go of it");
+  const history = log.open(world, null, 1000, 2);
+  assert.equal(Buffer.from(history.bytes).toString(), "line 4\nline 5\n", "history keeps to a number of lines");
+  assert.ok(history.before);
+  const forward = await log.page({ after: history.before }, { maxBytes: 1000 });
+  assert.deepEqual([Buffer.from(forward?.bytes ?? []).toString(), forward?.after], ["line 4\nline 5\n", null]);
+  log.release();
+});
+
+test("a page read takes the log as it was when asked, whatever is written while it reads", async () => {
+  const root = tempDir();
+  const registry = new SessionLogRegistry();
+  const world = { ...newWorld("w1"), name: "Moo" };
+  const log = new WindowLog(registry, root);
+  log.open(world, null, 1000);
+  for (let i = 0; i < 3000; i++) log.append(`line ${i} of a long enough log\n`, i);
+  const reading = log.page({ before: null }, { maxBytes: 10_000_000 });
+  log.append("written while reading\n", 9999);
+  const page = await reading;
+  assert.ok(page);
+  const text = Buffer.from(page.bytes).toString();
+  assert.ok(text.endsWith("line 2999 of a long enough log\n"), "the line written while reading is not in it");
+  assert.equal(page.times.length, 3000);
+  log.release();
+});
+
+test("the registry says when logs were rewritten", () => {
+  const registry = new SessionLogRegistry();
+  let told = 0;
+  registry.onRewritten(() => told++);
+  registry.rewritten();
+  assert.equal(told, 1);
 });
 
 test("a window knows the unfinished line it is waiting to write", () => {

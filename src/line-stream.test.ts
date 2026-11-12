@@ -390,3 +390,37 @@ test("a server's clear in older history is not acted on", () => {
   s.prepend([Buffer.from('old\r\n<xch_page clear="text">after\r\n')], [3, 4]);
   assert.equal(s.lines.length, before + 2);
 });
+
+test("newer history goes after the lines held, read on its own", () => {
+  const s = new LineStream();
+  s.write("one\r\n", 1);
+  s.write("\x1b[31mred\r\n", 2);
+  const made = s.append([Buffer.from("plain\r\nnext\r\n")], [3, 4]);
+  assert.deepEqual(
+    made.map((l) => l.text),
+    ["plain", "next"],
+  );
+  assert.deepEqual(view(s), [
+    ["one", 1],
+    ["red", 2],
+    ["plain", 3],
+    ["next", 4],
+  ]);
+  assert.notEqual(s.lines[1].runs?.[0].style.key, s.lines[2].runs?.[0].style.key, "the red doesn't carry over");
+});
+
+test("after the newest lines are dropped, catching up goes on into live output", () => {
+  const s = new LineStream();
+  s.write("kept\r\n", 1);
+  s.write("\x1b[31mhalf a line in red", 2);
+  s.dropBack(1);
+  assert.deepEqual(view(s), [["kept", 1]]);
+  s.catchUp([Buffer.from("caught up\r\nprompt> ")], [3]);
+  s.write("typed\r\n", 4);
+  assert.deepEqual(view(s), [
+    ["kept", 1],
+    ["caught up", 3],
+    ["prompt> typed", 4],
+  ]);
+  assert.equal(s.lines[1].runs?.length, 1, "the red was dropped with its line");
+});

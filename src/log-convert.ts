@@ -66,18 +66,23 @@ export async function convertAllLogs(
   if (registry.anyOpen()) throw new Error("Disconnect every window first: a log is being written");
   const files = findLogs(root);
   const summary: ConvertSummary = { converted: 0, unchanged: 0, failed: [] };
-  for (const [index, file] of files.entries()) {
-    removeStrayTemporaries(file);
-    try {
-      if (convertLog(file, target, sourceKey)) summary.converted++;
-      else summary.unchanged++;
-    } catch (error) {
-      summary.failed.push({ file, error: (error as Error).message });
+  try {
+    for (const [index, file] of files.entries()) {
+      removeStrayTemporaries(file);
+      try {
+        if (convertLog(file, target, sourceKey)) summary.converted++;
+        else summary.unchanged++;
+      } catch (error) {
+        summary.failed.push({ file, error: (error as Error).message });
+      }
+      onProgress(index + 1, files.length);
+      await new Promise((resolve) => setImmediate(resolve));
+      // A window may have connected while this yielded.
+      if (registry.anyOpen()) throw new Error("A window connected while the logs were being converted");
     }
-    onProgress(index + 1, files.length);
-    await new Promise((resolve) => setImmediate(resolve));
-    // A window may have connected while this yielded.
-    if (registry.anyOpen()) throw new Error("A window connected while the logs were being converted");
+  } finally {
+    // Cursors into a converted log no longer fit it.
+    if (summary.converted > 0) registry.rewritten();
   }
   return summary;
 }

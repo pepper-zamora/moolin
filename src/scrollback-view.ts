@@ -16,8 +16,9 @@ const EAGER_FLUSH_LINES = 2000;
 // trimmed every so many lines rather than on every one.
 const TRIM_SLACK_FRACTION = 0.1;
 
-// Within this many screens of the top, the view wants older history.
-const NEAR_TOP_SCREENS = 1;
+// Within this many screens of the top (or of the bottom, while the newest lines
+// are let go of), the view wants more history.
+const NEAR_EDGE_SCREENS = 1;
 
 // A clickable Pueblo link as the view reports it.
 export interface LinkTarget {
@@ -74,8 +75,9 @@ export class ScrollbackView {
   private cellWidthPx = 0;
   private size: number;
   private hovered: string | null = null;
-  // How many of the oldest lines are older history added in front (see prepend).
-  private pagedLines = 0;
+  // Whether the oldest lines past the cap are dropped (not while history paged
+  // in is held; see HistoryWindow).
+  private trimming = true;
   // Whether lines have been trimmed since the view was last reset.
   private trimmed = false;
 
@@ -213,7 +215,7 @@ export class ScrollbackView {
   // Starts over: no lines, and no half-received escape sequence or style.
   reset(): void {
     this.stream.reset();
-    this.pagedLines = 0;
+    this.trimming = true;
     this.trimmed = false;
     this.linesEl.replaceChildren();
     this.held.clear();
@@ -310,22 +312,19 @@ export class ScrollbackView {
     return nodes;
   }
 
-  // Drops the oldest lines past the cap. Not while older history is held: those
-  // are the lines being read, and the cap comes back when the view is next at
-  // the bottom (see releasePaged).
+  // Drops the oldest lines past the cap, unless told not to (see setTrimming).
   private trim(): void {
     const { maxLines } = this.options;
     const count = this.stream.lines.length;
-    if (this.pagedLines > 0 || count <= maxLines + Math.ceil(maxLines * TRIM_SLACK_FRACTION)) return;
+    if (!this.trimming || count <= maxLines + Math.ceil(maxLines * TRIM_SLACK_FRACTION)) return;
     this.trimmed = true;
-    this.removeFront(count - maxLines);
+    this.removeElements(this.stream.dropFront(count - maxLines));
   }
 
-  // Drops the oldest `count` lines, and their elements.
-  private removeFront(count: number): void {
-    // Only the lines already drawn have anything to remove; they are the
-    // oldest, so they are a run at the front.
-    const drawn = this.stream.dropFront(count).filter((line) => line.el);
+  // Removes the elements of a run of lines that were dropped.
+  private removeElements(lines: ReadonlyArray<Line>): void {
+    // Only the lines already drawn have anything to remove; they are a run.
+    const drawn = lines.filter((line) => line.el);
     if (drawn.length === 0) return;
     const first = drawn[0].el as HTMLElement;
     const last = drawn[drawn.length - 1].el as HTMLElement;
@@ -343,9 +342,57 @@ export class ScrollbackView {
     return this.trimmed;
   }
 
+  get lineCount(): number {
+    return this.stream.lines.length;
+  }
+
+  // Whether the oldest lines past the cap are dropped as more are added. Off
+  // while history paged in is held: HistoryWindow keeps to a cap of its own.
+  setTrimming(trimming: boolean): void {
+    this.trimming = trimming;
+  }
+
   // Whether the view is within a screen of the top.
   nearTop(): boolean {
-    return this.el.scrollTop < this.el.clientHeight * NEAR_TOP_SCREENS;
+    return this.el.scrollTop < this.el.clientHeight * NEAR_EDGE_SCREENS;
+  }
+
+  // Whether the view is within a screen of the bottom.
+  nearBottom(): boolean {
+    return this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight < this.el.clientHeight * NEAR_EDGE_SCREENS;
+  }
+
+  // Whether the view is at the bottom, with more than a screen above it (when
+  // the content is hardly longer than the view, the bottom is also the top).
+  settledAtBottom(): boolean {
+    return this.stuck && this.el.scrollHeight >= this.el.clientHeight * 2;
+  }
+
+  scrollToBottom(): void {
+    this.scrollToBottomNow();
+  }
+
+  // The lines from a screen above the view to a screen below it, as the indexes
+  // of the first and last.
+  linesNearView(): { first: number; last: number } {
+    const all = this.allLines();
+    const height = this.el.clientHeight;
+    // The first line whose bottom edge is below `y`.
+    const lineAt = (y: number): number => {
+      let lo = 0;
+      let hi = all.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        const el = all[mid].el as HTMLElement;
+        if (el.offsetTop + el.offsetHeight <= y) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    return {
+      first: lineAt(this.el.scrollTop - height),
+      last: Math.min(all.length - 1, lineAt(this.el.scrollTop + 2 * height)),
+    };
   }
 
   // The distance from the bottom of the content to the top of the view.
@@ -365,6 +412,74 @@ export class ScrollbackView {
     this.flush();
     const lines = this.stream.prepend(chunks, times);
     if (lines.length === 0) return 0;
+    this.keepingBottom(() => this.linesEl.prepend(this.drawn(lines)));
+    this.emitChange();
+    return lines.length;
+  }
+
+  // The lines `chunks` of history make, read as prepend reads them, without
+  // adding them (see LineStream.read).
+  readHistory(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): Line[] {
+    return this.stream.read(chunks, times);
+  }
+
+  // Replaces every line with a page of history (see LineStream.replaceWith), at
+  // the top of the view. Returns how many lines it holds.
+  showHistory(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): number {
+    this.flush();
+    const lines = this.stream.replaceWith(chunks, times);
+    this.linesEl.replaceChildren(this.drawn(lines));
+    this.held.clear();
+    this.trimmed = false;
+    this.el.scrollTop = 0;
+    this.stuck = this.atBottom();
+    this.emitChange();
+    return lines.length;
+  }
+
+  // Whether the view is at the bottom of what it holds.
+  isAtBottom(): boolean {
+    return this.atBottom();
+  }
+
+  // Adds newer history below the lines held (see LineStream.append), without
+  // moving what is on screen. Returns how many lines were added.
+  append(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): number {
+    this.flush();
+    const lines = this.stream.append(chunks, times);
+    if (lines.length === 0) return 0;
+    this.keepingTop(() => this.linesEl.append(this.drawn(lines)));
+    this.emitChange();
+    return lines.length;
+  }
+
+  // Adds the history that leads up to live output below the lines held (see
+  // LineStream.catchUp), without moving what is on screen.
+  catchUp(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): void {
+    this.flush();
+    this.stream.catchUp(chunks, times);
+    this.stuck = false;
+    this.keepingTop(() => this.flush());
+  }
+
+  // Drops the oldest `count` lines, without moving what is on screen.
+  dropFront(count: number): void {
+    this.flush();
+    this.keepingBottom(() => this.removeElements(this.stream.dropFront(count)));
+    this.emitChange();
+  }
+
+  // Drops the newest `count` lines, without moving what is on screen. What is
+  // written next starts a line of its own, in the default style.
+  dropBack(count: number): void {
+    this.flush();
+    this.keepingTop(() => this.removeElements(this.stream.dropBack(count)));
+    this.emitChange();
+  }
+
+  // Draws lines made apart from the stream's own (see prepend), all at once,
+  // into a fragment.
+  private drawn(lines: ReadonlyArray<Line>): DocumentFragment {
     const fresh = document.createDocumentFragment();
     for (const line of lines) {
       line.el = document.createElement("div");
@@ -373,29 +488,28 @@ export class ScrollbackView {
       line.runs = null;
       fresh.append(line.el);
     }
-    // The browser keeps the view where it was when content is added above it,
-    // except at the very top; do it the same way every time instead.
-    const distance = this.distanceFromBottom();
-    this.el.style.overflowAnchor = "none";
-    this.linesEl.prepend(fresh);
-    this.scrollToDistanceFromBottom(distance);
-    this.el.style.overflowAnchor = "";
-    this.pagedLines += lines.length;
-    this.emitChange();
-    return lines.length;
+    return fresh;
   }
 
-  // Once the view is back at the bottom, lets go of the older history added in
-  // front, so the cap on lines applies again. Returns whether it did.
-  releasePaged(): boolean {
-    // Not when the content is hardly longer than the view: the bottom is the top.
-    if (this.pagedLines === 0 || !this.stuck || this.el.scrollHeight < this.el.clientHeight * 2) return false;
-    this.flush();
-    this.removeFront(this.pagedLines);
-    this.pagedLines = 0;
-    this.scrollToBottomNow();
-    this.emitChange();
-    return true;
+  // Changes the content above the view without moving what is on screen. The
+  // browser does that itself, except at the very top; it is done the same way
+  // every time instead.
+  private keepingBottom(change: () => void): void {
+    const distance = this.distanceFromBottom();
+    this.el.style.overflowAnchor = "none";
+    change();
+    this.scrollToDistanceFromBottom(distance);
+    this.el.style.overflowAnchor = "";
+  }
+
+  // Changes the content below the view without moving what is on screen.
+  private keepingTop(change: () => void): void {
+    const top = this.el.scrollTop;
+    this.el.style.overflowAnchor = "none";
+    change();
+    this.el.scrollTop = top;
+    this.stuck = this.atBottom();
+    this.el.style.overflowAnchor = "";
   }
 
   // --- Scrolling ---------------------------------------------------------

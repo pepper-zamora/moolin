@@ -30,7 +30,7 @@ import { checkForUpdate } from "./update-check";
 import { fontFamilyFor } from "./fonts";
 import { normalizePhrase, type KeySource } from "./crypto-keys";
 import { readKeyFile, unlockWithKeyFile } from "./key-file";
-import { NO_HISTORY, type HistoryPage } from "./history-paging";
+import { STALE_PAGE, type HistoryPage } from "./history-paging";
 import { Security, type Outcome, type SecurityPageState } from "./security";
 import {
   parseSecurityDecline,
@@ -121,6 +121,11 @@ const logRegistry = new SessionLogRegistry(
 );
 // Whether passwords and logs are encrypted, and the key while unlocked (see security.ts).
 const security = new Security(worldsPath, LOG_ROOT, logRegistry);
+// A window paging through a log that was just converted holds places in it that
+// no longer fit; it starts over from a fresh replay.
+logRegistry.onRewritten(() => {
+  for (const terminal of windowManager.all()) terminal.send(IpcChannels.terminalHistoryRewritten);
+});
 // Whether to offer setting up encryption: once a run, to the first window to ask.
 let offerPending = prefs.encryptionPrompt === "ask" && security.state() === "off";
 
@@ -668,11 +673,11 @@ ipcMain.handle(
     },
 );
 
-ipcMain.handle(IpcChannels.terminalGetHistoryPage, (event, rawRequest: unknown): HistoryPage => {
+ipcMain.handle(IpcChannels.terminalGetHistoryPage, (event, rawRequest: unknown): Promise<HistoryPage> | HistoryPage => {
   const terminal = terminalFor(event);
   const request = parseHistoryRequest(rawRequest);
   if (terminal && !request) ignoreBad(IpcChannels.terminalGetHistoryPage, rawRequest);
-  return terminal && request ? terminal.getHistoryPage(request) : NO_HISTORY;
+  return terminal && request ? terminal.getHistoryPage(request) : STALE_PAGE;
 });
 
 // A freshly opened (non-cascaded) window's one-shot report of how big its

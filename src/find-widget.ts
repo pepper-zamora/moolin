@@ -1,4 +1,6 @@
+import type { HistoryPage, LogCursor } from "./history-paging";
 import type { Line } from "./line-builder";
+import type { LogHit, LogSearch } from "./log-search";
 import type { ScrollbackView } from "./scrollback-view";
 import {
   chooseActive,
@@ -20,6 +22,18 @@ const REFRESH_DELAY_MS = 150;
 // are in styles.css, under ::highlight()).
 const RULER_MATCH = "#d18616";
 const RULER_ACTIVE = "#a0a0a0";
+
+// What the widget needs to search the history beyond the lines the view holds
+// (HistoryWindow).
+export interface SearchableHistory {
+  readonly searchable: boolean;
+  readonly holdsAll: boolean;
+  readonly showsLive: boolean;
+  olderCursor(): Promise<LogCursor | null>;
+  newerCursor(): LogCursor | null;
+  show(page: HistoryPage): Promise<void>;
+  toNewest(): Promise<void>;
+}
 
 function element<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -72,8 +86,10 @@ class SearchRuler {
 
 // The find box floating at the top right of the scrollback, modelled on VS
 // Code's editor find widget (minus replace, since the scrollback is
-// read-only). Matches are highlighted throughout the buffer and marked on a
-// ruler beside the scrollbar, and stay current as new output arrives.
+// read-only). Matches are highlighted throughout the lines held and marked on a
+// ruler beside the scrollbar, and stay current as new output arrives. Next and
+// Previous go on past the first and last of them into the rest of the log,
+// and wrap around only at its ends.
 export class FindWidget {
   readonly root = element<HTMLDivElement>("find-widget");
   private readonly input = element<HTMLInputElement>("find-input");
@@ -87,9 +103,15 @@ export class FindWidget {
   private matches: Array<Match<Line>> = [];
   private active: Match<Line> | null = null;
   private refreshScheduled = false;
+  // Counts searches, so a search of the log that another has replaced stops.
+  private searches = 0;
+  // A search of the log is under way, which the count says meanwhile.
+  private searchingLog = false;
 
   constructor(
     private readonly view: ScrollbackView,
+    private readonly history: SearchableHistory,
+    private readonly logSearch: LogSearch,
     // Called after the widget closes, to hand focus back.
     private readonly onClose: () => void,
   ) {
@@ -147,6 +169,7 @@ export class FindWidget {
     if (!this.isOpen()) return;
     this.root.hidden = true;
     this.ruler.hidden = true;
+    this.searches++;
     this.clearResults();
     this.onClose();
   }
@@ -200,6 +223,12 @@ export class FindWidget {
   // on the current match while it still matches (as VS Code does on typing);
   // "refresh" does the same after new output, without moving the view.
   private find(mode: FindMode): void {
+    // A refresh for new output leaves a search of the log going; anything else
+    // replaces it.
+    if (mode !== "refresh") {
+      this.searches++;
+      this.searchingLog = false;
+    }
     this.root.classList.remove("invalid");
     if (this.input.value === "") {
       this.clearResults();
@@ -220,13 +249,114 @@ export class FindWidget {
     const { matches, truncated } = result;
     const previous = this.active;
     const kept = previous ? matches.findIndex((m) => m.line === previous.line && m.start === previous.start) : -1;
-    const index = chooseActive(mode, matches.length, kept, () => this.firstInView(matches));
-    this.matches = matches;
-    this.active = index >= 0 ? matches[index] : null;
+    // Past the oldest or newest match held, go on into the rest of the log.
+    const past =
+      (mode === "previous" && (matches.length === 0 || kept === 0)) ||
+      (mode === "next" && (matches.length === 0 || kept === matches.length - 1));
+    if (past && mode === "previous" && truncated && kept === 0) {
+      // Lines held above the oldest match counted are searched before the log.
+      const above = this.view.allLines().indexOf(matches[0].line);
+      const older = findMatches(this.view.allLines().slice(0, above), this.query(), MATCH_LIMIT);
+      if (older.matches.length > 0) {
+        this.show(older, older.matches.length - 1, true);
+        return;
+      }
+    }
+    if (past && !this.history.holdsAll) {
+      this.show(result, kept, false);
+      void this.searchLog(mode === "previous" ? "older" : "newer");
+      return;
+    }
+    this.show(
+      result,
+      chooseActive(mode, matches.length, kept, () => this.firstInView(matches)),
+      mode !== "refresh",
+    );
+  }
+
+  // Makes `index` of `result`'s matches the current one (none if -1).
+  private show(result: SearchResult<Line>, index: number, reveal: boolean): void {
+    this.matches = result.matches;
+    this.active = index >= 0 ? result.matches[index] : null;
     this.highlight();
-    if (this.active && mode !== "refresh") this.view.revealLine(this.active.line);
-    this.ruler.draw(matches, this.active);
-    this.showCount(index, matches.length, truncated);
+    if (this.active && reveal) this.view.revealLine(this.active.line);
+    this.ruler.draw(result.matches, this.active);
+    if (!this.searchingLog) this.showCount(index, result.matches.length, result.truncated);
+  }
+
+  // Looks through the log beyond the lines held for the nearest match older or
+  // newer than them, and shows its page. Found nothing that way, it wraps
+  // around: Previous to the newest match, Next to the oldest.
+  private async searchLog(direction: "older" | "newer"): Promise<void> {
+    const mine = this.searches;
+    const wanted = (): boolean => this.searches === mine && this.isOpen();
+    const query = this.query();
+    this.count.textContent = "Searching…";
+    this.root.classList.remove("no-results");
+    this.searchingLog = true;
+    // Whatever the search shows last, the count says what it found.
+    const done = (): boolean => {
+      if (!wanted()) return false;
+      this.searchingLog = false;
+      return true;
+    };
+    try {
+      let hit: LogHit | null = null;
+      if (direction === "older") {
+        const before = await this.history.olderCursor();
+        if (before && wanted()) hit = await this.logSearch.older(before, query, wanted);
+        if (!hit && wanted()) {
+          // Around to the newest match: among the newest lines, else before them.
+          await this.history.toNewest();
+          if (!wanted()) return;
+          const newest = findMatches(this.view.allLines(), query, MATCH_LIMIT);
+          if (newest.matches.length > 0 && done()) {
+            this.show(newest, newest.matches.length - 1, true);
+            return;
+          }
+          const from = await this.history.olderCursor();
+          if (from && wanted()) hit = await this.logSearch.older(from, query, wanted);
+        }
+      } else {
+        const after = this.history.newerCursor();
+        if (after) hit = await this.logSearch.newer(after, query, wanted);
+        // Around to the oldest match, from the start of the log.
+        if (!hit && wanted()) hit = await this.logSearch.newer(null, query, wanted);
+      }
+      if (!hit) {
+        if (done()) this.show({ matches: [], truncated: false }, -1, false);
+        return;
+      }
+      await this.history.show(hit.page);
+      if (done()) this.showHit(hit, query);
+    } catch (error) {
+      if (!done()) return;
+      this.root.classList.add("invalid");
+      this.count.textContent = "Search failed";
+      window.moolin.log("warn", "renderer", "searching the log failed:", String(error));
+    }
+  }
+
+  // Once a match's page is shown, makes that match the current one.
+  private showHit(hit: LogHit, query: SearchQuery): void {
+    const all = this.view.allLines();
+    // A page that reaches the end of the log is shown as the replay, which ends
+    // as it does.
+    const at = hit.page.after === null ? all.length - (hit.lines - hit.line) : hit.line;
+    const result = findMatches(all, query, MATCH_LIMIT);
+    let index = result.matches.findIndex((m) => m.line === all[at] && m.start === hit.start);
+    if (index < 0) {
+      // Not where it was expected: the nearest match to that line instead.
+      let best = Number.POSITIVE_INFINITY;
+      result.matches.forEach((m, i) => {
+        const distance = Math.abs(all.indexOf(m.line) - at);
+        if (distance < best) {
+          best = distance;
+          index = i;
+        }
+      });
+    }
+    this.show(result, index, true);
   }
 
   // The first match at or below the top of the view, else the newest.
@@ -246,10 +376,13 @@ export class FindWidget {
     setHighlight("find-active", active ? [active] : []);
   }
 
+  // The count is of the matches in the lines held; while the log holds more
+  // history than that, it says so (Next and Previous search the rest).
   private showCount(index: number, total: number, truncated: boolean): void {
-    const limited = truncated ? `${MATCH_LIMIT}+` : String(total);
-    this.root.classList.toggle("no-results", total === 0 && this.input.value !== "");
-    if (total === 0) this.count.textContent = "No results";
+    const partial = !this.history.holdsAll;
+    const limited = `${truncated ? `${MATCH_LIMIT}+` : String(total)}${partial ? " loaded" : ""}`;
+    this.root.classList.toggle("no-results", total === 0 && this.input.value !== "" && !partial);
+    if (total === 0) this.count.textContent = partial ? "None loaded" : "No results";
     else if (index < 0) this.count.textContent = `? of ${limited}`;
     else this.count.textContent = `${index + 1} of ${limited}`;
   }

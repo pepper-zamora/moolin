@@ -14,11 +14,17 @@ renames that section to the new version and date.
 
 - **Endless scroll.** Scrolling to the top of the window pages older history in
   from the character's log, 5,000 lines at a time, instead of stopping at the
-  newest 20,000. The older lines are dropped again when you scroll back to
-  the bottom, and a reload or a reconnect starts from the newest 20,000 as
-  before. Only the log can be paged: a window with no log has what it had.
-  Known limit: reloading a window just as another window on the same character
-  logs a line this one has not been sent yet shows that line twice.
+  newest 20,000. The window holds at most 30,000 lines, letting go of those
+  furthest from where you are reading and paging them in again as you scroll
+  back. Far enough back, new output isn't shown until you scroll down to it;
+  End (or clearing the screen) goes to the newest line in one press, and sending
+  a command leaves you where you are. Find's next and previous search the whole
+  log, not just the lines loaded. Back at the bottom the window keeps its
+  usual 20,000 lines, and a reload or a reconnect starts from the newest 20,000
+  as before. Only the log can be paged: a window with no log has what it had.
+  Older pages start in the default colour. Known limit: reloading a window just
+  as another window on the same character logs a line this one has not been
+  sent yet shows that line twice.
 - A "Clear the screen when a Pueblo server asks" setting (Global, with World
   and Character able to override it). A Pueblo server's
   `<xch_page clear=text>` is now ignored by default, since some servers send

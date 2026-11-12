@@ -22,16 +22,21 @@ export function parseSize(value: unknown): { cols: number; rows: number } | null
   return ok(cols) && ok(rows) ? { cols, rows } : null;
 }
 
-// A request for the page of history before a log cursor (see history-paging.ts).
-// The cursor's numbers only need to be whole and in the range of a file offset;
-// one that doesn't fit the log gets an empty page.
+// A request for the page of history before or after a log cursor (see
+// history-paging.ts). The cursor's numbers only need to be whole and in the
+// range of a file offset; one that doesn't fit the log gets a stale page.
 export function parseHistoryRequest(value: unknown): HistoryRequest | null {
   if (typeof value !== "object" || value === null) return null;
-  const before = (value as { before?: unknown }).before;
-  if (typeof before !== "object" || before === null) return null;
-  const { offset, skip } = before as { offset?: unknown; skip?: unknown };
+  const { before, after } = value as { before?: unknown; after?: unknown };
+  if ((before === undefined) === (after === undefined)) return null;
+  // A page after nothing is the first page of the log.
+  if (after === null) return { after: null };
+  const cursor = before ?? after;
+  if (typeof cursor !== "object" || cursor === null) return null;
+  const { offset, skip } = cursor as { offset?: unknown; skip?: unknown };
   const ok = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
-  return ok(offset) && ok(skip) ? { before: { offset, skip } } : null;
+  if (!ok(offset) || !ok(skip)) return null;
+  return before !== undefined ? { before: { offset, skip } } : { after: { offset, skip } };
 }
 
 // A web address to open in the browser: http or https only, so a server can't

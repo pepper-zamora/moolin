@@ -41,6 +41,9 @@ contextBridge.exposeInMainWorld("moolin", {
   getScrollback: (): Promise<ScrollbackReplay> => ipcRenderer.invoke(IpcChannels.terminalGetScrollback),
   getHistoryPage: (request: HistoryRequest): Promise<HistoryPage> =>
     ipcRenderer.invoke(IpcChannels.terminalGetHistoryPage, request),
+  onHistoryRewritten: (callback: () => void): void => {
+    ipcRenderer.on(IpcChannels.terminalHistoryRewritten, () => callback());
+  },
   onTerminalReset: (callback: (replay: ScrollbackReplay) => void): void => {
     ipcRenderer.on(IpcChannels.terminalReset, (_event, replay: ScrollbackReplay) => callback(replay));
   },

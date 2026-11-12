@@ -17,6 +17,9 @@ export const IpcChannels = {
   telnetData: "telnet:data",
   terminalGetScrollback: "terminal:getScrollback",
   terminalGetHistoryPage: "terminal:getHistoryPage",
+  // main -> renderer: the logs were rewritten (encryption turned on or off), so
+  // the window's places in its log no longer fit; it fetches its replay again.
+  terminalHistoryRewritten: "terminal:historyRewritten",
   // main -> renderer: the scrollback was replaced; clear and write these chunks.
   terminalReset: "terminal:reset",
   // main -> renderer: the server's Pueblo greeting no longer counts, with the

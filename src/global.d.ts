@@ -24,6 +24,7 @@ declare global {
       sendResize(cols: number, rows: number): void;
       getScrollback(): Promise<ScrollbackReplay>;
       getHistoryPage(request: HistoryRequest): Promise<HistoryPage>;
+      onHistoryRewritten(callback: () => void): void;
       onTerminalReset(callback: (replay: ScrollbackReplay) => void): void;
       onGreetingClosed(callback: (seq: number) => void): void;
       getConnectionState(): Promise<WindowState>;

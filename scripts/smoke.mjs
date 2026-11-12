@@ -614,6 +614,101 @@ try {
     expectEqual((await main.lineTexts())[0], `paging line ${total - 20000}`, "oldest line after letting go");
   });
 
+  // Paging back more than a couple of pages lets go of the newest lines, and
+  // live output with them, so the window stays a bounded size; scrolling down
+  // pages forward again until live output is back, with nothing lost or repeated.
+  await check("far back, live output is let go of, and scrolling down pages forward to it again", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    const total = 30000;
+    let burst = "";
+    for (let i = 0; i < total; i++) burst += `far line ${i}\r\n`;
+    latestSocket.write(burst);
+    const newest = `far line ${total - 1}`;
+    await waitFor("the flood to be shown", async () => (await main.lineTexts()).at(-1) === newest, 30000);
+    const scroll = (top) =>
+      main.evaluate(`(() => { const t = document.getElementById("terminal"); t.scrollTop = ${top ? 0 : "t.scrollHeight"}; })()`);
+    // The flood's lines held are consecutive, and so is whatever follows them.
+    const expectRun = (lines) => {
+      const numbers = lines.filter((line) => line.startsWith("far line ")).map((line) => Number(line.slice(9)));
+      if (numbers.length === 0) throw new Error("none of the flood is held");
+      numbers.forEach((n, i) => {
+        if (i > 0 && n !== numbers[i - 1] + 1) throw new Error(`far line ${numbers[i - 1]} is followed by ${n}`);
+      });
+      return numbers;
+    };
+    for (let i = 0; i < 10 && (await main.lineTexts()).at(-1) === newest; i++) {
+      const count = await main.lineCount();
+      await scroll(true);
+      await waitFor("a page to be added", async () => (await main.lineCount()) !== count, 15000);
+    }
+    let lines = await main.lineTexts();
+    if (lines.at(-1) === newest) throw new Error("paging back never let go of the newest lines");
+    if (lines.length > 35000) throw new Error(`${lines.length} lines held`);
+    expectRun(lines);
+    latestSocket.write("said while far back\r\n");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    if ((await main.lineTexts()).includes("said while far back")) throw new Error("live output was shown while far back");
+    for (let i = 0; i < 15 && (await main.lineTexts()).at(-1) !== "said while far back"; i++) {
+      const last = (await main.lineTexts()).at(-1);
+      await scroll(false);
+      await waitFor("a page to be added", async () => (await main.lineTexts()).at(-1) !== last, 15000);
+      if ((await main.lineCount()) > 35000) throw new Error(`${await main.lineCount()} lines held`);
+    }
+    lines = await main.lineTexts();
+    expectEqual(lines.at(-1), "said while far back", "newest line once paged forward");
+    expectEqual(expectRun(lines).at(-1), total - 1, "the flood's last line just before it");
+    await scroll(false);
+    await waitFor("the window to go back to its usual size", async () => (await main.lineCount()) <= 25000, 15000);
+    lines = await main.lineTexts();
+    if (lines.length < 20000) throw new Error(`only ${lines.length} lines kept`);
+    expectEqual(lines.at(-1), "said while far back", "newest line at the bottom");
+    expectRun(lines);
+  });
+
+  // Find goes on past the lines held into the rest of the log; a command sent
+  // from far back leaves the view where it is; End goes to the newest line.
+  await check("Find searches the whole log, a command sent far back leaves the view, and End goes to the newest line", async () => {
+    const target = "paging line 12345";
+    if ((await main.lineTexts()).includes(target)) throw new Error(`${target} is already held`);
+    const count = () => main.evaluate(`document.getElementById("find-count").textContent`);
+    const visible = (text) =>
+      main.evaluate(`(() => {
+        const box = document.getElementById("terminal").getBoundingClientRect();
+        const line = Array.from(document.querySelectorAll("#terminal .line")).find((l) => l.textContent === ${JSON.stringify(text)});
+        if (!line) return false;
+        const r = line.getBoundingClientRect();
+        return r.top >= box.top && r.bottom <= box.bottom;
+      })()`);
+    await main.evaluate(`document.getElementById("input-area").focus()`);
+    await main.key("f", "KeyF", 70, 2 /* Ctrl */);
+    await main.evaluate(`(() => {
+      const input = document.getElementById("find-input");
+      input.value = ${JSON.stringify(target)};
+      input.dispatchEvent(new Event("input"));
+    })()`);
+    await waitFor("no match among the lines held", async () => (await count()) === "None loaded", 3000);
+    await main.key("Enter", "Enter", 13, 8 /* Shift */);
+    await waitFor("the match to be found in the log", async () => (await count()) === "1 of 1 loaded", 20000).catch(
+      async (error) => {
+        throw new Error(`${error.message} (the count says ${JSON.stringify(await count())})`);
+      },
+    );
+    if (!(await visible(target))) throw new Error("the match is not on screen");
+    await main.key("Escape", "Escape", 27);
+    await typingReachesServer(main, "look");
+    await sleep(300);
+    if (!(await visible(target))) throw new Error("sending a command moved the view");
+    await main.key("End", "End", 35);
+    await waitFor(
+      "the newest line on screen",
+      async () => {
+        const lines = await main.lineTexts();
+        return lines.includes("said while far back") && (await visible(lines.at(-1)));
+      },
+      15000,
+    );
+  });
+
   // Launching again opens a second window in the running instance; it starts
   // disconnected, and (usually) takes focus from the first.
   console.log("smoke: a second, disconnected window");

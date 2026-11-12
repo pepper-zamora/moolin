@@ -3,8 +3,8 @@ import * as path from "node:path";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./file-modes";
 import { countLineFeeds } from "./line-feeds";
 import { LineDeduper } from "./line-dedupe";
-import { PLAIN, convertLog, encodeRecord, prepareForAppend, readLogHistory, readLogPage } from "./log-format";
-import type { LogCursor, LogHistory, LogMode, LogPage, PageLimits } from "./log-format";
+import { PLAIN, convertLog, encodeRecord, prepareForAppend, readLogPage, readLogPageSoon } from "./log-format";
+import type { LogMode, LogPage, PageFrom, PageLimits } from "./log-format";
 import type { Character, World } from "./worlds-types";
 import { characterLabel, worldLabel } from "./world-utils";
 
@@ -126,27 +126,31 @@ export class SessionLog {
     private readonly onError: (error: Error) => void,
   ) {}
 
-  // What the log already holds, plus each line's arrival time, for
+  // The newest `maxBytes` (and at most `maxLines` lines) the log holds, with
+  // each line's arrival time and the cursor for what lies before them, for
   // pre-populating the scrollback. Call before the first append. Empty if the
   // log can't be read, which is reported and stops logging.
-  history(maxBytes: number): LogHistory {
+  history(maxBytes: number, maxLines = Number.POSITIVE_INFINITY): LogPage {
     try {
       this.prepare();
-      return readLogHistory(this.file, this.mode, maxBytes);
+      const page = readLogPage(this.file, this.mode, { before: null }, { maxBytes, maxLines });
+      if (page) return page;
     } catch (error) {
       this.fail(error as Error);
-      return { bytes: new Uint8Array(), times: [] };
     }
+    return { bytes: new Uint8Array(), times: [], before: null, after: null };
   }
 
-  // A page of the log that ends at `before` (the end if null); see readLogPage.
-  page(before: LogCursor | null, limits: PageLimits): LogPage {
+  // A page of the log, read a block at a time (see readLogPageSoon, which this
+  // starts before returning). Null if the cursor doesn't fit the log, or if the
+  // log can't be read, which is reported and stops logging.
+  async page(from: PageFrom, limits: PageLimits): Promise<LogPage | null> {
     try {
       this.prepare();
-      return readLogPage(this.file, this.mode, before, limits);
+      return await readLogPageSoon(this.file, this.mode, from, limits);
     } catch (error) {
       this.fail(error as Error);
-      return { bytes: new Uint8Array(), times: [], before: null };
+      return null;
     }
   }
 
@@ -241,12 +245,12 @@ export class LogAttachment {
     return !this.closed && this.shared.log.isOpen;
   }
 
-  history(maxBytes: number): LogHistory {
-    return this.shared.log.history(maxBytes);
+  history(maxBytes: number, maxLines?: number): LogPage {
+    return this.shared.log.history(maxBytes, maxLines);
   }
 
-  page(before: LogCursor | null, limits: PageLimits): LogPage {
-    return this.shared.log.page(before, limits);
+  page(from: PageFrom, limits: PageLimits): Promise<LogPage | null> {
+    return this.shared.log.page(from, limits);
   }
 
   // The unfinished line this window's output is waiting to write (see
@@ -299,6 +303,7 @@ export class LogAttachment {
 export class SessionLogRegistry {
   private readonly open = new Map<string, SharedLog>();
   private paused = false;
+  private readonly rewrittenListeners: Array<() => void> = [];
 
   // `modeNow` says how logs are written right now: plain, or encrypted with a
   // key, or null while the key is not available (then no log can be opened).
@@ -326,6 +331,16 @@ export class SessionLogRegistry {
     this.paused = false;
   }
 
+  // Logs were rewritten in another mode (see convertAllLogs), so the places in
+  // them that windows paging through their history hold no longer fit.
+  rewritten(): void {
+    for (const listener of this.rewrittenListeners) listener();
+  }
+
+  onRewritten(listener: () => void): void {
+    this.rewrittenListeners.push(listener);
+  }
+
   // The log identified by `key` (see logKeyFor), opened if no window has it
   // open. `locate` finds its file, and is only called when it is opened, since
   // it may rename folders a window already attached would be writing in.
@@ -351,13 +366,14 @@ export class SessionLogRegistry {
   }
 
   // A page of the log in `file` for a window that has let go of it (it
-  // disconnected, but its scrollback can still be paged back). Null if the log
-  // can't be read: locked, or not a log this key opens.
-  readPage(file: string, before: LogCursor | null, limits: PageLimits): LogPage | null {
+  // disconnected, but its scrollback can still be paged through). Null if the
+  // cursor doesn't fit the log, or the log can't be read: locked, or not a log
+  // this key opens.
+  async readPage(file: string, from: PageFrom, limits: PageLimits): Promise<LogPage | null> {
     const mode = this.modeNow();
     if (!mode) return null;
     try {
-      return readLogPage(file, mode, before, limits);
+      return await readLogPageSoon(file, mode, from, limits);
     } catch {
       return null;
     }
@@ -377,13 +393,13 @@ export class WindowLog {
   ) {}
 
   // Lets go of any log held, then attaches to `world`/`character`'s. Returns up
-  // to `maxBytes` of its history to show.
-  open(world: World, character: Character | null, maxBytes: number): LogHistory {
+  // to `maxBytes` (and `maxLines` lines) of its history to show.
+  open(world: World, character: Character | null, maxBytes: number, maxLines?: number): LogPage {
     this.release();
     this.lastFile = null;
     this.log = this.registry.attach(logKeyFor(world, character), () => locateLogFile(this.root, world, character));
     this.lastFile = this.log.file;
-    return this.log.history(maxBytes);
+    return this.log.history(maxBytes, maxLines);
   }
 
   // Whether this window is writing a log.
@@ -400,14 +416,13 @@ export class WindowLog {
     this.log?.append(data, time);
   }
 
-  // A page of the history that ends at `before` (the end if null), from the log
-  // held or, once it was let go of, from its file. Null if the log can't be read.
-  page(before: LogCursor | null, limits: PageLimits): LogPage | null {
-    if (this.log?.isOpen) {
-      const page = this.log.page(before, limits);
-      return this.log.isOpen ? page : null;
-    }
-    return this.lastFile ? this.registry.readPage(this.lastFile, before, limits) : null;
+  // A page of the history, from the log held or, once it was let go of, from
+  // its file. The read starts before this returns (see readLogPageSoon), so it
+  // covers what the log held at the call. Null if the cursor doesn't fit the
+  // log, or the log can't be read.
+  page(from: PageFrom, limits: PageLimits): Promise<LogPage | null> {
+    if (this.log?.isOpen) return this.log.page(from, limits);
+    return this.lastFile ? this.registry.readPage(this.lastFile, from, limits) : Promise.resolve(null);
   }
 
   // The unfinished line this window has output for that the log is yet to write.

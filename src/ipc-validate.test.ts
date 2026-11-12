@@ -139,6 +139,8 @@ test("a security request is a phrase of a sane length, or a key file to be chose
 
 test("parseHistoryRequest takes a cursor of whole, non-negative numbers", () => {
   assert.deepEqual(parseHistoryRequest({ before: { offset: 120, skip: 0 } }), { before: { offset: 120, skip: 0 } });
+  assert.deepEqual(parseHistoryRequest({ after: { offset: 120, skip: 3 } }), { after: { offset: 120, skip: 3 } });
+  assert.deepEqual(parseHistoryRequest({ after: null }), { after: null }, "the start of the log");
   assert.deepEqual(parseHistoryRequest({ before: { offset: 5, skip: 9, extra: "ignored" }, more: 1 }), {
     before: { offset: 5, skip: 9 },
   });
@@ -154,6 +156,9 @@ test("parseHistoryRequest takes a cursor of whole, non-negative numbers", () => 
     { before: { offset: Number.POSITIVE_INFINITY, skip: 0 } },
     { before: { offset: 2 ** 60, skip: 0 } },
     { before: { offset: "1", skip: 0 } },
+    { before: null, after: null },
+    { after: { offset: -1, skip: 0 } },
+    { before: { offset: 1, skip: 0 }, after: { offset: 1, skip: 0 } },
   ]) {
     assert.equal(parseHistoryRequest(bad), null, JSON.stringify(bad));
   }

@@ -54,6 +54,22 @@ export class LiveReplay {
     for (const event of held) this.apply(event);
   }
 
+  // Goes on from history that leads up to live output and covers the live events
+  // up to `seq`: writes it, then whatever held events it doesn't cover. Unless a
+  // reset was held, which replaces everything anyway: then the history isn't
+  // written, the held events are let through, and this returns false.
+  catchUp(seq: number, write: () => void): boolean {
+    const held = this.held ?? [];
+    this.held = null;
+    const reset = held.some((event) => event.kind === "reset");
+    if (!reset) {
+      write();
+      this.replayedThrough = Math.max(this.replayedThrough, seq);
+    }
+    for (const event of held) this.apply(event);
+    return !reset;
+  }
+
   private apply(event: LiveEvent): void {
     if (seqOf(event) <= this.replayedThrough) return;
     this.onEvent(event);

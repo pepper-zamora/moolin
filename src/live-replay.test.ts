@@ -88,3 +88,30 @@ test("held events are let through when the replay could not be fetched", () => {
   live.receive(data("b", 3));
   assert.deepEqual(shown, ["replay:old", "data:a", "data:b"]);
 });
+
+test("catching up writes the history, then only the held events it doesn't cover", () => {
+  const { live, shown } = recorder();
+  live.replay(replay(["old"], 1));
+  live.hold();
+  live.receive(data("a", 2)); // in the history caught up with
+  live.receive(data("b", 3)); // not in it
+  assert.equal(
+    live.catchUp(2, () => shown.push("caught-up")),
+    true,
+  );
+  live.receive(data("c", 4));
+  assert.deepEqual(shown, ["replay:old", "caught-up", "data:b", "data:c"]);
+});
+
+test("a reset held while catching up wins, and the history is not written", () => {
+  const { live, shown } = recorder();
+  live.replay(replay(["old"], 1));
+  live.hold();
+  live.receive({ kind: "reset", replay: replay(["new"], 2) });
+  live.receive(data("after", 3));
+  assert.equal(
+    live.catchUp(3, () => shown.push("caught-up")),
+    false,
+  );
+  assert.deepEqual(shown, ["replay:old", "reset:new", "data:after"]);
+});

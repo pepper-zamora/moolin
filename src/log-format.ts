@@ -266,11 +266,18 @@ function lastSeq(file: string): number {
   return last;
 }
 
-// A piece of the log, with the cursor for what lies before it (null when
-// nothing readable does).
+// A piece of the log: its bytes, the time of each line feed in them, and the
+// cursors where it starts and ends. `before` is null when nothing older exists
+// (it starts at the log's start), and `after` when nothing newer did when it was
+// read (it ends at the log's end).
 export interface LogPage extends LogHistory {
   before: LogCursor | null;
+  after: LogCursor | null;
 }
+
+// Which page to read: the one that ends at `before` (at the end of the log if
+// null), or the one that starts at `after` (at the start of the log if null).
+export type PageFrom = { before: LogCursor | null } | { after: LogCursor | null };
 
 export interface PageLimits {
   // The most bytes to return.
@@ -278,128 +285,290 @@ export interface PageLimits {
   // The most lines (line feeds) to return, if fewer than `maxBytes` allows.
   maxLines?: number;
   // When no line boundary lies within reach, return everything read (which may
-  // begin mid-line) rather than nothing, so a reader paging back always moves on.
+  // begin or end mid-line) rather than nothing, so a reader paging always moves on.
   lenient?: boolean;
 }
 
-const EMPTY_PAGE: LogPage = { bytes: new Uint8Array(), times: [], before: null };
+const EMPTY_PAGE: LogPage = { bytes: new Uint8Array(), times: [], before: null, after: null };
+
+// Records are read this much at a time, and a reader that gives way does so
+// between blocks.
+const PAGE_BLOCK_BYTES = 64 * 1024;
 
 interface Piece {
+  // Where the record's line starts in the file.
   offset: number;
+  seq: number;
+  // How far into the record's bytes `data` starts.
+  start: number;
   data: Buffer;
   times: Array<number | null>;
+}
+
+interface OpenLog {
+  fd: number;
+  size: number;
+  headerEnd: number;
+  header: string;
+  mode: LogMode;
 }
 
 // The most recent `maxBytes` of what the log holds, cut forward to a line
 // boundary if the start had to be dropped (so it never begins mid-line or
 // mid-escape-sequence), with the time of each line feed in it. Empty for a log
-// that is missing or empty. A record that can't be read, or whose number is not
+// that doesn't exist yet. A damaged record, or one whose number is not
 // higher than the one before it, is skipped. Throws if the log is in the other
 // mode, needs another key, or is not a log.
 export function readLogHistory(file: string, mode: LogMode, maxBytes: number): LogHistory {
-  const { bytes, times } = readLogPage(file, mode, null, { maxBytes });
+  const { bytes, times } = readLogPage(file, mode, { before: null }, { maxBytes }) ?? EMPTY_PAGE;
   return { bytes, times };
 }
 
-// A page of the log that ends at `before` (the end of the log if null), at most
-// `limits` long and cut forward to a line boundary like readLogHistory, with the
-// cursor for the page before it.
-export function readLogPage(file: string, mode: LogMode, before: LogCursor | null, limits: PageLimits): LogPage {
+// A page of the log, at most `limits` long. One that ends at a cursor is cut
+// forward to a line boundary like readLogHistory, and one that starts at a
+// cursor is cut back to one, unless it reaches the end of the log. Null if the
+// cursor doesn't fit the log (it has been rewritten since, say). Throws like
+// readLogHistory.
+export function readLogPage(file: string, mode: LogMode, from: PageFrom, limits: PageLimits): LogPage | null {
+  const steps = pageSteps(file, mode, from, limits);
+  let step = steps.next();
+  while (!step.done) step = steps.next();
+  return step.value;
+}
+
+// readLogPage, giving way to other work between blocks of records, since
+// decoding them (decrypting, in an encrypted log) is what takes the time. The
+// log's size is taken before this returns, so the page covers what the log
+// held at the call, whatever is appended while it reads.
+export async function readLogPageSoon(
+  file: string,
+  mode: LogMode,
+  from: PageFrom,
+  limits: PageLimits,
+): Promise<LogPage | null> {
+  const steps = pageSteps(file, mode, from, limits);
+  for (let step = steps.next(); ; step = steps.next()) {
+    if (step.done) return step.value;
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+function* pageSteps(file: string, mode: LogMode, from: PageFrom, limits: PageLimits): Generator<void, LogPage | null> {
+  const cursor = "before" in from ? from.before : from.after;
   const found = inspectLog(file);
-  if (found === "missing" || found === "empty") return EMPTY_PAGE;
+  if (found === "missing" || found === "empty") return cursor ? null : EMPTY_PAGE;
   if (found === "foreign") throw new Error(NOT_A_LOG);
   if (!matchesMode(found, mode)) throw new WrongLogKeyError();
   const header = headerFor(found);
-  const { maxBytes, maxLines = Number.POSITIVE_INFINITY, lenient = false } = limits;
-
   const fd = fs.openSync(file, "r");
   try {
-    const size = fs.fstatSync(fd).size;
-    const headerEnd = header.length + 1;
-    if (before && (before.offset < headerEnd || before.offset > size)) return EMPTY_PAGE;
-    const end = before ? before.offset : size;
-
-    // The record the cursor is inside holds the newest of the page, up to the cursor.
-    let newest: Piece | null = null;
-    if (before && before.skip > 0) {
-      const line = readAt(fd, before.offset, Math.min(size - before.offset, BLOCK_BYTES * 4));
-      const newline = line.indexOf(0x0a);
-      try {
-        if (newline !== -1) {
-          const record = decodeRecord(line.toString("latin1", 0, newline), mode, header);
-          const data = record.data.subarray(0, before.skip);
-          newest = { offset: before.offset, data, times: record.times.slice(0, countLineFeeds(data)) };
-        }
-      } catch {
-        // Skipped, like any record that can't be read.
-      }
-    }
-
-    // A record is a little over a third bigger than its bytes, so a window of
-    // twice as much covers `maxBytes` of them, and is doubled if it did not.
-    for (let window = Math.max(maxBytes * 2, BLOCK_BYTES); ; window *= 2) {
-      let start = Math.max(headerEnd, end - window);
-      let block = readAt(fd, start, end - start);
-      if (start > headerEnd) {
-        const firstNewline = block.indexOf(0x0a);
-        start = firstNewline === -1 ? end : start + firstNewline + 1;
-        block = firstNewline === -1 ? Buffer.alloc(0) : block.subarray(firstNewline + 1);
-      }
-      const lastNewline = block.lastIndexOf(0x0a);
-      block = lastNewline === -1 ? Buffer.alloc(0) : block.subarray(0, lastNewline + 1);
-
-      const pieces: Piece[] = [];
-      let total = 0;
-      let lines = 0;
-      let previous = -1;
-      for (let position = 0; position < block.length; ) {
-        const newline = block.indexOf(0x0a, position);
-        const offset = start + position;
-        const text = block.toString("latin1", position, newline);
-        position = newline + 1;
-        if (text === "") continue;
-        try {
-          const record = decodeRecord(text, mode, header);
-          if (record.seq <= previous) continue;
-          previous = record.seq;
-          pieces.push({ offset, data: record.data, times: record.times });
-          total += record.data.length;
-          lines += record.times.length;
-        } catch {
-          // Skipped; the lines around it are still good.
-        }
-      }
-      if (newest) {
-        pieces.push(newest);
-        total += newest.data.length;
-        lines += newest.times.length;
-      }
-      const atStart = start === headerEnd;
-      if (total >= maxBytes || lines >= maxLines || atStart || window > size)
-        return cutPage(pieces, atStart, { maxBytes, maxLines, lenient });
-    }
+    const log: OpenLog = { fd, size: fs.fstatSync(fd).size, headerEnd: header.length + 1, header, mode };
+    const split = cursor ? splitAt(log, cursor) : null;
+    if (split === undefined) return null;
+    const full = { maxLines: Number.POSITIVE_INFINITY, lenient: false, ...limits };
+    return "before" in from
+      ? yield* pageBefore(log, cursor, split, full)
+      : yield* pageAfter(log, from.after, split, full);
   } finally {
     fs.closeSync(fd);
   }
 }
 
-// The newest `maxBytes` and `maxLines` of `pieces`, from the first line feed on,
-// with the cursor for what was left out. `atStart` says nothing older exists.
-function cutPage(pieces: Piece[], atStart: boolean, limits: Required<PageLimits>): LogPage {
+// The record `cursor` points into, cut in two at it, and where the record after
+// it starts; null when it points at the start of a record (or the end of the
+// log). Undefined if it fits no record: not at the start of a line of the log,
+// or inside a record that can't be read or is shorter than the cursor says.
+function splitAt(log: OpenLog, cursor: LogCursor): { head: Piece; tail: Piece; next: number } | null | undefined {
+  const { offset, skip } = cursor;
+  if (offset < log.headerEnd || offset > log.size) return undefined;
+  if (offset > log.headerEnd && readAt(log.fd, offset - 1, 1)[0] !== 0x0a) return undefined;
+  if (skip === 0) return null;
+  let line = Buffer.alloc(0);
+  for (let at = offset; line.indexOf(0x0a) === -1; at += PAGE_BLOCK_BYTES) {
+    if (at >= log.size) return undefined;
+    line = Buffer.concat([line, readAt(log.fd, at, Math.min(PAGE_BLOCK_BYTES, log.size - at))]);
+  }
+  const newline = line.indexOf(0x0a);
+  try {
+    const record = decodeRecord(line.toString("latin1", 0, newline), log.mode, log.header);
+    if (skip > record.data.length) return undefined;
+    const head = record.data.subarray(0, skip);
+    const headLines = countLineFeeds(head);
+    return {
+      head: { offset, seq: record.seq, start: 0, data: head, times: record.times.slice(0, headLines) },
+      tail: {
+        offset,
+        seq: record.seq,
+        start: skip,
+        data: record.data.subarray(skip),
+        times: record.times.slice(headLines),
+      },
+      next: offset + newline + 1,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+// Where the last complete line of the log ends: the log's size, unless the app
+// died writing its last line.
+function endOfLastLine(log: OpenLog): number {
+  if (log.size <= log.headerEnd || readAt(log.fd, log.size - 1, 1)[0] === 0x0a) return log.size;
+  for (let end = log.size; end > log.headerEnd; ) {
+    const start = Math.max(log.headerEnd, end - PAGE_BLOCK_BYTES);
+    const newline = readAt(log.fd, start, end - start).lastIndexOf(0x0a);
+    if (newline !== -1) return start + newline + 1;
+    end = start;
+  }
+  return log.headerEnd;
+}
+
+// The page that ends at `cursor` (the end of the log if null). Records are read
+// newest first, a block at a time, until there are more than the limits allow,
+// so only what the page needs is decoded.
+function* pageBefore(
+  log: OpenLog,
+  cursor: LogCursor | null,
+  split: { head: Piece } | null,
+  limits: Required<PageLimits>,
+): Generator<void, LogPage> {
+  const newestFirst: Piece[] = [];
+  let total = split ? split.head.data.length : 0;
+  let lines = split ? split.head.times.length : 0;
+  const over = (): boolean => total > limits.maxBytes || lines > limits.maxLines;
+  let blockEnd = cursor ? cursor.offset : endOfLastLine(log);
+  // The start of a line that began in an earlier block than the one read.
+  let carry = Buffer.alloc(0);
+  let unread = 0;
+  while (!over() && blockEnd > log.headerEnd) {
+    const blockStart = Math.max(log.headerEnd, blockEnd - PAGE_BLOCK_BYTES);
+    const block = Buffer.concat([readAt(log.fd, blockStart, blockEnd - blockStart), carry]);
+    blockEnd = blockStart;
+    // Only the lines that start in this block are whole, unless it is the first.
+    const linesStart = blockStart === log.headerEnd ? 0 : block.indexOf(0x0a) + 1;
+    if (linesStart === 0 && blockStart > log.headerEnd) {
+      carry = block;
+      continue;
+    }
+    carry = Buffer.from(block.subarray(0, linesStart));
+    let lineEnd = block.length;
+    while (lineEnd > linesStart && !over()) {
+      // (Buffer.lastIndexOf counts a negative position from the end.)
+      const lineStart = lineEnd < 2 ? 0 : Math.max(linesStart, block.lastIndexOf(0x0a, lineEnd - 2) + 1);
+      const text = block.toString("latin1", lineStart, lineEnd - 1);
+      const offset = blockStart + lineStart;
+      lineEnd = lineStart;
+      if (text === "") continue;
+      try {
+        const record = decodeRecord(text, log.mode, log.header);
+        newestFirst.push({ offset, start: 0, ...record });
+        total += record.data.length;
+        lines += record.times.length;
+      } catch {
+        // Skipped; the lines around it are still good.
+      }
+    }
+    unread = lineEnd - linesStart;
+    yield;
+  }
+  const atStart = blockEnd <= log.headerEnd && unread === 0 && carry.length === 0;
+  // A record whose number isn't higher than the one before it is skipped.
+  const pieces: Piece[] = [];
+  let previous = -1;
+  for (let i = newestFirst.length - 1; i >= 0; i--) {
+    if (newestFirst[i].seq <= previous) continue;
+    previous = newestFirst[i].seq;
+    pieces.push(newestFirst[i]);
+  }
+  if (split) pieces.push(split.head);
+  return cutBefore(pieces, atStart, limits, cursor);
+}
+
+// The newest `maxBytes` and `maxLines` of `pieces`, from a line boundary unless
+// they are all the log holds before `after` (`atStart`), with the cursor for what
+// was left out.
+function cutBefore(pieces: Piece[], atStart: boolean, limits: Required<PageLimits>, after: LogCursor | null): LogPage {
   const bytes = Buffer.concat(pieces.map((piece) => piece.data));
   const times = pieces.flatMap((piece) => piece.times);
   let drop = Math.max(0, bytes.length - limits.maxBytes);
   if (times.length > limits.maxLines) drop = Math.max(drop, endOfLine(bytes, times.length - limits.maxLines));
+  // The oldest piece may begin mid-line, its start in a record not read.
+  if (!atStart) drop = Math.max(drop, 1);
   let cut = 0;
   if (drop > 0) {
     const newline = bytes.indexOf(0x0a, drop - 1);
     if (newline !== -1 && newline + 1 < bytes.length) cut = newline + 1;
-    else if (!limits.lenient) return EMPTY_PAGE;
+    else if (!limits.lenient) return { ...EMPTY_PAGE, after };
   }
   return {
     bytes: new Uint8Array(bytes.subarray(cut)),
     times: times.slice(countLineFeeds(bytes.subarray(0, cut))),
     before: cut === 0 && atStart ? null : cursorAt(pieces, cut),
+    after,
+  };
+}
+
+// The page that starts at `cursor` (the start of the log if null): records read
+// oldest first until there are more than the limits allow, cut back to a line
+// boundary, or everything to the end of the log if that fits.
+function* pageAfter(
+  log: OpenLog,
+  cursor: LogCursor | null,
+  split: { tail: Piece; next: number } | null,
+  limits: Required<PageLimits>,
+): Generator<void, LogPage> {
+  const pieces: Piece[] = split ? [split.tail] : [];
+  let total = split ? split.tail.data.length : 0;
+  let lines = split ? split.tail.times.length : 0;
+  const over = (): boolean => total > limits.maxBytes || lines > limits.maxLines;
+  let previous = split ? split.tail.seq : -1;
+  // Where the line after the last one read starts.
+  let end = split ? split.next : (cursor?.offset ?? log.headerEnd);
+  let carry = Buffer.alloc(0);
+  for (let position = end; !over() && position < log.size; ) {
+    const read = readAt(log.fd, position, Math.min(PAGE_BLOCK_BYTES, log.size - position));
+    const base = position - carry.length;
+    const block = carry.length > 0 ? Buffer.concat([carry, read]) : read;
+    position += read.length;
+    let lineStart = 0;
+    for (let newline = block.indexOf(0x0a); newline !== -1 && !over(); newline = block.indexOf(0x0a, lineStart)) {
+      const text = block.toString("latin1", lineStart, newline);
+      const offset = base + lineStart;
+      lineStart = newline + 1;
+      end = base + lineStart;
+      if (text === "") continue;
+      try {
+        const record = decodeRecord(text, log.mode, log.header);
+        if (record.seq <= previous) continue;
+        previous = record.seq;
+        pieces.push({ offset, start: 0, ...record });
+        total += record.data.length;
+        lines += record.times.length;
+      } catch {
+        // Skipped; the lines around it are still good.
+      }
+    }
+    carry = Buffer.from(block.subarray(lineStart));
+    if (read.length === 0) break;
+    yield;
+  }
+  const bytes = Buffer.concat(pieces.map((piece) => piece.data));
+  const times = pieces.flatMap((piece) => piece.times);
+  // Everything to the end of the log (but an unfinished last line) fits.
+  if (!over()) return { bytes: new Uint8Array(bytes), times, before: cursor, after: null };
+  let limit = Math.min(bytes.length, limits.maxBytes);
+  if (times.length > limits.maxLines) limit = Math.min(limit, endOfLine(bytes, limits.maxLines));
+  let cut = limit > 0 ? bytes.lastIndexOf(0x0a, limit - 1) + 1 : 0;
+  if (cut === 0) {
+    if (!limits.lenient) return { ...EMPTY_PAGE, before: cursor, after: cursor ?? { offset: log.headerEnd, skip: 0 } };
+    cut = limit;
+  }
+  const kept = bytes.subarray(0, cut);
+  return {
+    bytes: new Uint8Array(kept),
+    times: times.slice(0, countLineFeeds(kept)),
+    before: cursor,
+    after: cursorAt(pieces, cut) ?? { offset: end, skip: 0 },
   };
 }
 
@@ -413,11 +582,12 @@ function endOfLine(bytes: Buffer, count: number): number {
   return bytes.length;
 }
 
-// The cursor for byte `index` of the pieces' bytes taken together.
+// The cursor for byte `index` of the pieces' bytes taken together, or null past
+// their end.
 function cursorAt(pieces: Piece[], index: number): LogCursor | null {
   let from = 0;
   for (const piece of pieces) {
-    if (index < from + piece.data.length) return { offset: piece.offset, skip: index - from };
+    if (index < from + piece.data.length) return { offset: piece.offset, skip: piece.start + index - from };
     from += piece.data.length;
   }
   return null;

@@ -102,10 +102,19 @@ from source never check at startup.
   the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
 - **Endless scroll.** Scroll to the top and the window pages older history in
   from the character's log, 5,000 lines at a time, as far back as the log
-  goes. The scrollbar then covers what has been loaded, not the whole log,
-  and the older lines are dropped again when you scroll back to the bottom.
-  Searching covers what is loaded. A window with no log (locked, or a disk
-  error) has only its 20,000 lines.
+  goes. The scrollbar then covers what has been loaded, not the whole log.
+  The window holds at most 30,000 lines: past that, the lines furthest from
+  where you are reading are let go of, and scrolling back towards them pages
+  them in again. When the newest lines are let go of, new output isn't shown
+  until you scroll back down to it; sending a command leaves you where you
+  are. End takes you to the newest line in one press, as does clearing the
+  screen. At the bottom the window goes back to its usual 20,000 lines. Find
+  searches the whole log (see Scrollback search). An older
+  page starts in the default colour, so a colour a server turned on in an
+  earlier page and never turned off isn't shown on it. A window with no log
+  (locked, or a disk error) has only its 20,000 lines. Turning encryption on
+  or off rewrites the logs, so each window starts again from its newest
+  20,000 lines.
 - **Pueblo.** On a world that speaks it, links are clickable (right-click
   one with several commands to choose), and the status bar shows what a link
   will send or open while the pointer is on it. See
@@ -147,8 +156,12 @@ from source never check at startup.
   [Preferences](#preferences)).
 - **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
   right of the window, with match-case, whole-word and regular-expression
-  toggles. Every match is highlighted, and marked beside the scrollbar, and
-  the matches update as new output arrives (the newest 1,000 are kept).
+  toggles. Every match in the lines loaded is highlighted, and marked beside
+  the scrollbar, and the matches update as new output arrives (the newest 1,000
+  are kept). Next and previous (Enter and Shift+Enter, or F3 and Shift+F3) go
+  on past the first and last of them through the rest of the character's log,
+  and show the page the next match is on; they wrap around only at the ends of
+  the log. While the log holds more than is loaded, the count says "loaded".
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
@@ -309,6 +322,7 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Up / Down                | Previous / next command, from the first / last line     |
 | Ctrl+Up / Ctrl+Down      | Previous / next command, from anywhere                  |
 | Page Up / Page Down      | Scroll the scrollback                                   |
+| End                      | To the newest line, when not there already (otherwise the end of the input line); Ctrl+End always |
 | Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
 | Ctrl+F                   | Find in the scrollback                                  |
 | F3 / Shift+F3            | Next / previous match                                   |
@@ -609,10 +623,11 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/security.ts`         | Whether encryption is on, locked or unlocked; turning it on, off or changing the key |
 | `src/encryption-dialog.ts` | The dialog for the first-run offer, unlocking and managing encryption  |
 | `src/log-convert.ts`      | Converting every log to encrypted or plain, and finishing a stopped conversion |
-| `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting between modes |
+| `src/log-format.ts`       | The log file format (plain or sealed records), reading pages of it, converting between modes |
 | `src/key-file.ts`         | Reading a key file, and unlocking with the one Moolin remembers            |
 | `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
-| `src/history-paging.ts`   | What the window and main agree on for paging older history in             |
+| `src/history-paging.ts`   | What the window and main agree on for paging through history              |
+| `src/history-window.ts`   | Pages history in and out of the scrollback as you scroll                  |
 | `src/line-dedupe.ts`      | Keeps one copy of a line when several connections to a character get it    |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
@@ -627,6 +642,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/pueblo.ts`           | Pueblo: the greeting, and reading its links, line breaks and clears        |
 | `src/link-menu.ts`        | The popup that lists a Pueblo link's commands                              |
 | `src/scrollback-search.ts`| Finding matches in the lines, and which match is current                   |
+| `src/log-search.ts`       | Searching the log beyond the lines loaded, a page at a time               |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
 | `src/preferences-dialog.ts` | The Preferences dialog                                                  |
 | `src/tabs.ts`             | Tab strips (the Worlds dialog's), with ‹ › scrolling when they overflow   |

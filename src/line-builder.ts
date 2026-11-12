@@ -149,6 +149,24 @@ export class LineBuilder {
     this.lines = [...older, ...this.lines];
   }
 
+  // Puts newer lines, made by another builder, after the ones held, which must
+  // end with a finished line (see dropBack). They get ids above every other
+  // line's, and stay as they are: not open, and not due to be redrawn.
+  append(newer: ReadonlyArray<Line>): void {
+    for (const line of newer) (line as { id: number }).id = this.nextId++;
+    for (const line of newer) this.lines.push(line);
+  }
+
+  // Drops the newest `count` lines, returning them, and with them the open line:
+  // what is added next starts a line of its own.
+  dropBack(count: number): Line[] {
+    const dropped = this.lines.splice(Math.max(0, this.lines.length - count), count);
+    for (const line of dropped) line.dropped = true;
+    this.open = null;
+    this.lastBreak = null;
+    return dropped;
+  }
+
   // Drops the oldest `count` lines, returning them.
   dropFront(count: number): Line[] {
     const dropped = this.lines.splice(0, count);
