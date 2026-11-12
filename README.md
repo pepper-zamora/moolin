@@ -114,12 +114,17 @@ from source never check at startup.
   `3f2a9c1e.LambdaMOO/7b0d44aa.Cowpernica/`, so worlds with the same name (or
   names differing only in case) get folders of their own, and renaming a
   world or character renames its folder to match. Connecting pre-populates
-  the scrollback with the last 2 MiB of the log. A character has one log,
+  the scrollback with the last 20,000 lines of the log (at most 2 MiB). A character has one log,
   shared by every window connected to it. Servers that allow several
   connections to one character send all of its output to each, so a line that
   several windows receive within five seconds of each other is written once
   (lines that differ between connections, or an unfinished line such as a
-  prompt, can still appear more than once). The status bar shows a scroll
+  prompt, can still appear more than once). Reloading a window (Ctrl+R)
+  while another window on the same character is receiving output shows what
+  the log holds, which can include a line the other window has logged and
+  this one has not yet been sent; when that line reaches this window it
+  appears a second time. The window is only a few milliseconds behind, so
+  this is rare. The status bar shows a scroll
   beside the security shield when the window is logging, and a red "no" sign
   when it couldn't open the log. The log grows without bound for now; delete or
   prune it as a whole. It isn't plain text: its first line says what it is
@@ -601,6 +606,7 @@ work but hasn't been tried. To check a packaged build instead, point
 | `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting between modes |
 | `src/key-file.ts`         | Reading a key file, and unlocking with the one Moolin remembers            |
 | `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
+| `src/history-paging.ts`   | What the window and main agree on for paging older history in             |
 | `src/line-dedupe.ts`      | Keeps one copy of a line when several connections to a character get it    |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |

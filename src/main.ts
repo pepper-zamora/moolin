@@ -30,6 +30,7 @@ import { checkForUpdate } from "./update-check";
 import { fontFamilyFor } from "./fonts";
 import { normalizePhrase, type KeySource } from "./crypto-keys";
 import { readKeyFile, unlockWithKeyFile } from "./key-file";
+import { NO_HISTORY, type HistoryPage } from "./history-paging";
 import { Security, type Outcome, type SecurityPageState } from "./security";
 import {
   parseSecurityDecline,
@@ -40,6 +41,7 @@ import {
   parseConnectRequest,
   parseContextMenuOptions,
   parseExternalUrl,
+  parseHistoryRequest,
   parseInitialSize,
   parseInputText,
   parseLogCall,
@@ -655,8 +657,23 @@ ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, rawCanUndo: unknown, ra
 ipcMain.handle(
   IpcChannels.terminalGetScrollback,
   (event) =>
-    terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0, pueblo: false, greetingOpen: false },
+    terminalFor(event)?.getScrollback() ?? {
+      chunks: [],
+      times: [],
+      seq: 0,
+      pueblo: false,
+      greetingOpen: false,
+      fromLog: false,
+      before: null,
+    },
 );
+
+ipcMain.handle(IpcChannels.terminalGetHistoryPage, (event, rawRequest: unknown): HistoryPage => {
+  const terminal = terminalFor(event);
+  const request = parseHistoryRequest(rawRequest);
+  if (terminal && !request) ignoreBad(IpcChannels.terminalGetHistoryPage, rawRequest);
+  return terminal && request ? terminal.getHistoryPage(request) : NO_HISTORY;
+});
 
 // A freshly opened (non-cascaded) window's one-shot report of how big its
 // content needs to be to show an 80x25 terminal at its starting font.

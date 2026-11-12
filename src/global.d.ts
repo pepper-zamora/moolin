@@ -1,5 +1,6 @@
 import type { GlobalSettings, World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
+import type { HistoryPage, HistoryRequest } from "./history-paging";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { SelectAllTarget } from "./select-all";
 import type { LogLevel } from "./logger";
@@ -22,6 +23,7 @@ declare global {
       sendInput(text: string): void;
       sendResize(cols: number, rows: number): void;
       getScrollback(): Promise<ScrollbackReplay>;
+      getHistoryPage(request: HistoryRequest): Promise<HistoryPage>;
       onTerminalReset(callback: (replay: ScrollbackReplay) => void): void;
       onGreetingClosed(callback: (seq: number) => void): void;
       getConnectionState(): Promise<WindowState>;

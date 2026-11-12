@@ -15,6 +15,7 @@ import {
   parseSecurityDecline,
   parseSecurityRequest,
   parseSize,
+  parseHistoryRequest,
 } from "./ipc-validate";
 
 test("a size is two whole numbers that fit NAWS's two bytes", () => {
@@ -134,4 +135,26 @@ test("a security request is a phrase of a sane length, or a key file to be chose
   assert.equal(parseSecurityDecline({ never: true }), true);
   assert.equal(parseSecurityDecline({ never: "yes" }), null);
   assert.equal(parseSecurityDecline(undefined), null);
+});
+
+test("parseHistoryRequest takes a cursor of whole, non-negative numbers", () => {
+  assert.deepEqual(parseHistoryRequest({ before: { offset: 120, skip: 0 } }), { before: { offset: 120, skip: 0 } });
+  assert.deepEqual(parseHistoryRequest({ before: { offset: 5, skip: 9, extra: "ignored" }, more: 1 }), {
+    before: { offset: 5, skip: 9 },
+  });
+  for (const bad of [
+    null,
+    "x",
+    {},
+    { before: null },
+    { before: { offset: 1 } },
+    { before: { offset: -1, skip: 0 } },
+    { before: { offset: 1.5, skip: 0 } },
+    { before: { offset: 1, skip: Number.NaN } },
+    { before: { offset: Number.POSITIVE_INFINITY, skip: 0 } },
+    { before: { offset: 2 ** 60, skip: 0 } },
+    { before: { offset: "1", skip: 0 } },
+  ]) {
+    assert.equal(parseHistoryRequest(bad), null, JSON.stringify(bad));
+  }
 });

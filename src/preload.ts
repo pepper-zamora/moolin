@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import type { GlobalSettings, World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
 import { getCliLogLevel, isEnabled, type LogLevel } from "./logger";
+import type { HistoryPage, HistoryRequest } from "./history-paging";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { SelectAllTarget } from "./select-all";
 import { IpcChannels } from "./ipc-channels";
@@ -38,6 +39,8 @@ contextBridge.exposeInMainWorld("moolin", {
   sendInput: (text: string): void => ipcRenderer.send(IpcChannels.telnetInput, text),
   sendResize: (cols: number, rows: number): void => ipcRenderer.send(IpcChannels.telnetResize, { cols, rows }),
   getScrollback: (): Promise<ScrollbackReplay> => ipcRenderer.invoke(IpcChannels.terminalGetScrollback),
+  getHistoryPage: (request: HistoryRequest): Promise<HistoryPage> =>
+    ipcRenderer.invoke(IpcChannels.terminalGetHistoryPage, request),
   onTerminalReset: (callback: (replay: ScrollbackReplay) => void): void => {
     ipcRenderer.on(IpcChannels.terminalReset, (_event, replay: ScrollbackReplay) => callback(replay));
   },

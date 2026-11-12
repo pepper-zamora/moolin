@@ -3,8 +3,8 @@ import * as path from "node:path";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./file-modes";
 import { countLineFeeds } from "./line-feeds";
 import { LineDeduper } from "./line-dedupe";
-import { PLAIN, convertLog, encodeRecord, prepareForAppend, readLogHistory } from "./log-format";
-import type { LogHistory, LogMode } from "./log-format";
+import { PLAIN, convertLog, encodeRecord, prepareForAppend, readLogHistory, readLogPage } from "./log-format";
+import type { LogCursor, LogHistory, LogMode, LogPage, PageLimits } from "./log-format";
 import type { Character, World } from "./worlds-types";
 import { characterLabel, worldLabel } from "./world-utils";
 
@@ -139,6 +139,17 @@ export class SessionLog {
     }
   }
 
+  // A page of the log that ends at `before` (the end if null); see readLogPage.
+  page(before: LogCursor | null, limits: PageLimits): LogPage {
+    try {
+      this.prepare();
+      return readLogPage(this.file, this.mode, before, limits);
+    } catch (error) {
+      this.fail(error as Error);
+      return { bytes: new Uint8Array(), times: [], before: null };
+    }
+  }
+
   // Appends exactly what the terminal was shown, escape sequences included
   // (written as base64, so they never reach a terminal that shows the file),
   // with `time` (epoch ms, or null for a line with no timestamp) for each line
@@ -232,6 +243,16 @@ export class LogAttachment {
 
   history(maxBytes: number): LogHistory {
     return this.shared.log.history(maxBytes);
+  }
+
+  page(before: LogCursor | null, limits: PageLimits): LogPage {
+    return this.shared.log.page(before, limits);
+  }
+
+  // The unfinished line this window's output is waiting to write (see
+  // LineDeduper), which the log doesn't have yet.
+  held(): Uint8Array {
+    return this.shared.dedupe.peek(this);
   }
 
   // Appends what the window was shown. With another window attached, only the
@@ -328,12 +349,27 @@ export class SessionLogRegistry {
     }
     return new LogAttachment(shared, this.clock);
   }
+
+  // A page of the log in `file` for a window that has let go of it (it
+  // disconnected, but its scrollback can still be paged back). Null if the log
+  // can't be read: locked, or not a log this key opens.
+  readPage(file: string, before: LogCursor | null, limits: PageLimits): LogPage | null {
+    const mode = this.modeNow();
+    if (!mode) return null;
+    try {
+      return readLogPage(file, mode, before, limits);
+    } catch {
+      return null;
+    }
+  }
 }
 
 // The log one window writes to. A window attaches to its target's log as it
 // connects and lets go of it when the connection ends (or the window closes).
 export class WindowLog {
   private log: LogAttachment | null = null;
+  // The file of the last log opened, which can be read after letting go of it.
+  private lastFile: string | null = null;
 
   constructor(
     private readonly registry: SessionLogRegistry,
@@ -344,7 +380,9 @@ export class WindowLog {
   // to `maxBytes` of its history to show.
   open(world: World, character: Character | null, maxBytes: number): LogHistory {
     this.release();
+    this.lastFile = null;
     this.log = this.registry.attach(logKeyFor(world, character), () => locateLogFile(this.root, world, character));
+    this.lastFile = this.log.file;
     return this.log.history(maxBytes);
   }
 
@@ -360,6 +398,21 @@ export class WindowLog {
 
   append(data: string | Uint8Array, time: number | null): void {
     this.log?.append(data, time);
+  }
+
+  // A page of the history that ends at `before` (the end if null), from the log
+  // held or, once it was let go of, from its file. Null if the log can't be read.
+  page(before: LogCursor | null, limits: PageLimits): LogPage | null {
+    if (this.log?.isOpen) {
+      const page = this.log.page(before, limits);
+      return this.log.isOpen ? page : null;
+    }
+    return this.lastFile ? this.registry.readPage(this.lastFile, before, limits) : null;
+  }
+
+  // The unfinished line this window has output for that the log is yet to write.
+  held(): Uint8Array {
+    return this.log?.isOpen ? this.log.held() : new Uint8Array();
   }
 
   release(): void {

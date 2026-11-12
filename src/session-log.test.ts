@@ -232,6 +232,50 @@ test("a window leaving writes the unfinished line it and the last other window w
   assert.equal(Buffer.from(history.bytes).toString(), "> more\n", "the prompt both held is written once");
 });
 
+test("a window pages back through the log it holds, and after letting go of it", () => {
+  const root = tempDir();
+  const registry = new SessionLogRegistry();
+  const world = { ...newWorld("w1"), name: "Moo" };
+  const log = new WindowLog(registry, root);
+  assert.equal(log.page(null, { maxBytes: 100 }), null, "nothing to read before a log is opened");
+  log.open(world, null, 1000);
+  for (let i = 0; i < 6; i++) log.append(`line ${i}\n`, i);
+  const read = () => {
+    const pieces: string[] = [];
+    let before = null as Parameters<typeof log.page>[0];
+    for (let n = 0; n < 20; n++) {
+      const page = log.page(before, { maxBytes: 16, lenient: true });
+      assert.ok(page);
+      pieces.unshift(Buffer.from(page.bytes).toString());
+      if (!page.before) break;
+      before = page.before;
+    }
+    return pieces.join("");
+  };
+  const all = "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\n";
+  assert.equal(read(), all);
+  log.release();
+  assert.equal(read(), all, "the file can still be read once the window has let go of it");
+});
+
+test("a window knows the unfinished line it is waiting to write", () => {
+  const root = tempDir();
+  const registry = new SessionLogRegistry();
+  const world = { ...newWorld("w1"), name: "Moo" };
+  const a = new WindowLog(registry, root);
+  const b = new WindowLog(registry, root);
+  a.open(world, null, 1000);
+  assert.equal(a.held().length, 0);
+  a.append("alone> ", 1);
+  assert.equal(a.held().length, 0, "a window on its own writes straight through");
+  b.open(world, null, 1000);
+  a.append("> ", 2);
+  assert.equal(Buffer.from(a.held()).toString(), "> ");
+  assert.equal(b.held().length, 0);
+  a.release();
+  b.release();
+});
+
 test("a log that stops on a disk error stops logging", () => {
   const root = tempDir();
   const world = { ...newWorld("w1"), name: "Moo" };

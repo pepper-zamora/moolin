@@ -1,6 +1,14 @@
 import { BrowserWindow, Menu } from "electron";
 import { ConnectionManager, type WindowState } from "./connection-manager";
 import { ScrollbackBuffer, type ScrollbackReplay, type TerminalChunk } from "./scrollback-buffer";
+import {
+  NO_HISTORY,
+  PAGE_BYTES,
+  PAGE_LINES,
+  SCROLLBACK_LINES,
+  type HistoryPage,
+  type HistoryRequest,
+} from "./history-paging";
 import { IpcChannels } from "./ipc-channels";
 import { log } from "./logger";
 import { WindowLog, type LogHistory, type SessionLogRegistry } from "./session-log";
@@ -194,13 +202,34 @@ export class TerminalWindow {
     return { ...connection, logging: connection.status !== "disconnected" && this.sessionLog.logging };
   }
 
+  // What a window that has just loaded (or reloaded) shows. From the log when
+  // there is one, since it holds what every window on the character was sent,
+  // and so can be paged back from the line this starts at; otherwise from the
+  // buffer, with nothing to page. A line another window has logged but this
+  // one has not been sent yet is in the log, so it is shown now and again when
+  // it arrives; the gap is the few milliseconds between two connections.
   getScrollback(): ScrollbackReplay {
-    return {
-      chunks: this.scrollback.snapshot(),
-      times: this.scrollback.snapshotTimes(),
-      seq: this.seq,
-      pueblo: this.connection.isPueblo(),
-      greetingOpen: this.connection.isGreetingOpen(),
-    };
+    const page = this.sessionLog.page(null, { maxBytes: MAX_SCROLLBACK_BYTES, maxLines: SCROLLBACK_LINES });
+    const base = { seq: this.seq, pueblo: this.connection.isPueblo(), greetingOpen: this.connection.isGreetingOpen() };
+    if (!page) {
+      return {
+        ...base,
+        chunks: this.scrollback.snapshot(),
+        times: this.scrollback.snapshotTimes(),
+        fromLog: false,
+        before: null,
+      };
+    }
+    const held = this.sessionLog.held();
+    const chunks = [page.bytes, held].filter((chunk) => chunk.length > 0);
+    return { ...base, chunks, times: page.times, fromLog: true, before: page.before };
+  }
+
+  // The page of the log before `request.before`, for scrolling back past what
+  // the window holds.
+  getHistoryPage(request: HistoryRequest): HistoryPage {
+    return (
+      this.sessionLog.page(request.before, { maxBytes: PAGE_BYTES, maxLines: PAGE_LINES, lenient: true }) ?? NO_HISTORY
+    );
   }
 }

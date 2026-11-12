@@ -17,6 +17,8 @@ import {
   parseHeader,
   prepareForAppend,
   readLogHistory,
+  readLogPage,
+  type LogCursor,
   type LogFormat,
   type LogMode,
 } from "./log-format";
@@ -138,6 +140,100 @@ test("history keeps the newest bytes from a line boundary, with the times that g
     assert.equal(text(tail), "bbbb\r\ncccc\r\n");
     assert.deepEqual(tail.times, [2, 3]);
     assert.equal(text(readLogHistory(file, mode, 3)), "", "no line boundary within reach");
+  }
+});
+
+// Pages back through the whole log from its end, newest page first.
+function pagesBack(file: string, mode: LogMode, limits: { maxBytes: number; maxLines?: number }) {
+  const pages: Array<{ text: string; times: Array<number | null> }> = [];
+  let before: LogCursor | null = null;
+  for (let i = 0; i < 1000; i++) {
+    const page = readLogPage(file, mode, before, { ...limits, lenient: true });
+    pages.push({ text: text(page), times: page.times });
+    before = page.before;
+    if (!before) return pages;
+  }
+  throw new Error("paging back did not end");
+}
+
+test("pages back through a log reproduce it exactly, with their times", async () => {
+  for (const mode of [PLAIN, await encryptedMode()]) {
+    const file = tempFile();
+    // Records of different sizes, one holding several lines, so pages end inside records.
+    const appends: Array<[string, number | null]> = [];
+    let expected = "";
+    const times: Array<number | null> = [];
+    for (let i = 0; i < 40; i++) {
+      const data = i % 7 === 0 ? `multi ${i} a\r\nmulti ${i} b\r\nmulti ${i} c\r\n` : `line ${i} of the log\r\n`;
+      const time = i % 5 === 0 ? null : 1000 + i;
+      appends.push([data, time]);
+      expected += data;
+      for (let k = 0; k < data.split("\n").length - 1; k++) times.push(time);
+    }
+    writeLog(file, mode, appends);
+    for (const limits of [{ maxBytes: 60 }, { maxBytes: 100_000, maxLines: 7 }, { maxBytes: 1000, maxLines: 13 }]) {
+      const pages = pagesBack(file, mode, limits);
+      assert.ok(pages.length > 1, "more than one page");
+      assert.equal(
+        pages
+          .map((page) => page.text)
+          .reverse()
+          .join(""),
+        expected,
+      );
+      assert.deepEqual(
+        pages
+          .map((page) => page.times)
+          .reverse()
+          .flat(),
+        times,
+      );
+      for (const page of pages) {
+        assert.ok(page.text === "" || page.text.endsWith("\n"));
+        if (limits.maxLines) assert.ok(page.times.length <= limits.maxLines);
+      }
+    }
+  }
+});
+
+test("a page that starts at the end of the log is its tail, and one at the start has nothing before it", () => {
+  const file = tempFile();
+  writeLog(file, PLAIN, [
+    ["aaaa\r\n", 1],
+    ["bbbb\r\n", 2],
+    ["cccc\r\n", 3],
+  ]);
+  const tail = readLogPage(file, PLAIN, null, { maxBytes: 14 });
+  assert.equal(text(tail), "bbbb\r\ncccc\r\n");
+  assert.ok(tail.before);
+  const rest = readLogPage(file, PLAIN, tail.before, { maxBytes: 14 });
+  assert.equal(text(rest), "aaaa\r\n");
+  assert.equal(rest.before, null);
+  assert.equal(text(readLogPage(file, PLAIN, null, { maxBytes: 1000 })), "aaaa\r\nbbbb\r\ncccc\r\n");
+  assert.equal(readLogPage(file, PLAIN, null, { maxBytes: 1000 }).before, null);
+});
+
+test("a lenient page moves on even when no line boundary is in reach", () => {
+  const file = tempFile();
+  writeLog(file, PLAIN, [
+    ["x".repeat(50), 1],
+    [`${"y".repeat(50)}\r\n`, 2],
+  ]);
+  assert.equal(text(readLogPage(file, PLAIN, null, { maxBytes: 10 })), "");
+  const page = readLogPage(file, PLAIN, null, { maxBytes: 10, lenient: true });
+  assert.equal(text(page).length, 102);
+  assert.equal(page.before, null);
+});
+
+test("a cursor that does not fit the log gives an empty page", () => {
+  const file = tempFile();
+  writeLog(file, PLAIN, [["one\r\n", 1]]);
+  for (const before of [
+    { offset: 0, skip: 0 },
+    { offset: 99999, skip: 0 },
+  ]) {
+    const page = readLogPage(file, PLAIN, before, { maxBytes: 100 });
+    assert.deepEqual([text(page), page.before], ["", null]);
   }
 });
 

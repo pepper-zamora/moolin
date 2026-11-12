@@ -16,6 +16,7 @@ export const IpcChannels = {
   telnetResize: "telnet:resize",
   telnetData: "telnet:data",
   terminalGetScrollback: "terminal:getScrollback",
+  terminalGetHistoryPage: "terminal:getHistoryPage",
   // main -> renderer: the scrollback was replaced; clear and write these chunks.
   terminalReset: "terminal:reset",
   // main -> renderer: the server's Pueblo greeting no longer counts, with the

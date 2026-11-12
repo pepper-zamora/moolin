@@ -74,6 +74,11 @@ export class LineDeduper {
     return pending ?? new Uint8Array();
   }
 
+  // What `source` is holding, left where it is.
+  peek(source: unknown): Uint8Array {
+    return this.held.get(source) ?? new Uint8Array();
+  }
+
   // Like `flush`, for a connection that is ending: nothing if another
   // connection is holding the same unfinished line (or more of it), since that
   // one will write it.
