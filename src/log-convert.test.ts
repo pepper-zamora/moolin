@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -7,6 +7,12 @@ import { createEnvelope, normalizePhrase } from "./crypto-keys";
 import { convertAllLogs, findLogs } from "./log-convert";
 import { PLAIN, inspectLog, matchesMode, readLogHistory, type LogFormat, type LogMode } from "./log-format";
 import { SessionLogRegistry } from "./session-log";
+
+// Temporary folders the tests make, removed once they have all run.
+const tempDirs: string[] = [];
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 // Whether `file` is a log in `mode`.
 const isInMode = (file: string, mode: LogMode): boolean => {
@@ -33,6 +39,7 @@ function writeLog(file: string, mode: LogMode, body: string): void {
 // <root>/w1/moolin.log, <root>/w1/c1/moolin.log, <root>/w2/c2/moolin.log
 function tree(): { root: string; files: string[] } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-convert-"));
+  tempDirs.push(root);
   const files = [
     path.join(root, "w1", "moolin.log"),
     path.join(root, "w1", "c1", "moolin.log"),

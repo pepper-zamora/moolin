@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -27,10 +27,18 @@ import {
 } from "./log-format";
 import { SessionLogRegistry } from "./session-log";
 
+// Temporary folders the tests make, removed once they have all run.
+const tempDirs: string[] = [];
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 const CHEAP = { N: 1 << 14, r: 8, p: 1 };
 
 function tempFile(): string {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "moolin-logfmt-")), "moolin.log");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-logfmt-"));
+  tempDirs.push(dir);
+  return path.join(dir, "moolin.log");
 }
 
 async function encryptedMode(phrase = "x"): Promise<LogMode & { kind: "encrypted" }> {

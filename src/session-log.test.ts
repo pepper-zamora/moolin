@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -7,8 +7,16 @@ import { PLAIN, type LogCursor } from "./log-format";
 import { locateLogFile, logPathFor, sanitizePathSegment, SessionLogRegistry, WindowLog } from "./session-log";
 import { newWorld } from "./world-utils";
 
+// Temporary folders the tests make, removed once they have all run.
+const tempDirs: string[] = [];
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function tempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "moolin-log-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-log-"));
+  tempDirs.push(dir);
+  return dir;
 }
 
 test("sanitizePathSegment neutralises separators, dots and empties", () => {
