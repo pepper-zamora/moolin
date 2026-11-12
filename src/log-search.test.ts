@@ -22,6 +22,7 @@ function setup(lines: string[]) {
     times: [],
     before: cursor(start),
     after: end >= lines.length ? null : { offset: end, skip: 0 },
+    end: { offset: end, skip: 0 },
     seq: 0,
     stale: false,
   });

@@ -32,15 +32,26 @@ export type HistoryRequest = { before: LogCursor } | { after: LogCursor | null }
 // ends. `before` is null when nothing older exists. `after` is null when the
 // page reaches the end of the log: then it also holds the unfinished line the
 // window is still to log, and covers the window's live output up to `seq` (as a
-// replay does). `stale` says the cursor no longer fits the log (it was
+// replay does). `end` is where the page ends in the log all the same, so asking
+// for the page before it gets this page again: the log only grows at its end
+// (null for an empty log). `stale` says the cursor no longer fits the log (it was
 // rewritten, or can't be read), so the window should start over.
 export interface HistoryPage {
   chunks: Uint8Array[];
   times: Array<number | null>;
   before: LogCursor | null;
   after: LogCursor | null;
+  end: LogCursor | null;
   seq: number;
   stale: boolean;
 }
 
-export const STALE_PAGE: HistoryPage = { chunks: [], times: [], before: null, after: null, seq: 0, stale: true };
+export const STALE_PAGE: HistoryPage = {
+  chunks: [],
+  times: [],
+  before: null,
+  after: null,
+  end: null,
+  seq: 0,
+  stale: true,
+};

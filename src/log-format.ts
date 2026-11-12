@@ -269,10 +269,13 @@ function lastSeq(file: string): number {
 // A piece of the log: its bytes, the time of each line feed in them, and the
 // cursors where it starts and ends. `before` is null when nothing older exists
 // (it starts at the log's start), and `after` when nothing newer did when it was
-// read (it ends at the log's end).
+// read (it ends at the log's end). `end` is where it ends all the same, so a
+// page asked for as the one before `end` is this one again (the log only grows
+// at its end); null for a log with nothing in it.
 export interface LogPage extends LogHistory {
   before: LogCursor | null;
   after: LogCursor | null;
+  end: LogCursor | null;
 }
 
 // Which page to read: the one that ends at `before` (at the end of the log if
@@ -289,7 +292,7 @@ export interface PageLimits {
   lenient?: boolean;
 }
 
-const EMPTY_PAGE: LogPage = { bytes: new Uint8Array(), times: [], before: null, after: null };
+const EMPTY_PAGE: LogPage = { bytes: new Uint8Array(), times: [], before: null, after: null, end: null };
 
 // Records are read this much at a time, and a reader that gives way does so
 // between blocks.
@@ -437,6 +440,7 @@ function* pageBefore(
   let lines = split ? split.head.times.length : 0;
   const over = (): boolean => total > limits.maxBytes || lines > limits.maxLines;
   let blockEnd = cursor ? cursor.offset : endOfLastLine(log);
+  const end = cursor ?? { offset: blockEnd, skip: 0 };
   // The start of a line that began in an earlier block than the one read.
   let carry = Buffer.alloc(0);
   let unread = 0;
@@ -481,13 +485,19 @@ function* pageBefore(
     pieces.push(newestFirst[i]);
   }
   if (split) pieces.push(split.head);
-  return cutBefore(pieces, atStart, limits, cursor);
+  return cutBefore(pieces, atStart, limits, cursor, end);
 }
 
 // The newest `maxBytes` and `maxLines` of `pieces`, from a line boundary unless
 // they are all the log holds before `after` (`atStart`), with the cursor for what
 // was left out.
-function cutBefore(pieces: Piece[], atStart: boolean, limits: Required<PageLimits>, after: LogCursor | null): LogPage {
+function cutBefore(
+  pieces: Piece[],
+  atStart: boolean,
+  limits: Required<PageLimits>,
+  after: LogCursor | null,
+  end: LogCursor,
+): LogPage {
   const bytes = Buffer.concat(pieces.map((piece) => piece.data));
   const times = pieces.flatMap((piece) => piece.times);
   let drop = Math.max(0, bytes.length - limits.maxBytes);
@@ -498,13 +508,14 @@ function cutBefore(pieces: Piece[], atStart: boolean, limits: Required<PageLimit
   if (drop > 0) {
     const newline = bytes.indexOf(0x0a, drop - 1);
     if (newline !== -1 && newline + 1 < bytes.length) cut = newline + 1;
-    else if (!limits.lenient) return { ...EMPTY_PAGE, after };
+    else if (!limits.lenient) return { ...EMPTY_PAGE, after, end };
   }
   return {
     bytes: new Uint8Array(bytes.subarray(cut)),
     times: times.slice(countLineFeeds(bytes.subarray(0, cut))),
     before: cut === 0 && atStart ? null : cursorAt(pieces, cut),
     after,
+    end,
   };
 }
 
@@ -555,20 +566,26 @@ function* pageAfter(
   const bytes = Buffer.concat(pieces.map((piece) => piece.data));
   const times = pieces.flatMap((piece) => piece.times);
   // Everything to the end of the log (but an unfinished last line) fits.
-  if (!over()) return { bytes: new Uint8Array(bytes), times, before: cursor, after: null };
+  if (!over())
+    return { bytes: new Uint8Array(bytes), times, before: cursor, after: null, end: { offset: end, skip: 0 } };
   let limit = Math.min(bytes.length, limits.maxBytes);
   if (times.length > limits.maxLines) limit = Math.min(limit, endOfLine(bytes, limits.maxLines));
   let cut = limit > 0 ? bytes.lastIndexOf(0x0a, limit - 1) + 1 : 0;
   if (cut === 0) {
-    if (!limits.lenient) return { ...EMPTY_PAGE, before: cursor, after: cursor ?? { offset: log.headerEnd, skip: 0 } };
+    if (!limits.lenient) {
+      const at = cursor ?? { offset: log.headerEnd, skip: 0 };
+      return { ...EMPTY_PAGE, before: cursor, after: at, end: at };
+    }
     cut = limit;
   }
   const kept = bytes.subarray(0, cut);
+  const after = cursorAt(pieces, cut) ?? { offset: end, skip: 0 };
   return {
     bytes: new Uint8Array(kept),
     times: times.slice(0, countLineFeeds(kept)),
     before: cursor,
-    after: cursorAt(pieces, cut) ?? { offset: end, skip: 0 },
+    after,
+    end: after,
   };
 }
 

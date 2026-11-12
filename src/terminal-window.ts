@@ -167,7 +167,7 @@ export class TerminalWindow {
   // opened the window starts empty and doesn't log; the status bar shows
   // whether it is logging (see getState).
   private startLog(target: ConnectTarget): void {
-    let history: LogPage = { bytes: new Uint8Array(), times: [], before: null, after: null };
+    let history: LogPage = { bytes: new Uint8Array(), times: [], before: null, after: null, end: null };
     let unavailable: string | null = null;
     try {
       history = this.sessionLog.open(target.world, target.character, MAX_SCROLLBACK_BYTES, SCROLLBACK_LINES);
@@ -262,6 +262,7 @@ export class TerminalWindow {
       times: page.times,
       before: page.before,
       after: page.after,
+      end: page.end,
       seq,
       stale: false,
     };

@@ -227,6 +227,31 @@ test("pages back through a log reproduce it exactly, with their times", async ()
   }
 });
 
+test("a page asked for again by where it ends is the same page, even after the log has grown", async () => {
+  for (const mode of [PLAIN, await encryptedMode()]) {
+    const file = tempFile();
+    variedLog(file, mode);
+    for (const limits of VARIED_LIMITS) {
+      const full = { ...limits, lenient: true };
+      const pages = [];
+      for (let before: LogCursor | null = null, i = 0; i === 0 || before !== null; i++) {
+        const page = pageOf(file, mode, { before }, full);
+        assert.ok(page.end, "a page of a log with lines in has an end");
+        pages.push(page);
+        before = page.before;
+      }
+      assert.deepEqual(pages[0].end, { offset: fs.statSync(file).size, skip: 0 }, "the tail ends at the log's end");
+      writeLog(file, mode, [["more after the pages were read\r\n", 5]]);
+      for (const page of pages) {
+        const again = pageOf(file, mode, { before: page.end }, full);
+        assert.equal(text(again), text(page));
+        assert.deepEqual(again.times, page.times);
+        assert.deepEqual(again.before, page.before);
+      }
+    }
+  }
+});
+
 test("pages forward from any page's start reproduce the rest of the log exactly", async () => {
   for (const mode of [PLAIN, await encryptedMode()]) {
     const file = tempFile();

@@ -141,18 +141,27 @@ function setup(logLines: number) {
       };
     },
     getHistoryPage: async (request: HistoryRequest): Promise<HistoryPage> => {
-      if (stale) return { chunks: [], times: [], before: null, after: null, seq: 0, stale: true };
+      if (stale) return { chunks: [], times: [], before: null, after: null, end: null, seq: 0, stale: true };
       if ("before" in request) {
         const end = request.before.offset;
         const start = Math.max(0, end - PAGE_LINES);
         const chunks = [bytes(log.slice(start, end))];
-        return { chunks, times: [], before: cursor(start), after: request.before, seq, stale: false };
+        return {
+          chunks,
+          times: [],
+          before: cursor(start),
+          after: request.before,
+          end: request.before,
+          seq,
+          stale: false,
+        };
       }
       const start = request.after?.offset ?? 0;
       const end = Math.min(log.length, start + PAGE_LINES);
       const atEnd = end === log.length;
       const chunks = [bytes(log.slice(start, end))];
-      return { chunks, times: [], before: cursor(start), after: atEnd ? null : cursor(end), seq, stale: false };
+      const after = atEnd ? null : cursor(end);
+      return { chunks, times: [], before: cursor(start), after, end: cursor(end), seq, stale: false };
     },
   };
   const view = new FakeView();

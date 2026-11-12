@@ -138,7 +138,7 @@ export class SessionLog {
     } catch (error) {
       this.fail(error as Error);
     }
-    return { bytes: new Uint8Array(), times: [], before: null, after: null };
+    return { bytes: new Uint8Array(), times: [], before: null, after: null, end: null };
   }
 
   // A page of the log, read a block at a time (see readLogPageSoon, which this
