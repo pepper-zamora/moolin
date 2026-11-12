@@ -29,8 +29,10 @@ export function parseHistoryRequest(value: unknown): HistoryRequest | null {
   if (typeof value !== "object" || value === null) return null;
   const { before, after } = value as { before?: unknown; after?: unknown };
   if ((before === undefined) === (after === undefined)) return null;
-  // A page after nothing is the first page of the log.
+  // A page after nothing is the first page of the log, and one before nothing
+  // its last.
   if (after === null) return { after: null };
+  if (before === null) return { before: null };
   const cursor = before ?? after;
   if (typeof cursor !== "object" || cursor === null) return null;
   const { offset, skip } = cursor as { offset?: unknown; skip?: unknown };

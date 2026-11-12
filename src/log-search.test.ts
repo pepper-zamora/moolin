@@ -29,7 +29,10 @@ function setup(lines: string[]) {
   const search = new LogSearch(
     async (request) => {
       requests.push(request);
-      if ("before" in request) return page(Math.max(0, request.before.offset - 10), request.before.offset);
+      if ("before" in request) {
+        const end = request.before?.offset ?? lines.length;
+        return page(Math.max(0, end - 10), end);
+      }
       const start = request.after?.offset ?? 0;
       return page(start, Math.min(lines.length, start + 10));
     },

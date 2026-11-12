@@ -141,6 +141,7 @@ test("parseHistoryRequest takes a cursor of whole, non-negative numbers", () => 
   assert.deepEqual(parseHistoryRequest({ before: { offset: 120, skip: 0 } }), { before: { offset: 120, skip: 0 } });
   assert.deepEqual(parseHistoryRequest({ after: { offset: 120, skip: 3 } }), { after: { offset: 120, skip: 3 } });
   assert.deepEqual(parseHistoryRequest({ after: null }), { after: null }, "the start of the log");
+  assert.deepEqual(parseHistoryRequest({ before: null }), { before: null }, "the end of the log");
   assert.deepEqual(parseHistoryRequest({ before: { offset: 5, skip: 9, extra: "ignored" }, more: 1 }), {
     before: { offset: 5, skip: 9 },
   });
@@ -148,7 +149,6 @@ test("parseHistoryRequest takes a cursor of whole, non-negative numbers", () => 
     null,
     "x",
     {},
-    { before: null },
     { before: { offset: 1 } },
     { before: { offset: -1, skip: 0 } },
     { before: { offset: 1.5, skip: 0 } },

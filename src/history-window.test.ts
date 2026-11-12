@@ -143,7 +143,7 @@ function setup(logLines: number) {
     getHistoryPage: async (request: HistoryRequest): Promise<HistoryPage> => {
       if (stale) return { chunks: [], times: [], before: null, after: null, end: null, seq: 0, stale: true };
       if ("before" in request) {
-        const end = request.before.offset;
+        const end = request.before?.offset ?? log.length;
         const start = Math.max(0, end - PAGE_LINES);
         const chunks = [bytes(log.slice(start, end))];
         return {

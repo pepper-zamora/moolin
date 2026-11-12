@@ -22,10 +22,10 @@ export interface LogCursor {
   skip: number;
 }
 
-// Asks for the page of history that ends at `before`, or the one that starts at
-// `after` (at the start of the log if null, which searching from the oldest
-// line uses).
-export type HistoryRequest = { before: LogCursor } | { after: LogCursor | null };
+// Asks for the page of history that ends at `before` (at the end of the log if
+// null: its tail), or the one that starts at `after` (at the start of the log if
+// null).
+export type HistoryRequest = { before: LogCursor | null } | { after: LogCursor | null };
 
 // A page of history: bytes cut at a line boundary, the arrival time of each line
 // feed in them (null where unknown), and the cursors where the page starts and
