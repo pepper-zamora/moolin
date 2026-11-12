@@ -32,8 +32,8 @@
           <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
           <canvas id="search-ruler" hidden></canvas>
         </div>
-        <!-- Scrollback search (Ctrl+F), floating over the terminal's top
-             right; driven by find-widget.ts. -->
+        <!-- Search (Ctrl+F), floating over the panes' top right; driven by
+             find-widget.ts. -->
         <div id="find-widget" role="search" hidden>
           <div class="find-field">
             <input id="find-input" type="text" spellcheck="false" placeholder="Find" aria-label="Find" />
@@ -42,8 +42,8 @@
             <button id="find-regex" class="find-toggle" type="button" aria-pressed="false" title="Use Regular Expression (Alt+R)">.*</button>
           </div>
           <span id="find-count" aria-live="polite">No results</span>
-          <button id="find-prev" class="find-action" type="button" title="Previous Match (Shift+Enter)" aria-label="Previous Match">&#x2191;</button>
-          <button id="find-next" class="find-action" type="button" title="Next Match (Enter)" aria-label="Next Match">&#x2193;</button>
+          <button id="find-older" class="find-action" type="button" title="Older Match (Enter)" aria-label="Older Match">&#x2191;</button>
+          <button id="find-newer" class="find-action" type="button" title="Newer Match (Shift+Enter)" aria-label="Newer Match">&#x2193;</button>
           <button id="find-close" class="find-action" type="button" title="Close (Escape)" aria-label="Close">&#x2715;</button>
         </div>
       </div>
@@ -51,6 +51,9 @@
       <textarea id="input-area" rows="1" spellcheck="true" disabled></textarea>
       <div id="status-bar" data-status="disconnected">
         <span id="status-text">Not connected</span>
+        <!-- How far a search of the log has got, while it takes a while (see
+             find-widget.ts). -->
+        <span id="search-status" aria-live="polite" hidden></span>
         <!-- The terminal's current size, in characters (cols x rows). -->
         <span id="screen-size" title="Terminal size, in characters"></span>
         <!-- Whether this window is writing the session log: a scroll when it

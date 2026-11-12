@@ -177,7 +177,7 @@ const historyPane: HistoryPane = new HistoryPane(
   scrollbackOptions(() => view),
   view,
   (request) => window.moolin.getHistoryPage(request),
-  () => lastReplay !== null && lastReplay.fromLog && (lastReplay.before !== null || view.hasTrimmed),
+  () => lastReplay?.fromLog === true && (lastReplay.before !== null || view.hasTrimmed),
   (open) => {
     if (!open) view.scrollToBottom();
   },
@@ -453,7 +453,7 @@ window.moolin.onUndoRequested(() => undoInput());
 window.moolin.onRedoRequested(() => redoInput());
 window.moolin.onFindRequested((action) => {
   if (action === "open") findWidget.open();
-  else findWidget.findFromMenu(action);
+  else findWidget.findFromMenu(action === "next" ? "older" : "newer");
 });
 window.moolin.onClearScreenRequested(() => clearToOffscreen());
 window.moolin.onToggleTimestamps((show) => {
@@ -489,8 +489,9 @@ document.addEventListener(
     let handled = true;
     if (mod && !event.shiftKey && key === "f") {
       findWidget.open();
-    } else if (event.key === "F3" && !mod && !event.altKey) {
-      findWidget.findFromMenu(event.shiftKey ? "previous" : "next");
+    } else if ((event.key === "F3" && !mod && !event.altKey) || (event.metaKey && !event.altKey && key === "g")) {
+      // Find Next goes older, and Find Previous newer: F3, and Cmd+G as on macOS.
+      findWidget.findFromMenu(event.shiftKey ? "newer" : "older");
     } else if (event.key === "Escape" && findWidget.isOpen()) {
       findWidget.close();
     } else if (event.key === "Escape" && historyPane.isOpen) {
@@ -590,9 +591,18 @@ const live = new LiveReplay(applyReset, (event) => {
 // history pane holds in it no longer fit.
 window.moolin.onHistoryRewritten(() => historyPane.close());
 
-const findWidget = new FindWidget(view, () => {
-  if (!inputArea.disabled) inputArea.focus();
-});
+const findWidget = new FindWidget(
+  view,
+  historyPane,
+  {
+    getPage: (request) => window.moolin.getHistoryPage(request),
+    available: () => lastReplay?.fromLog === true,
+  },
+  element("search-status"),
+  () => {
+    if (!inputArea.disabled) inputArea.focus();
+  },
+);
 
 // Replay the main process's scrollback (it survives a reload, and catches a new
 // window up on what was written before its page loaded), then follow live

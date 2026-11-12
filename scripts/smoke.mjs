@@ -766,6 +766,43 @@ try {
     expectEqual(await historyOpen(), false, "the pane, after scrolling down past the end of the log");
   });
 
+  // Find searches the whole log, not just the scrollback: a match only the log
+  // holds is counted, and Enter (older) shows it in the history pane.
+  await check("Find counts the whole log, and Enter goes older, into the history pane", async () => {
+    const count = () => main.evaluate(`document.getElementById("find-count").textContent`);
+    const inHistoryView = (text) =>
+      main.evaluate(`(() => {
+        const box = document.getElementById("history").getBoundingClientRect();
+        const line = Array.from(document.querySelectorAll("#history .line")).find((l) => l.textContent === ${JSON.stringify(text)});
+        if (!line) return false;
+        const r = line.getBoundingClientRect();
+        return r.top >= box.top && r.bottom <= box.bottom;
+      })()`);
+    const target = "paging line 1234";
+    if ((await main.lineTexts()).includes(target)) throw new Error(`${target} is in the scrollback`);
+    await main.evaluate(`document.getElementById("input-area").focus()`);
+    await main.key("f", "KeyF", 70, 2 /* Ctrl */);
+    await main.evaluate(`(() => {
+      const word = document.getElementById("find-word");
+      if (word.getAttribute("aria-pressed") !== "true") word.click();
+      const input = document.getElementById("find-input");
+      input.value = ${JSON.stringify(target)};
+      input.dispatchEvent(new Event("input"));
+    })()`);
+    await waitFor("the whole log to be counted", async () => (await count()) === "? of 1", 20000).catch(async (error) => {
+      throw new Error(`${error.message} (the count says ${JSON.stringify(await count())})`);
+    });
+    await main.key("Enter", "Enter", 13);
+    await waitFor("the history pane to open", historyOpen, 10000);
+    await waitFor("the match on screen in it", () => inHistoryView(target), 10000);
+    expectEqual(await count(), "1 of 1", "the count");
+    await main.key("Escape", "Escape", 27);
+    await waitFor("Escape to close the find box", async () => !(await main.evaluate(`!document.getElementById("find-widget").hidden`)), 3000);
+    expectEqual(await historyOpen(), true, "the history pane, after the find box closed");
+    await main.key("Escape", "Escape", 27);
+    await waitFor("Escape again to close the history pane", async () => !(await historyOpen()), 3000);
+  });
+
   // Launching again opens a second window in the running instance; it starts
   // disconnected, and (usually) takes focus from the first.
   console.log("smoke: a second, disconnected window");

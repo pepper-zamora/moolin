@@ -486,6 +486,15 @@ html, body {
   white-space: nowrap;
 }
 
+#search-status {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #d7ba7d;
+}
+
 .security-icon,
 #logging-status {
   display: flex;

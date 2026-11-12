@@ -23,6 +23,11 @@ renames that section to the new version and date.
   it had. Pages start in the default colour. Known limit: reloading a window
   just as another window on the same character logs a line this one has not
   been sent yet shows that line twice.
+- **Find searches the whole log.** With a log, Find searches all of it as well
+  as the scrollback, in the background from the newest line back, and counts
+  every match ("3 of 25"). A match only the log holds opens the history pane
+  at it, in one move once found; the status bar shows how far a long search
+  has got and how many it has found.
 - A "Clear the screen when a Pueblo server asks" setting (Global, with World
   and Character able to override it). A Pueblo server's
   `<xch_page clear=text>` is now ignored by default, since some servers send
@@ -73,6 +78,9 @@ renames that section to the new version and date.
 
 ### Changed
 
+- Find's Enter and F3 now go to the next older match (up the scrollback), and
+  Shift+Enter and Shift+F3 the next newer. On macOS, Cmd+G and Cmd+Shift+G do
+  the same.
 - **Windows connected to the same character now share one log.** Before, the
   first window to connect owned the log and the others logged nothing and
   started with no history. Now every window logs and reads the same history,

@@ -155,9 +155,17 @@ from source never check at startup.
   [Preferences](#preferences)).
 - **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
   right of the window, with match-case, whole-word and regular-expression
-  toggles. Every match is highlighted, and marked beside the scrollbar, and
-  the matches update as new output arrives (the newest 1,000 are kept). It
-  searches the scrollback's lines, not the history pane's.
+  toggles. Every match on screen is highlighted, in the scrollback (marked
+  beside its scrollbar too) and the history pane, and the highlights follow
+  new output. With a log, the whole log is searched as well, from the newest
+  line back, while you type: the count is of every match, newest first ("3 of
+  25"), and says "…" while the search is still going. Enter (or F3, or ↑) goes
+  to the next older match, Shift+Enter (Shift+F3, ↓) the next newer, going
+  round at either end of the log. A match the scrollback holds is scrolled to
+  there; an older one opens the history pane at it, once it has been found. If
+  a step has to wait on the search for more than a moment, the status bar says
+  how far it has got and how many it has found. The search runs in the window,
+  a page of the log at a time; without a log, it covers the scrollback alone.
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
@@ -321,8 +329,8 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | End                      | To the newest line, closing the history pane, when not there already (otherwise the end of the input line); Ctrl+End always |
 | Escape                   | Close the find box, else the history pane               |
 | Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
-| Ctrl+F                   | Find in the scrollback                                  |
-| F3 / Shift+F3            | Next / previous match                                   |
+| Ctrl+F                   | Find, in the scrollback and the log                     |
+| F3 / Shift+F3            | Next older / newer match (also Cmd+G / Cmd+Shift+G on macOS) |
 | Ctrl+A                   | Select all of the input line, or of the scrollback if something there is selected |
 | Ctrl+X / Ctrl+C / Ctrl+V | Cut / copy the selection / paste into the input area    |
 | Ctrl+Z                   | Undo in the input area                                  |
@@ -330,7 +338,7 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default font size                    |
 | Ctrl+R                   | Reload the window (the connection and scrollback stay)  |
 
-In the find box: Enter / Shift+Enter go to the next / previous match,
+In the find box: Enter / Shift+Enter go to the next older / newer match,
 Alt+C / Alt+W / Alt+R toggle match case, whole word and regular expression,
 and Escape closes it.
 
@@ -650,6 +658,7 @@ been tried. To check a packaged build instead, point
 | `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
 | `src/history-paging.ts`   | What the window and main agree on for paging through history              |
 | `src/log-pane.ts`         | A fixed chain of log pages, and the history pane's paging through it      |
+| `src/log-scan.ts`         | Searching a whole chain of the log for every match, in the background     |
 | `src/history-pane.ts`     | The history pane above the scrollback: opening, closing, the divider      |
 | `src/line-dedupe.ts`      | Keeps one copy of a line when several connections to a character get it    |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |

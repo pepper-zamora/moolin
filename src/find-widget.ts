@@ -1,20 +1,23 @@
+import type { HistoryPage, HistoryRequest } from "./history-paging";
+import type { HistoryPane } from "./history-pane";
 import type { Line } from "./line-builder";
+import { LogChain } from "./log-pane";
+import { LogScan, alignLive } from "./log-scan";
 import type { ScrollbackView } from "./scrollback-view";
-import {
-  chooseActive,
-  findMatches,
-  type FindMode,
-  type Match,
-  type SearchQuery,
-  type SearchResult,
-} from "./scrollback-search";
+import { buildPattern, findMatches, type Match, type SearchQuery, type SearchResult } from "./scrollback-search";
 
-// Most matches highlighted (and counted); past this the count shows as
-// "1000+", and the oldest matches are the ones left out.
+// Most matches highlighted in a pane (and counted, without a log); past this
+// the count shows as "1000+", and the oldest matches are the ones left out.
 const MATCH_LIMIT = 1000;
 
 // How long after output or a resize the matches are searched for again.
 const REFRESH_DELAY_MS = 150;
+
+// How long after the search term last changed the log is searched for it.
+const SCAN_DELAY_MS = 300;
+
+// How long a search of the log runs before the status bar says how it's going.
+const PROGRESS_DELAY_MS = 1000;
 
 // Match colours follow VS Code's dark theme (the highlight colours themselves
 // are in styles.css, under ::highlight()).
@@ -70,10 +73,27 @@ class SearchRuler {
   }
 }
 
-// The find box floating at the top right of the scrollback, modelled on VS
-// Code's editor find widget (minus replace, since the scrollback is
-// read-only). Matches are highlighted throughout the buffer and marked on a
-// ruler beside the scrollbar, and stay current as new output arrives.
+// The current match: one the live scrollback shows, or a hit of the log search.
+type Current = { kind: "live"; match: Match<Line> } | { kind: "log"; hit: number };
+
+export interface LogAccess {
+  getPage(request: HistoryRequest): Promise<HistoryPage>;
+  // Whether the window has a log to search: only a replay from one does.
+  available(): boolean;
+}
+
+// The find box floating at the top right of the panes, modelled on VS Code's
+// editor find widget (minus replace, since the scrollback is read-only).
+//
+// Matches in the live scrollback are highlighted, marked on a ruler beside its
+// scrollbar, and stay current as new output arrives. With a log, the whole log
+// is searched too, from its end back, in the background while the term stands;
+// the matches are numbered newest first, the live scrollback's own and then
+// the log's older ones, "3 of 25". Enter (and F3, ↑) goes to the next older
+// match, Shift+Enter (Shift+F3, ↓) the next newer, wrapping around at the ends
+// of the log. A match the live scrollback holds is scrolled to there; an older
+// one is shown in the history pane, in one move once found. While a step waits
+// on the search, the status bar says how far it has got.
 export class FindWidget {
   readonly root = element<HTMLDivElement>("find-widget");
   private readonly input = element<HTMLInputElement>("find-input");
@@ -84,24 +104,49 @@ export class FindWidget {
     regex: element<HTMLButtonElement>("find-regex"),
   };
   private readonly ruler: SearchRuler;
-  private matches: Array<Match<Line>> = [];
-  private active: Match<Line> | null = null;
+  // The live scrollback's matches, oldest first, and whether older ones were
+  // left out past MATCH_LIMIT.
+  private live: Array<Match<Line>> = [];
+  private liveTruncated = false;
+  // The history pane's matches, for highlighting.
+  private paned: Array<Match<Line>> = [];
+  private current: Current | null = null;
+  private scan: LogScan | null = null;
+  // The term and options the scan is of, and when it began.
+  private scanKey = "";
+  private scanStarted = 0;
+  private scanTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshScheduled = false;
+  // Counts steps, so a step waiting on the scan gives way to a later one.
+  private steps = 0;
+  private waiting = false;
+  // The last order worked out, and what it was worked out from.
+  private ordered: {
+    from: Array<Match<Line>>;
+    scan: LogScan | null;
+    texts: number;
+    order: { live: Array<Match<Line>>; newer: number; shared: number };
+  } | null = null;
 
   constructor(
     private readonly view: ScrollbackView,
+    private readonly history: HistoryPane,
+    private readonly log: LogAccess,
+    private readonly status: HTMLElement,
     // Called after the widget closes, to hand focus back.
     private readonly onClose: () => void,
   ) {
     this.ruler = new SearchRuler(element<HTMLCanvasElement>("search-ruler"), view);
-    // New output (or a resize) can add, remove and move matches.
+    // New output (or a resize) can add, remove and move matches; the history
+    // pane paging changes which of its lines are there to highlight.
     view.onChange(() => this.scheduleRefresh());
+    history.view.onChange(() => this.scheduleRefresh());
 
-    this.input.addEventListener("input", () => this.find("incremental"));
+    this.input.addEventListener("input", () => this.find());
     this.input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        this.find(event.shiftKey ? "previous" : "next");
+        void this.step(event.shiftKey ? "newer" : "older");
       }
     });
     // Keep VS Code's Alt+C/W/R toggles while focus is anywhere in the widget.
@@ -117,8 +162,8 @@ export class FindWidget {
     for (const [option, button] of Object.entries(this.toggles)) {
       button.addEventListener("click", () => this.toggle(option as keyof FindWidget["toggles"]));
     }
-    element<HTMLButtonElement>("find-prev").addEventListener("click", () => this.find("previous"));
-    element<HTMLButtonElement>("find-next").addEventListener("click", () => this.find("next"));
+    element<HTMLButtonElement>("find-older").addEventListener("click", () => void this.step("older"));
+    element<HTMLButtonElement>("find-newer").addEventListener("click", () => void this.step("newer"));
     element<HTMLButtonElement>("find-close").addEventListener("click", () => this.close());
     // Clicking a button shouldn't pull focus out of the search field.
     for (const button of this.root.querySelectorAll("button")) {
@@ -133,38 +178,42 @@ export class FindWidget {
   // Shows the widget and focuses the search field with its text selected,
   // seeded from a single-line scrollback selection when there is one.
   open(): void {
-    const selection = this.view.selectedText();
+    const selection = this.history.view.selectedText() || this.view.selectedText();
     if (selection.length > 0 && !selection.includes("\n")) this.input.value = selection;
     const wasOpen = this.isOpen();
     this.root.hidden = false;
     this.ruler.hidden = false;
     this.input.focus();
     this.input.select();
-    if (!wasOpen || selection.length > 0) this.find("incremental");
+    if (!wasOpen || selection.length > 0) this.find();
   }
 
   close(): void {
     if (!this.isOpen()) return;
     this.root.hidden = true;
     this.ruler.hidden = true;
+    this.stopScan();
+    this.steps++;
+    this.current = null;
     this.clearResults();
     this.onClose();
   }
 
-  // F3 / Shift+F3 and the Edit menu's Find Next/Previous: with nothing to
-  // search for yet, open the widget so there's somewhere to type it.
-  findFromMenu(direction: "next" | "previous"): void {
+  // F3 / Shift+F3, Cmd+G / Cmd+Shift+G, and the Edit menu's Find Next/Previous
+  // (older and newer): with nothing to search for yet, open the widget so there's
+  // somewhere to type it.
+  findFromMenu(direction: "older" | "newer"): void {
     if (!this.isOpen() || this.input.value === "") {
       this.open();
       return;
     }
-    this.find(direction);
+    void this.step(direction);
   }
 
   private toggle(option: keyof FindWidget["toggles"]): void {
     const button = this.toggles[option];
     button.setAttribute("aria-pressed", String(button.getAttribute("aria-pressed") !== "true"));
-    this.find("incremental");
+    this.find();
   }
 
   private query(): SearchQuery {
@@ -184,73 +233,291 @@ export class FindWidget {
     // cost more than keeping the highlights that current is worth.
     setTimeout(() => {
       this.refreshScheduled = false;
-      if (this.isOpen() && this.input.value !== "") this.find("refresh");
+      if (this.isOpen() && this.input.value !== "") this.refresh();
     }, REFRESH_DELAY_MS);
   }
 
   private clearResults(): void {
-    this.matches = [];
-    this.active = null;
+    this.live = [];
+    this.paned = [];
+    this.liveTruncated = false;
     setHighlight("find-match", []);
     setHighlight("find-active", []);
     this.ruler.clear();
   }
 
-  // "incremental" re-runs the search as the term or options change, staying
-  // on the current match while it still matches (as VS Code does on typing);
-  // "refresh" does the same after new output, without moving the view.
-  private find(mode: FindMode): void {
+  // The term or options changed: searches the live scrollback again, staying on
+  // the current match while it still matches (as VS Code does on typing), or
+  // taking the first one at or below the top of the view (else the newest), and
+  // starts searching the log for it.
+  private find(): void {
+    this.steps++;
     this.root.classList.remove("invalid");
     if (this.input.value === "") {
+      this.stopScan();
+      this.current = null;
       this.clearResults();
       this.count.textContent = "No results";
       this.root.classList.remove("no-results");
       return;
     }
-    let result: SearchResult<Line>;
     try {
-      result = findMatches(this.view.allLines(), this.query(), MATCH_LIMIT);
+      buildPattern(this.query());
     } catch {
       // An unfinished regex (e.g. "foo(") — wait for the user to complete it.
+      this.stopScan();
+      this.current = null;
       this.clearResults();
       this.root.classList.add("invalid");
       this.count.textContent = "Invalid pattern";
       return;
     }
-    const { matches, truncated } = result;
-    const previous = this.active;
-    const kept = previous ? matches.findIndex((m) => m.line === previous.line && m.start === previous.start) : -1;
-    const index = chooseActive(mode, matches.length, kept, () => this.firstInView(matches));
-    this.matches = matches;
-    this.active = index >= 0 ? matches[index] : null;
-    this.highlight();
-    if (this.active && mode !== "refresh") this.view.revealLine(this.active.line);
-    this.ruler.draw(matches, this.active);
-    this.showCount(index, matches.length, truncated);
+    if (this.scanKey !== JSON.stringify(this.query())) {
+      this.stopScan();
+      this.scheduleScan();
+    }
+    const kept = this.current?.kind === "live" ? this.current.match : null;
+    this.searchPanes();
+    const match = (kept && this.liveMatching(kept)) ?? this.firstInView();
+    this.current = match ? { kind: "live", match } : null;
+    if (match) this.view.revealLine(match.line);
+    this.show();
   }
 
-  // The first match at or below the top of the view, else the newest.
-  private firstInView(matches: ReadonlyArray<Match<Line>>): number {
+  // New output, a resize, or the history pane paging: the same search again,
+  // keeping the current match, without moving either pane.
+  private refresh(): void {
+    try {
+      buildPattern(this.query());
+    } catch {
+      return;
+    }
+    const kept = this.current?.kind === "live" ? this.current.match : null;
+    this.searchPanes();
+    if (kept) {
+      const match = this.liveMatching(kept);
+      this.current = match ? { kind: "live", match } : null;
+    }
+    this.show();
+  }
+
+  private searchPanes(): void {
+    const query = this.query();
+    const live: SearchResult<Line> = findMatches(this.view.allLines(), query, MATCH_LIMIT);
+    this.live = live.matches;
+    this.liveTruncated = live.truncated;
+    this.paned = this.history.isOpen ? findMatches(this.history.view.allLines(), query, MATCH_LIMIT).matches : [];
+  }
+
+  // The live match that is `match` again after a new search, if there is one.
+  private liveMatching(match: Match<Line>): Match<Line> | null {
+    return this.live.find((m) => m.line === match.line && m.start === match.start) ?? null;
+  }
+
+  // The first live match at or below the top of the view, else the newest.
+  private firstInView(): Match<Line> | null {
     const top = this.view.scrollTop();
-    const index = matches.findIndex((m) => this.view.lineOffset(m.line) >= top);
-    return index >= 0 ? index : matches.length - 1;
+    return this.live.find((m) => this.view.lineOffset(m.line) >= top) ?? this.live.at(-1) ?? null;
   }
 
-  private highlight(): void {
-    const range = (m: Match<Line>) => this.view.rangeFor(m.line, m.start, m.end);
+  // --- The log ---------------------------------------------------------------
+
+  private scheduleScan(): void {
+    if (this.scanTimer !== null) clearTimeout(this.scanTimer);
+    this.scanTimer = setTimeout(() => {
+      this.scanTimer = null;
+      void this.startScan();
+    }, SCAN_DELAY_MS);
+  }
+
+  private async startScan(): Promise<LogScan | null> {
+    if (this.scanTimer !== null) {
+      clearTimeout(this.scanTimer);
+      this.scanTimer = null;
+    }
+    const key = JSON.stringify(this.query());
+    if (this.scan && this.scanKey === key) return this.scan;
+    this.stopScan();
+    if (!this.log.available() || !this.isOpen() || this.input.value === "") return null;
+    this.scanKey = key;
+    const query = this.query();
+    const chain = await LogChain.start((request) => this.log.getPage(request));
+    if (!chain || this.scanKey !== key || this.scan) return this.scan;
+    const scan = new LogScan(
+      chain,
+      query,
+      (chunks, times) => this.history.read(chunks, times),
+      () => {
+        if (this.scan !== scan) return;
+        this.showProgress();
+        this.show();
+      },
+    );
+    this.scan = scan;
+    this.scanStarted = Date.now();
+    void scan.run();
+    // The status bar shows how it's going once it has run a while.
+    setTimeout(() => this.showProgress(), PROGRESS_DELAY_MS);
+    return scan;
+  }
+
+  private stopScan(): void {
+    if (this.scanTimer !== null) clearTimeout(this.scanTimer);
+    this.scanTimer = null;
+    this.scan?.cancel();
+    this.scan = null;
+    this.scanKey = "";
+    this.showProgress();
+  }
+
+  private showProgress(): void {
+    const scan = this.scan;
+    const running = scan !== null && !scan.done && (this.waiting || Date.now() - this.scanStarted >= PROGRESS_DELAY_MS);
+    this.status.hidden = !running;
+    if (!running || !scan) return;
+    const percent = Math.floor(scan.progress * 100);
+    const found = scan.count === 1 ? "1 found" : `${scan.count.toLocaleString()} found`;
+    this.status.textContent = `Searching for “${this.input.value}”… ${percent}%, ${found}`;
+  }
+
+  // --- Stepping through the matches ----------------------------------------------
+
+  // The matches in order, newest first: the live scrollback's newer than the
+  // scan's first hit, then the ones it shares with the scan, then the scan's
+  // older hits. Without a scan, just the live scrollback's.
+  private order(): { live: Array<Match<Line>>; newer: number; shared: number } {
+    const scan = this.scan;
+    const cached = this.ordered;
+    // Worked out again only when the live matches or the scan's newest hits change.
+    if (cached && cached.from === this.live && cached.scan === scan && cached.texts === (scan?.texts.length ?? 0)) {
+      return cached.order;
+    }
+    const live = [...this.live].reverse();
+    let order = { live, newer: live.length, shared: 0 };
+    if (scan) {
+      const hits = scan.texts.map((text, i) => ({ text, start: scan.hits[i]?.start ?? -1 }));
+      const aligned = alignLive(
+        live.map((m) => ({ text: m.line.text, start: m.start })),
+        hits,
+      );
+      order = { live, ...aligned };
+    }
+    this.ordered = { from: this.live, scan, texts: scan?.texts.length ?? 0, order };
+    return order;
+  }
+
+  // Where the current match is in the order, or -1.
+  private indexOf(current: Current | null, order: ReturnType<FindWidget["order"]>): number {
+    if (!current) return -1;
+    if (current.kind === "log") return order.newer + current.hit;
+    return order.live.indexOf(current.match);
+  }
+
+  private async step(direction: "older" | "newer"): Promise<void> {
+    if (this.input.value === "" || this.root.classList.contains("invalid")) return;
+    const mine = ++this.steps;
+    // The search of the log, at once if it was waiting on the term to settle.
+    const scan = this.log.available() ? await this.startScan() : null;
+    if (mine !== this.steps) return;
+    let order = this.order();
+    let index = this.indexOf(this.current, order);
+    if (index < 0) index = direction === "older" ? this.startOlder(order) - 1 : 0;
+    let target = index + (direction === "older" ? 1 : -1);
+    const known = () => (scan ? order.newer + scan.hits.length : order.live.length);
+    if (scan && (target >= known() || target < 0) && !scan.done) {
+      // Past the matches found so far: wait for the search to find the next, or
+      // (going round from the newest) to finish.
+      this.waiting = true;
+      this.showProgress();
+      try {
+        if (target < 0) await scan.finish();
+        else await scan.reach(target - order.newer);
+      } finally {
+        this.waiting = false;
+        this.showProgress();
+      }
+      if (mine !== this.steps || this.scan !== scan) return;
+      order = this.order();
+    }
+    const total = known();
+    if (total === 0) {
+      this.show();
+      return;
+    }
+    target = ((target % total) + total) % total;
+    await this.go(target, order);
+  }
+
+  // Where going older starts from without a current match: the newest live
+  // match at or above the bottom of the view.
+  private startOlder(order: ReturnType<FindWidget["order"]>): number {
+    const bottom = this.view.scrollTop() + this.view.element.clientHeight;
+    const index = order.live.findIndex((m) => this.view.lineOffset(m.line) < bottom);
+    return index >= 0 ? index : 0;
+  }
+
+  private async go(index: number, order: ReturnType<FindWidget["order"]>): Promise<void> {
+    const mine = this.steps;
+    if (index < order.newer + order.shared) {
+      const match = order.live[index];
+      this.current = { kind: "live", match };
+      this.view.revealLine(match.line);
+      this.show();
+      return;
+    }
+    const scan = this.scan;
+    const hit = scan?.hits[index - order.newer];
+    if (!scan || !hit) return;
+    this.current = { kind: "log", hit: index - order.newer };
+    await this.history.showPage(scan.chain, hit.k, { line: hit.line, at: "center" });
+    if (mine !== this.steps) return;
+    this.searchPanes();
+    this.show();
+  }
+
+  // --- Showing it ----------------------------------------------------------------
+
+  private show(): void {
+    const order = this.order();
+    const current = this.current;
+    let active: Range | null = null;
+    let liveActive: Match<Line> | null = null;
+    if (current?.kind === "live") {
+      liveActive = current.match;
+      active = this.view.rangeFor(current.match.line, current.match.start, current.match.end);
+    } else if (current?.kind === "log" && this.scan) {
+      const hit = this.scan.hits[current.hit];
+      const line = hit ? this.history.lineAt(this.scan.chain, hit.k, hit.line) : null;
+      if (hit && line) active = this.history.view.rangeFor(line, hit.start, hit.end);
+    }
+    const ranges = [
+      ...this.live.map((m) => this.view.rangeFor(m.line, m.start, m.end)),
+      ...this.paned.map((m) => this.history.view.rangeFor(m.line, m.start, m.end)),
+    ];
     setHighlight(
       "find-match",
-      this.matches.map(range).filter((r): r is Range => r !== null),
+      ranges.filter((r): r is Range => r !== null),
     );
-    const active = this.active ? range(this.active) : null;
     setHighlight("find-active", active ? [active] : []);
+    this.ruler.draw(this.live, liveActive);
+    this.showCount(this.indexOf(current, order), order);
   }
 
-  private showCount(index: number, total: number, truncated: boolean): void {
-    const limited = truncated ? `${MATCH_LIMIT}+` : String(total);
-    this.root.classList.toggle("no-results", total === 0 && this.input.value !== "");
-    if (total === 0) this.count.textContent = "No results";
-    else if (index < 0) this.count.textContent = `? of ${limited}`;
-    else this.count.textContent = `${index + 1} of ${limited}`;
+  private showCount(index: number, order: ReturnType<FindWidget["order"]>): void {
+    const scan = this.scan;
+    let total: string;
+    let none: boolean;
+    if (scan) {
+      const count = order.newer + scan.count;
+      total = `${count.toLocaleString()}${scan.done ? "" : "…"}`;
+      none = count === 0 && scan.done;
+    } else {
+      total = this.liveTruncated ? `${MATCH_LIMIT}+` : String(this.live.length);
+      none = this.live.length === 0 && !this.scanTimer;
+    }
+    this.root.classList.toggle("no-results", none);
+    if (none) this.count.textContent = "No results";
+    else if (index < 0) this.count.textContent = `? of ${total}`;
+    else this.count.textContent = `${(index + 1).toLocaleString()} of ${total}`;
   }
 }

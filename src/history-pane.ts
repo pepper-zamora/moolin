@@ -1,4 +1,5 @@
 import { MAX_HELD_LINES, type HistoryPage, type HistoryRequest } from "./history-paging";
+import type { Line } from "./line-builder";
 import { LogChain, LogPane, locateFromEnd, type PanePlace } from "./log-pane";
 import { ScrollbackView, type ScrollbackViewOptions } from "./scrollback-view";
 import { TimestampGutter } from "./timestamp-gutter";
@@ -100,6 +101,19 @@ export class HistoryPane {
     this.view.setPuebloEnabled(this.live.puebloEnabled);
     this.show();
     await this.pane.show(chain, k, place);
+  }
+
+  // Reads a page of the log into lines as this pane would show them (in the
+  // connection's Pueblo mode), without showing them: what search looks through.
+  read(chunks: ReadonlyArray<Uint8Array>, times: ReadonlyArray<number | null>): ReadonlyArray<Line> {
+    this.view.setPuebloEnabled(this.live.puebloEnabled);
+    return this.view.readHistory(chunks, times);
+  }
+
+  // The line of the pane that is line `line` of page k of `chain`, if it holds it.
+  lineAt(chain: LogChain, k: number, line: number): Line | null {
+    const index = this.pane.indexOf(chain, k, { line });
+    return index === null ? null : (this.view.allLines()[index] ?? null);
   }
 
   close(): void {

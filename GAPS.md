@@ -200,8 +200,11 @@ currently discards or never negotiates:
 - **Searchable/filterable scrollback** beyond plain text search (Mudlet
   logs are searchable; Blightmud has a text-search mode in its TUI). Moolin
   has plain text search (Edit > Find, with case, whole-word and regex
-  options) but nothing beyond it, such as filtering to matching lines or
-  searching the on-disk logs.
+  options), which covers the character's whole on-disk log as well as the
+  scrollback, but nothing beyond it, such as filtering to matching lines.
+  Searching a log reads all of it, at roughly 100 MB a second; an index
+  kept beside the log would make it near-instant, if logs grow big enough to
+  need one.
 - **Tag-aware scrollback filtering**: the view-side counterpart to
   Blightmud's trigger-tagging (§1) — once lines can be tagged, being able to
   show-only or hide-by-tag turns tags into a lightweight "channel" view
