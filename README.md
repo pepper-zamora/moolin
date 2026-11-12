@@ -100,21 +100,20 @@ from source never check at startup.
 - **Scrollback that survives a reload.** 20,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
-- **Endless scroll.** Scroll to the top and the window pages older history in
-  from the character's log, 5,000 lines at a time, as far back as the log
-  goes. The scrollbar then covers what has been loaded, not the whole log.
-  The window holds at most 30,000 lines: past that, the lines furthest from
-  where you are reading are let go of, and scrolling back towards them pages
-  them in again. When the newest lines are let go of, new output isn't shown
-  until you scroll back down to it; sending a command leaves you where you
-  are. End takes you to the newest line in one press, as does clearing the
-  screen. At the bottom the window goes back to its usual 20,000 lines. Find
-  searches the whole log (see Scrollback search). An older
-  page starts in the default colour, so a colour a server turned on in an
-  earlier page and never turned off isn't shown on it. A window with no log
-  (locked, or a disk error) has only its 20,000 lines. Turning encryption on
-  or off rewrites the logs, so each window starts again from its newest
-  20,000 lines.
+- **History pane.** Scroll up past the top of the scrollback (the mouse
+  wheel, or Page Up) and the window splits: a history pane opens above it, at
+  the lines just before the scrollback's oldest, read from the character's log,
+  and pages further back, 5,000 lines at a time, as far as the log goes. The
+  scrollback below carries on as it was, with new output and the input line,
+  so you can keep playing while you read. Drag the bar between them to share
+  the height. Escape, End, the bar's close button, or scrolling down past the
+  end of the log close the pane. Page Up and Page Down scroll it while it's
+  open. It holds at most 30,000 lines, letting go of those furthest from where
+  you are reading and paging them in again as you scroll back. A page starts
+  in the default colour, so a colour a server turned on in an earlier page and
+  never turned off isn't shown on it. A window with no log (locked, or a disk
+  error) has only its 20,000 lines of scrollback, and no history pane.
+  Turning encryption on or off rewrites the logs, which closes the pane.
 - **Pueblo.** On a world that speaks it, links are clickable (right-click
   one with several commands to choose), and the status bar shows what a link
   will send or open while the pointer is on it. See
@@ -156,12 +155,9 @@ from source never check at startup.
   [Preferences](#preferences)).
 - **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
   right of the window, with match-case, whole-word and regular-expression
-  toggles. Every match in the lines loaded is highlighted, and marked beside
-  the scrollbar, and the matches update as new output arrives (the newest 1,000
-  are kept). Next and previous (Enter and Shift+Enter, or F3 and Shift+F3) go
-  on past the first and last of them through the rest of the character's log,
-  and show the page the next match is on; they wrap around only at the ends of
-  the log. While the log holds more than is loaded, the count says "loaded".
+  toggles. Every match is highlighted, and marked beside the scrollbar, and
+  the matches update as new output arrives (the newest 1,000 are kept). It
+  searches the scrollback's lines, not the history pane's.
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
@@ -321,8 +317,9 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Enter / Shift+Enter      | Send / insert a newline                                 |
 | Up / Down                | Previous / next command, from the first / last line     |
 | Ctrl+Up / Ctrl+Down      | Previous / next command, from anywhere                  |
-| Page Up / Page Down      | Scroll the scrollback                                   |
-| End                      | To the newest line, when not there already (otherwise the end of the input line); Ctrl+End always |
+| Page Up / Page Down      | Scroll the scrollback, or the history pane while it's open; Page Up at the top opens it |
+| End                      | To the newest line, closing the history pane, when not there already (otherwise the end of the input line); Ctrl+End always |
+| Escape                   | Close the find box, else the history pane               |
 | Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
 | Ctrl+F                   | Find in the scrollback                                  |
 | F3 / Shift+F3            | Next / previous match                                   |
@@ -599,7 +596,8 @@ leaves a Moolin you have running and your logs alone), connects it to a
 local test server, and drives it over the Chrome DevTools Protocol:
 clicking, selecting, copying and typing, and checking where keyboard focus
 goes, that typed commands reach the server, what copying a wrapped or
-partial selection gives, Clear Screen, a Pueblo world's links, and the
+partial selection gives, Clear Screen, a Pueblo world's links, the history
+pane (opening it at the right line, paging back, closing it), and the
 encryption flows (the first-run offer, turning it on, unlocking, logging
 encrypted, changing the key phrase, the phrase length limit, and unlocking in
 one window while another waits). The key file picker and the stop
@@ -651,7 +649,8 @@ been tried. To check a packaged build instead, point
 | `src/key-file.ts`         | Reading a key file, and unlocking with the one Moolin remembers            |
 | `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
 | `src/history-paging.ts`   | What the window and main agree on for paging through history              |
-| `src/history-window.ts`   | Pages history in and out of the scrollback as you scroll                  |
+| `src/log-pane.ts`         | A fixed chain of log pages, and the history pane's paging through it      |
+| `src/history-pane.ts`     | The history pane above the scrollback: opening, closing, the divider      |
 | `src/line-dedupe.ts`      | Keeps one copy of a line when several connections to a character get it    |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
@@ -666,7 +665,6 @@ been tried. To check a packaged build instead, point
 | `src/pueblo.ts`           | Pueblo: the greeting, and reading its links, line breaks and clears        |
 | `src/link-menu.ts`        | The popup that lists a Pueblo link's commands                              |
 | `src/scrollback-search.ts`| Finding matches in the lines, and which match is current                   |
-| `src/log-search.ts`       | Searching the log beyond the lines loaded, a page at a time               |
 | `src/worlds-dialog.ts`    | The Worlds dialog                                                         |
 | `src/preferences-dialog.ts` | The Preferences dialog                                                  |
 | `src/tabs.ts`             | Tab strips (the Worlds dialog's), with ‹ › scrolling when they overflow   |

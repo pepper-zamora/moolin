@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MAX_HELD_LINES, PAGE_LINES, type HistoryPage, type HistoryRequest, type LogCursor } from "./history-paging";
-import { LogChain, LogPane, type PaneView } from "./log-pane";
+import { LogChain, LogPane, locateFromEnd, type PaneView } from "./log-pane";
 
 const SCREEN = 40;
 const decoder = new TextDecoder();
@@ -53,9 +53,9 @@ class FakeView implements PaneView {
     this.top = 0;
     return this.lines.length;
   }
-  revealLineAt(index: number): void {
-    if (index >= this.top && index < this.top + SCREEN) return;
-    this.scrollTo(index - SCREEN / 2);
+  revealLineAt(index: number, at: "center" | "bottom" = "center"): void {
+    if (at === "bottom") this.scrollTo(index - SCREEN + 1);
+    else if (index < this.top || index >= this.top + SCREEN) this.scrollTo(index - SCREEN / 2);
   }
   scrollToBottom(): void {
     this.top = Math.max(0, this.lines.length - SCREEN);
@@ -261,4 +261,28 @@ test("any mix of scrolling, showing and output keeps the pane a bounded run of t
       assert.ok(view.lineCount <= MAX_HELD_LINES + PAGE_LINES, `${view.lineCount} lines, ${where}`);
     }
   }
+});
+
+test("the live scrollback's oldest line is found in the log by its distance from the end, then its text", async () => {
+  const { log, view, pane, getPage } = setup(30000);
+  const chain = await LogChain.start(getPage);
+  assert.ok(chain);
+  const read = (chunks: ReadonlyArray<Uint8Array>) => linesOf(chunks).map((text) => ({ text }));
+  // 12,000 lines from the end is line 18,000: on page 2 (lines 15,000 to 19,999).
+  assert.deepEqual(await locateFromEnd(chain, read, 12000, "line 18000"), { k: 2, line: 3000 });
+  // A count a few lines out still finds the line by its text.
+  assert.deepEqual(await locateFromEnd(chain, read, 12003, "line 18000"), { k: 2, line: 3000 });
+  // Text that isn't near is left to the count.
+  assert.deepEqual(await locateFromEnd(chain, read, 12000, "not in the log"), { k: 2, line: 3000 });
+  // Past the start of the log, its first line.
+  assert.deepEqual(await locateFromEnd(chain, read, 99999, "nothing"), { k: 5, line: 0 });
+  // The pane shows it at its bottom edge, the history above it in view.
+  await pane.show(chain, 2, { line: 3000, at: "bottom" });
+  await settle();
+  assert.equal(view.lines[view.top + SCREEN - 1], "line 18000");
+  assertRun(view.lines, log); // A page's first line, with the page before it brought in to fill the view above.
+  await pane.show(chain, 3, { line: 0, at: "bottom" });
+  await settle();
+  assert.equal(view.lines[view.top + SCREEN - 1], "line 10000");
+  assertRun(view.lines, log);
 });

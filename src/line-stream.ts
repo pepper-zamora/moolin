@@ -78,7 +78,7 @@ export class LineStream {
   }
 
   // Drops the newest `count` lines, and any half-received escape sequence,
-  // style or link with them, so what is added next (see catchUp) starts afresh.
+  // style or link with them, so what is added next starts afresh.
   dropBack(count: number): Line[] {
     const dropped = this.builder.dropBack(count);
     this.pueblo.setEnabled(this.pueblo.enabled); // forgets a tag cut off, keeping the mode
@@ -95,6 +95,16 @@ export class LineStream {
   // commands), which carries no time.
   write(data: string | Uint8Array, time: number | null): void {
     this.ingest(data, constantTime(time));
+  }
+
+  // Whether the connection is in Pueblo mode, which history read on its own
+  // (see read) assumes.
+  get puebloEnabled(): boolean {
+    return this.pueblo.enabled;
+  }
+
+  setPuebloEnabled(enabled: boolean): void {
+    this.pueblo.setEnabled(enabled);
   }
 
   // The server's Pueblo greeting no longer counts (the first line has been
@@ -166,13 +176,6 @@ export class LineStream {
     const lines = this.read(chunks, times);
     this.builder.append(lines);
     return lines;
-  }
-
-  // Adds the history that leads up to live output, through this stream, so the
-  // live output goes on from it (finishing a line it leaves open, say).
-  catchUp(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): void {
-    const source = listedTimes(times);
-    for (const chunk of chunks) this.ingest(chunk, source);
   }
 
   private ingest(data: string | Uint8Array, source: TimeSource): void {

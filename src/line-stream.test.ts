@@ -408,19 +408,3 @@ test("newer history goes after the lines held, read on its own", () => {
   ]);
   assert.notEqual(s.lines[1].runs?.[0].style.key, s.lines[2].runs?.[0].style.key, "the red doesn't carry over");
 });
-
-test("after the newest lines are dropped, catching up goes on into live output", () => {
-  const s = new LineStream();
-  s.write("kept\r\n", 1);
-  s.write("\x1b[31mhalf a line in red", 2);
-  s.dropBack(1);
-  assert.deepEqual(view(s), [["kept", 1]]);
-  s.catchUp([Buffer.from("caught up\r\nprompt> ")], [3]);
-  s.write("typed\r\n", 4);
-  assert.deepEqual(view(s), [
-    ["kept", 1],
-    ["caught up", 3],
-    ["prompt> typed", 4],
-  ]);
-  assert.equal(s.lines[1].runs?.length, 1, "the red was dropped with its line");
-});

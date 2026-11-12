@@ -12,12 +12,11 @@ import { LinkMenu } from "./link-menu";
 import { LiveReplay } from "./live-replay";
 import { linkCommands } from "./pueblo";
 import { SCROLLBACK_LINES } from "./history-paging";
-import { HistoryWindow } from "./history-window";
-import { LogSearch } from "./log-search";
+import { HistoryPane } from "./history-pane";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import { fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
 import { chooseSelectAllTarget, type SelectAllTarget } from "./select-all";
-import { ScrollbackView } from "./scrollback-view";
+import { ScrollbackView, type ScrollbackViewOptions } from "./scrollback-view";
 import { TimestampGutter } from "./timestamp-gutter";
 
 window.addEventListener("error", (event) => {
@@ -85,59 +84,105 @@ function cancelPendingReclaim(): void {
   reclaimTimer = null;
 }
 
-const view = new ScrollbackView(terminalContainer, {
+// What the live scrollback and the history pane share: the font, and what
+// clicks, hovering and selecting in them do. `other` is the other pane, whose
+// selection a new one in this pane lets go of, so only one holds a selection.
+function scrollbackOptions(
+  other: () => ScrollbackView | undefined,
+): Omit<ScrollbackViewOptions, "maxLines" | "onResize"> {
+  return {
+    fontFamily,
+    fontSize: initialFont.fontSize,
+    wordWrap: false, // set from the connection once it's known (applyConnectionState)
+    ...scrollbackHandlers(other),
+  };
+}
+
+function scrollbackHandlers(
+  other: () => ScrollbackView | undefined,
+): Omit<ScrollbackViewOptions, "maxLines" | "onResize" | "fontFamily" | "fontSize" | "wordWrap"> {
+  return {
+    // Renderer has no direct access to Electron's `shell` module (sandboxed),
+    // so opening the link is proxied through main.ts.
+    onOpenUrl: (url) => window.moolin.openExternal(url),
+    onLink: (link) => {
+      if (link.cmd !== null) {
+        const [command] = linkCommands(link.cmd, link.text);
+        if (command) sendLinkCommand(command);
+      } else if (link.href !== null && /^https?:\/\//i.test(link.href)) {
+        window.moolin.openExternal(link.href);
+      }
+    },
+    // A link with several commands offers them in a menu.
+    onLinkMenu: (link, event) => {
+      const commands = link.cmd === null ? [] : linkCommands(link.cmd, link.text);
+      if (commands.length < 2) return false;
+      linkMenu.show(commands, event.clientX, event.clientY);
+      return true;
+    },
+    // Where a link goes is shown in the status bar while the pointer is on it.
+    onHover: (target) => {
+      if (target === null) setHoverMessage(null);
+      else if ("url" in target) setHoverMessage(target.url);
+      else if (target.link.cmd !== null)
+        setHoverMessage(`Send: ${linkCommands(target.link.cmd, target.link.text).join(" | ")}`);
+      else setHoverMessage(target.link.href);
+    },
+    log: (message) => window.moolin.log("debug", "renderer", message),
+    onPointerDown: () => {
+      cancelPendingReclaim();
+      other()?.clearSelection();
+    },
+    onPointerUp: () => {
+      // Not at once: focusing the input area replaces the document's selection,
+      // which would cut short a double or triple click still going on. Only the
+      // time the system allows between clicks is waited out, and typing in the
+      // meantime claims focus straight away (see the keydown handler).
+      cancelPendingReclaim();
+      reclaimTimer = setTimeout(() => {
+        reclaimTimer = null;
+        reclaimFocus();
+      }, MULTI_CLICK_MS);
+    },
+  };
+}
+
+const view: ScrollbackView = new ScrollbackView(terminalContainer, {
+  ...scrollbackOptions(() => historyPane?.view),
   maxLines: SCROLLBACK_LINES,
-  fontFamily,
-  fontSize: initialFont.fontSize,
-  wordWrap: false, // set from the connection once it's known (applyConnectionState)
   onResize: (cols, rows) => {
     window.moolin.log("debug", "renderer", "terminal resized to", `${cols}x${rows}`);
     window.moolin.sendResize(cols, rows);
     screenSize.textContent = `${cols}x${rows}`;
   },
-  // Renderer has no direct access to Electron's `shell` module (sandboxed),
-  // so opening the link is proxied through main.ts.
-  onOpenUrl: (url) => window.moolin.openExternal(url),
-  onLink: (link) => {
-    if (link.cmd !== null) {
-      const [command] = linkCommands(link.cmd, link.text);
-      if (command) sendLinkCommand(command);
-    } else if (link.href !== null && /^https?:\/\//i.test(link.href)) {
-      window.moolin.openExternal(link.href);
-    }
-  },
-  // A link with several commands offers them in a menu.
-  onLinkMenu: (link, event) => {
-    const commands = link.cmd === null ? [] : linkCommands(link.cmd, link.text);
-    if (commands.length < 2) return false;
-    linkMenu.show(commands, event.clientX, event.clientY);
-    return true;
-  },
-  // Where a link goes is shown in the status bar while the pointer is on it.
-  onHover: (target) => {
-    if (target === null) setHoverMessage(null);
-    else if ("url" in target) setHoverMessage(target.url);
-    else if (target.link.cmd !== null)
-      setHoverMessage(`Send: ${linkCommands(target.link.cmd, target.link.text).join(" | ")}`);
-    else setHoverMessage(target.link.href);
-  },
-  log: (message) => window.moolin.log("debug", "renderer", message),
-  onPointerDown: () => cancelPendingReclaim(),
-  onPointerUp: () => {
-    // Not at once: focusing the input area replaces the document's selection,
-    // which would cut short a double or triple click still going on. Only the
-    // time the system allows between clicks is waited out, and typing in the
-    // meantime claims focus straight away (see the keydown handler).
-    cancelPendingReclaim();
-    reclaimTimer = setTimeout(() => {
-      reclaimTimer = null;
-      reclaimFocus();
-    }, MULTI_CLICK_MS);
-  },
 });
 screenSize.textContent = `${view.cells.cols}x${view.cells.rows}`;
 
 const gutter = new TimestampGutter(gutterElement, view);
+
+// The last replay, which says whether the log holds history older than the live
+// scrollback's oldest line (as it does once lines have been trimmed off its top).
+let lastReplay: ScrollbackReplay | null = null;
+
+// The history pane above the live scrollback (see history-pane.ts).
+const historyPane: HistoryPane = new HistoryPane(
+  {
+    panes: element("panes"),
+    row: element("history-row"),
+    terminal: element("history"),
+    gutter: element("history-gutter"),
+    divider: element("history-divider"),
+    close: element("history-close"),
+  },
+  scrollbackOptions(() => view),
+  view,
+  (request) => window.moolin.getHistoryPage(request),
+  () => lastReplay !== null && lastReplay.fromLog && (lastReplay.before !== null || view.hasTrimmed),
+  (open) => {
+    if (!open) view.scrollToBottom();
+  },
+  (message) => window.moolin.log("warn", "renderer", message),
+);
 
 // Keeps the input area and gutter's font matched to the scrollback's, since
 // neither shares its element; used at startup and whenever the font changes
@@ -148,6 +193,8 @@ function applyFont(family: string, size: number): void {
   inputArea.style.fontSize = `${size}px`;
   view.setFont(family, size);
   gutter.setFont(family, size);
+  historyPane.view.setFont(family, size);
+  historyPane.gutter.setFont(family, size);
   resizeInput();
 }
 applyFont(fontFamily, initialFont.fontSize);
@@ -247,11 +294,9 @@ function sendInput(): void {
   window.moolin.sendInput(text);
 }
 
-// Clear Screen (Ctrl+L, and View > Clear Screen): see ScrollbackView.clear. It
-// clears below the newest line, and so goes there first, as it always has.
+// Clear Screen (Ctrl+L, and View > Clear Screen): see ScrollbackView.clear.
 function clearToOffscreen(): void {
-  if (paging.showsLive) view.clear();
-  else void paging.toNewest().then(() => view.clear());
+  view.clear();
 }
 
 // Enter sends and Shift+Enter inserts a newline. Up/Down browse history when
@@ -282,13 +327,13 @@ inputArea.addEventListener("input", () => resizeInput());
 
 // Working in the input line (clicking into it, or editing it) ends a lingering
 // scrollback selection, so Select All then means the input line.
-inputArea.addEventListener("mousedown", () => view.clearSelection());
+inputArea.addEventListener("mousedown", () => clearSelections());
 // "beforeinput" is captured before the value mutates (unlike "input", which
 // fires after), so the pre-edit state can be pushed as an undo step.
 // Consecutive keystrokes coalesce into one step via InputUndoStack's own
 // debounce.
 inputArea.addEventListener("beforeinput", () => {
-  view.clearSelection();
+  clearSelections();
   inputUndo.pushTyping(inputSnapshot(), Date.now());
   reportUndoState();
 });
@@ -304,7 +349,7 @@ window.addEventListener("resize", () => resizeInput());
 // While there's no connection to type to, focus is just left off the input,
 // leaving keys to the window (and its menu shortcuts).
 function reclaimFocus(): void {
-  if (modalOpen() || view.isSelecting()) return;
+  if (modalOpen() || view.isSelecting() || historyPane.view.isSelecting()) return;
   const active = document.activeElement;
   if (findWidget.root.contains(active) || securityStatus.isHovered()) return;
   if (!inputArea.disabled && active !== inputArea) inputArea.focus();
@@ -319,7 +364,17 @@ window.addEventListener("focus", () => setTimeout(reclaimFocus));
 
 // Selecting text in the input means Ctrl+C should copy that, not a stale
 // scrollback selection.
-inputArea.addEventListener("select", () => view.clearSelection());
+inputArea.addEventListener("select", () => clearSelections());
+
+function clearSelections(): void {
+  view.clearSelection();
+  historyPane.view.clearSelection();
+}
+
+// The scrollback selection there is, in either pane (only one holds one).
+function scrollbackSelection(): string {
+  return historyPane.view.selectedText() || view.selectedText();
+}
 
 // Copy/paste go through Electron's clipboard module (via preload) rather
 // than the browser's native copy/paste commands, which act on whichever
@@ -330,7 +385,7 @@ inputArea.addEventListener("select", () => view.clearSelection());
 function copySelection(): void {
   const text =
     securityStatus.selectedText() ||
-    view.selectedText() ||
+    scrollbackSelection() ||
     inputArea.value.slice(inputArea.selectionStart, inputArea.selectionEnd);
   if (text.length > 0) {
     window.moolin.clipboard.writeText(text);
@@ -341,7 +396,7 @@ function copySelection(): void {
 // removed — Cut just falls back to Copy in that case. Otherwise it cuts from
 // the input area like a normal text field.
 function cutSelection(): void {
-  if (view.selectedText() !== "") {
+  if (scrollbackSelection() !== "") {
     copySelection();
     return;
   }
@@ -380,10 +435,14 @@ window.moolin.onPasteRequested(() => void pasteIntoInput());
 // Select All: the input line, unless something is selected in the scrollback
 // (see select-all.ts). Reached from the keyboard and from the Edit and context
 // menus; the menus name their target only where they know it.
+// In the scrollback, it's the history pane's lines if that holds the selection
+// (or was right-clicked), else the live scrollback's.
+let selectAllPane: ScrollbackView = view;
 function selectAll(requested?: SelectAllTarget): void {
-  const target = chooseSelectAllTarget(requested, view.selectedText() !== "", !inputArea.disabled);
+  const target = chooseSelectAllTarget(requested, scrollbackSelection() !== "", !inputArea.disabled);
   if (target === "scrollback") {
-    view.selectAll();
+    const pane = historyPane.view.selectedText() !== "" ? historyPane.view : requested ? selectAllPane : view;
+    pane.selectAll();
   } else {
     inputArea.focus();
     inputArea.select(); // which also lets go of any scrollback selection (see the "select" handler)
@@ -401,6 +460,7 @@ window.moolin.onToggleTimestamps((show) => {
   // The gutter takes its width from the scrollback when shown (and gives it
   // back when hidden); the view refits itself when its width changes.
   gutter.setShown(show);
+  historyPane.gutter.setShown(show);
 });
 
 // Starts the Edit menu's Undo/Redo items disabled until there's anything to act on.
@@ -433,6 +493,8 @@ document.addEventListener(
       findWidget.findFromMenu(event.shiftKey ? "previous" : "next");
     } else if (event.key === "Escape" && findWidget.isOpen()) {
       findWidget.close();
+    } else if (event.key === "Escape" && historyPane.isOpen) {
+      historyPane.close();
     } else if (editingFind && mod && ["a", "c", "x", "v", "z", "y"].includes(key)) {
       handled = false;
     } else if (mod && !event.shiftKey && key === "a") {
@@ -453,11 +515,23 @@ document.addEventListener(
     } else if (mod && !event.shiftKey && key === "l") {
       clearToOffscreen();
     } else if (event.key === "PageUp" || event.key === "PageDown") {
-      view.scrollPages(event.key === "PageUp" ? -1 : 1);
-    } else if (event.key === "End" && !event.shiftKey && !event.altKey && !editingFind && (mod || !paging.atNewest())) {
-      // To the newest line, in one press however far back. At the newest line
-      // End is the input area's again (Home always is); Ctrl+End always goes.
-      void paging.toNewest();
+      // The history pane's while it's open; Page Up at the top of the live
+      // scrollback opens it.
+      const up = event.key === "PageUp";
+      if (historyPane.isOpen) historyPane.view.scrollPages(up ? -1 : 1);
+      else if (up && view.scrollTop() <= 0) void historyPane.openAbove();
+      else view.scrollPages(up ? -1 : 1);
+    } else if (
+      event.key === "End" &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !editingFind &&
+      (mod || historyPane.isOpen || !view.isAtBottom())
+    ) {
+      // To the newest line, closing the history pane. At the newest line End is
+      // the input area's again (Home always is); Ctrl+End always goes.
+      if (historyPane.isOpen) historyPane.close();
+      else view.scrollToBottom();
     } else {
       handled = false;
     }
@@ -476,10 +550,12 @@ document.addEventListener("contextmenu", (event) => {
   // Any selection Copy would act on (see copySelection).
   const hasSelection =
     securityStatus.selectedText() !== "" ||
-    view.selectedText() !== "" ||
+    scrollbackSelection() !== "" ||
     inputArea.selectionStart !== inputArea.selectionEnd;
-  // Select All there means what was clicked on: the scrollback, or the input line.
-  const selectAllTarget = terminalContainer.contains(event.target as Node) ? "scrollback" : "input";
+  // Select All there means what was clicked on: a scrollback, or the input line.
+  const inHistory = historyPane.view.element.contains(event.target as Node);
+  selectAllPane = inHistory ? historyPane.view : view;
+  const selectAllTarget = inHistory || terminalContainer.contains(event.target as Node) ? "scrollback" : "input";
   window.moolin.showContextMenu({ hasSelection, selectAllTarget });
 });
 
@@ -489,20 +565,19 @@ document.addEventListener("contextmenu", (event) => {
 // no stamp (see GAPS.md §8).
 function writeReplay(replay: ScrollbackReplay): void {
   view.replay(replay.chunks, replay.times, replay.pueblo, replay.greetingOpen);
-  paging.replayed(replay);
+  lastReplay = replay;
 }
 
 // Starts over from a replay: the connect-time switch to a world's logged
-// history, or a replay fetched again (see HistoryWindow).
+// history. The history pane, on the old log, closes.
 function applyReset(replay: ScrollbackReplay): void {
+  historyPane.close();
   view.reset();
   writeReplay(replay);
 }
 
-// Live output, unless the newest lines are let go of to hold older history: then
-// it is in the log, and shown once scrolling down pages back to it.
 function applyData(data: string | Uint8Array, time: number | null): void {
-  if (paging.showsLive) view.write(data, time);
+  view.write(data, time);
 }
 
 const live = new LiveReplay(applyReset, (event) => {
@@ -511,26 +586,13 @@ const live = new LiveReplay(applyReset, (event) => {
   else applyReset(event.replay);
 });
 
-// Pages older history in from the character's log when the view nears the top,
-// and back out again (see history-window.ts).
-const paging = new HistoryWindow(view, window.moolin, live, (message) =>
-  window.moolin.log("warn", "renderer", message),
-);
-view.onScroll(() => paging.scrolled());
-view.onChange(() => paging.linesAdded());
-window.moolin.onHistoryRewritten(() => void paging.rewritten());
+// The log was rewritten (encryption turned on or off), so the places the
+// history pane holds in it no longer fit.
+window.moolin.onHistoryRewritten(() => historyPane.close());
 
-const findWidget = new FindWidget(
-  view,
-  paging,
-  new LogSearch(
-    (request) => window.moolin.getHistoryPage(request),
-    (chunks, times) => view.readHistory(chunks, times),
-  ),
-  () => {
-    if (!inputArea.disabled) inputArea.focus();
-  },
-);
+const findWidget = new FindWidget(view, () => {
+  if (!inputArea.disabled) inputArea.focus();
+});
 
 // Replay the main process's scrollback (it survives a reload, and catches a new
 // window up on what was written before its page loaded), then follow live
@@ -593,6 +655,7 @@ function applyConnectionState(state: WindowState): void {
   document.title = connected && state.label ? `${state.label} - ${APP_NAME}` : APP_NAME;
   inputArea.disabled = !connected;
   view.setWordWrap(state.wordWrap);
+  historyPane.view.setWordWrap(state.wordWrap);
   view.setHonorClear(state.honorClear);
   statusBar.dataset.status = state.status;
   statusMessage =
@@ -646,6 +709,8 @@ resizeInput();
 document.fonts.ready.then(() => {
   view.refit();
   gutter.schedule();
+  historyPane.view.refit();
+  historyPane.gutter.schedule();
 
   // A freshly opened (non-cascaded) window asks main.ts to size it so this
   // scrollback shows 80x25 characters, centered on screen (see WindowManager).

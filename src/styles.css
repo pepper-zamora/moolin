@@ -49,16 +49,26 @@ html, body {
 
 /* The terminal and its timestamp gutter sit side by side; the row is what
    flexes to fill the window's height. */
-#terminal-row {
+/* The panes: the history pane (when open) above the divider, and the live
+   scrollback below, which flexes to fill what's left. */
+#panes {
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
+  flex-direction: column;
   position: relative; /* anchors the find widget */
+}
+
+.scrollback-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  position: relative; /* anchors the search ruler */
 }
 
 /* The scrollback: a scrolling element holding one div per line (see
    scrollback-view.ts). The browser wraps and selects the text. */
-#terminal {
+.scrollback {
   flex: 1 1 auto;
   min-width: 0;
   position: relative; /* the lines' offsetTop, for the gutter, is measured from here */
@@ -78,12 +88,12 @@ html, body {
   cursor: text;
 }
 
-#terminal.wrap-words {
+.scrollback.wrap-words {
   word-break: normal;
 }
 
-#terminal ::selection,
-#terminal::selection {
+.scrollback ::selection,
+.scrollback::selection {
   /* Focus lives in the input area, so the scrollback is never focused; the
      selection is drawn the same as a focused one rather than dimmed. */
   background: #264f78;
@@ -103,30 +113,30 @@ html, body {
 }
 
 /* Measures a character cell (see ScrollbackView.refit). */
-#terminal .probe {
+.scrollback .probe {
   position: absolute;
   visibility: hidden;
   white-space: pre;
   pointer-events: none;
 }
 
-#terminal::-webkit-scrollbar {
+.scrollback::-webkit-scrollbar {
   width: 14px;
 }
 
-#terminal::-webkit-scrollbar-track {
+.scrollback::-webkit-scrollbar-track {
   background: var(--bg);
 }
 
-#terminal::-webkit-scrollbar-thumb {
+.scrollback::-webkit-scrollbar-thumb {
   background: #5a5a5a;
 }
 
-#terminal::-webkit-scrollbar-thumb:hover {
+.scrollback::-webkit-scrollbar-thumb:hover {
   background: #7a7a7a;
 }
 
-#terminal::-webkit-scrollbar-thumb:active {
+.scrollback::-webkit-scrollbar-thumb:active {
   background: #9a9a9a;
 }
 
@@ -147,7 +157,7 @@ html, body {
    measured pixel offsets, not by counting rows). It's purely
    visual: no pointer events, no text selection, so it never interferes with
    selecting or clicking the scrollback. */
-#gutter {
+.gutter {
   flex: 0 0 auto;
   position: relative;
   overflow: hidden;
@@ -376,6 +386,48 @@ html, body {
 #find-widget.no-results #find-count,
 #find-widget.invalid #find-count {
   color: #f48771;
+}
+
+/* The history pane takes a share of the panes' height (set as its flex-basis
+   by history-pane.ts); the live scrollback below takes the rest. */
+#history-row {
+  flex: 0 0 auto;
+}
+
+/* Between the history pane and the live scrollback: drag it to share the
+   height between them. */
+#history-divider {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  height: 18px;
+  padding: 0 6px;
+  background: #1e1e1e;
+  border-top: 1px solid #333;
+  border-bottom: 1px solid #333;
+  color: #888;
+  font-family: system-ui, sans-serif;
+  font-size: 11px;
+  cursor: row-resize;
+  user-select: none;
+  touch-action: none;
+}
+
+#history-close {
+  border: none;
+  background: none;
+  color: #aaa;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+#history-close:hover {
+  color: #fff;
+  background: #333;
 }
 
 #divider {

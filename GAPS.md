@@ -275,16 +275,14 @@ currently discards or never negotiates:
   Moolin's input box has history recall (Up/Down) but no completion.
 - **Split-view scrolling**: scrolling back through history opens a split so
   new server output keeps arriving below while old output stays pinned above
-  (Blightmud's `scroll_split`; similar in Mudlet/TinTin++). Not a quick win
-  for Moolin specifically: the scrollback (`src/scrollback-view.ts`) is a
-  single scrolling element with one viewport over one set of lines, and
-  has no split/pinned-pane mode — there's nothing to "turn on."
-  Getting this would mean building it: most plausibly a second, read-only
-  view frozen at a scroll position, fed from the same replay
-  data Moolin already keeps per window in `scrollback-buffer.ts`, rendered
-  alongside the live-tailing primary instance. That's real layout and
-  state-sync work, not a config flag — treat it as closer in cost to a
-  mapper or status-bar feature than to scrollback search.
+  (Blightmud's `scroll_split`; similar in Mudlet/TinTin++).
+  - **Done, differently placed.** Moolin's history pane (`src/history-pane.ts`)
+    opens when the scrollback is scrolled up past its top, not on any scroll
+    up: the scrollback's own 20,000 lines scroll as before, and the pane
+    reads further back from the character's log (see README, History pane).
+    Blightmud splits as soon as you scroll back at all.
+  - **Not done.** The pane can't be opened from a menu, and its size isn't
+    remembered between windows or runs.
 
 ## 9. Accessibility
 

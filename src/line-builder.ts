@@ -39,6 +39,8 @@ export interface Line {
   el?: HTMLElement;
   // Set when trimmed away, so a line dropped before it was drawn never is.
   dropped?: boolean;
+  // A blank line of Clear Screen's, which only the window has: the log doesn't.
+  filler?: boolean;
 }
 
 // A line that grows without a line feed (a stuck server, a binary dump) is cut
@@ -81,7 +83,11 @@ export class LineBuilder {
 
   // `count` line feeds that carry no time (Clear Screen's filler).
   blankLines(count: number): void {
-    for (let i = 0; i < count; i++) this.lineFeed(null);
+    for (let i = 0; i < count; i++) {
+      const created = this.open === null;
+      this.lineFeed(null);
+      if (created) (this.lines[this.lines.length - 1] as Line).filler = true;
+    }
   }
 
   private newLine(): Line {

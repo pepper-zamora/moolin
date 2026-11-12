@@ -660,131 +660,110 @@ try {
     await waitFor("new output after clearing", async () => (await visibleText()).includes("after the clear"), 3000);
   });
 
-  // A flood longer than the scrollback trims the view to its newest 20,000
-  // lines; scrolling to the top fetches them again from the log and then pages
-  // the 5,000 before them in, without moving what was on screen.
-  await check("scrolling to the top pages older history in, and letting go of it at the bottom drops it", async () => {
+  // A flood longer than the scrollback trims it to its newest 20,000 lines or
+  // so; scrolling up past its top opens the history pane above it, at the
+  // history just before its oldest line, read from the log.
+  const historyLines = () =>
+    main.evaluate(`Array.from(document.querySelectorAll("#history .line"), (line) => line.textContent)`);
+  const historyOpen = () => main.evaluate(`!document.getElementById("history-row").hidden`);
+  // A turn of the mouse wheel over a pane (negative is up).
+  const wheel = async (id, deltaY) => {
+    const point = await main.evaluate(
+      `(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+    );
+    await main.call("Input.dispatchMouseEvent", { type: "mouseWheel", ...point, deltaX: 0, deltaY });
+  };
+  const scrollHistory = (top) =>
+    main.evaluate(`(() => { const t = document.getElementById("history"); t.scrollTop = ${top ? 0 : "t.scrollHeight"}; })()`);
+  const number = (line) => Number(line.slice(line.lastIndexOf(" ") + 1));
+
+  await check("scrolling up past the top opens the history pane at the history before the oldest line", async () => {
     if (!latestSocket) throw new Error("no server socket to write to");
     const total = 26000;
     let burst = "";
     for (let i = 0; i < total; i++) burst += `paging line ${i}\r\n`;
     latestSocket.write(burst);
     await waitFor("the flood to be shown", async () => (await main.lineTexts()).at(-1) === `paging line ${total - 1}`, 30000);
-    const topOf = (text) =>
-      main.evaluate(`(() => {
-        const box = document.getElementById("terminal").getBoundingClientRect();
-        const line = Array.from(document.querySelectorAll("#terminal .line")).find((l) => l.textContent === ${JSON.stringify(text)});
-        return line ? line.getBoundingClientRect().top - box.top : null;
-      })()`);
-    const kept = (await main.lineTexts())[0];
+    const oldest = (await main.lineTexts()).find((line) => line.startsWith("paging line "));
+    if (!oldest || number(oldest) === 0) throw new Error(`the scrollback wasn't trimmed (oldest line ${oldest})`);
     await main.evaluate(`document.getElementById("terminal").scrollTop = 0`);
-    await waitFor("older history to be paged in", async () => (await main.lineCount()) >= 25000, 20000).catch(async (error) => {
-      throw new Error(`${error.message} (${await main.lineCount()} lines, first ${(await main.lineTexts())[0]})`);
-    });
-    const lines = await main.lineTexts();
-    expectEqual(lines.length, 25000, "lines after paging");
-    expectEqual(lines[0], `paging line ${total - 25000}`, "oldest line after paging");
-    expectEqual(lines.at(-1), `paging line ${total - 1}`, "newest line after paging");
-    const top = await topOf(kept);
-    if (top === null || top < -2 || top > 400) throw new Error(`the line that was at the top moved to ${top}px`);
-    await main.evaluate(`document.getElementById("terminal").scrollTop = document.getElementById("terminal").scrollHeight`);
-    await waitFor("the older history to be let go of", async () => (await main.lineCount()) === 20000, 15000);
-    expectEqual((await main.lineTexts())[0], `paging line ${total - 20000}`, "oldest line after letting go");
-  });
-
-  // Paging back more than a couple of pages lets go of the newest lines, and
-  // live output with them, so the window stays a bounded size; scrolling down
-  // pages forward again until live output is back, with nothing lost or repeated.
-  await check("far back, live output is let go of, and scrolling down pages forward to it again", async () => {
-    if (!latestSocket) throw new Error("no server socket to write to");
-    const total = 30000;
-    let burst = "";
-    for (let i = 0; i < total; i++) burst += `far line ${i}\r\n`;
-    latestSocket.write(burst);
-    const newest = `far line ${total - 1}`;
-    await waitFor("the flood to be shown", async () => (await main.lineTexts()).at(-1) === newest, 30000);
-    const scroll = (top) =>
-      main.evaluate(`(() => { const t = document.getElementById("terminal"); t.scrollTop = ${top ? 0 : "t.scrollHeight"}; })()`);
-    // The flood's lines held are consecutive, and so is whatever follows them.
-    const expectRun = (lines) => {
-      const numbers = lines.filter((line) => line.startsWith("far line ")).map((line) => Number(line.slice(9)));
-      if (numbers.length === 0) throw new Error("none of the flood is held");
-      numbers.forEach((n, i) => {
-        if (i > 0 && n !== numbers[i - 1] + 1) throw new Error(`far line ${numbers[i - 1]} is followed by ${n}`);
-      });
-      return numbers;
-    };
-    for (let i = 0; i < 10 && (await main.lineTexts()).at(-1) === newest; i++) {
-      const count = await main.lineCount();
-      await scroll(true);
-      await waitFor("a page to be added", async () => (await main.lineCount()) !== count, 15000);
-    }
-    let lines = await main.lineTexts();
-    if (lines.at(-1) === newest) throw new Error("paging back never let go of the newest lines");
-    if (lines.length > 35000) throw new Error(`${lines.length} lines held`);
-    expectRun(lines);
-    latestSocket.write("said while far back\r\n");
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    if ((await main.lineTexts()).includes("said while far back")) throw new Error("live output was shown while far back");
-    for (let i = 0; i < 15 && (await main.lineTexts()).at(-1) !== "said while far back"; i++) {
-      const last = (await main.lineTexts()).at(-1);
-      await scroll(false);
-      await waitFor("a page to be added", async () => (await main.lineTexts()).at(-1) !== last, 15000);
-      if ((await main.lineCount()) > 35000) throw new Error(`${await main.lineCount()} lines held`);
-    }
-    lines = await main.lineTexts();
-    expectEqual(lines.at(-1), "said while far back", "newest line once paged forward");
-    expectEqual(expectRun(lines).at(-1), total - 1, "the flood's last line just before it");
-    await scroll(false);
-    await waitFor("the window to go back to its usual size", async () => (await main.lineCount()) <= 25000, 15000);
-    lines = await main.lineTexts();
-    if (lines.length < 20000) throw new Error(`only ${lines.length} lines kept`);
-    expectEqual(lines.at(-1), "said while far back", "newest line at the bottom");
-    expectRun(lines);
-  });
-
-  // Find goes on past the lines held into the rest of the log; a command sent
-  // from far back leaves the view where it is; End goes to the newest line.
-  await check("Find searches the whole log, a command sent far back leaves the view, and End goes to the newest line", async () => {
-    const target = "paging line 12345";
-    if ((await main.lineTexts()).includes(target)) throw new Error(`${target} is already held`);
-    const count = () => main.evaluate(`document.getElementById("find-count").textContent`);
-    const visible = (text) =>
-      main.evaluate(`(() => {
-        const box = document.getElementById("terminal").getBoundingClientRect();
-        const line = Array.from(document.querySelectorAll("#terminal .line")).find((l) => l.textContent === ${JSON.stringify(text)});
-        if (!line) return false;
-        const r = line.getBoundingClientRect();
-        return r.top >= box.top && r.bottom <= box.bottom;
-      })()`);
-    await main.evaluate(`document.getElementById("input-area").focus()`);
-    await main.key("f", "KeyF", 70, 2 /* Ctrl */);
-    await main.evaluate(`(() => {
-      const input = document.getElementById("find-input");
-      input.value = ${JSON.stringify(target)};
-      input.dispatchEvent(new Event("input"));
+    await sleep(100);
+    await wheel("terminal", -100);
+    await waitFor("the history pane to open", historyOpen, 5000);
+    await waitFor("history in it", async () => (await historyLines()).length > 0, 10000);
+    // The pane's bottom edge shows the live scrollback's oldest line, so the
+    // history reads on upwards from where the scrollback stops.
+    const atBottomEdge = await main.evaluate(`(() => {
+      const box = document.getElementById("history").getBoundingClientRect();
+      const lines = Array.from(document.querySelectorAll("#history .line"));
+      const last = lines.filter((l) => l.getBoundingClientRect().top < box.bottom - 2).at(-1);
+      return last ? last.textContent : null;
     })()`);
-    await waitFor("no match among the lines held", async () => (await count()) === "None loaded", 3000);
-    await main.key("Enter", "Enter", 13, 8 /* Shift */);
-    await waitFor("the match to be found in the log", async () => (await count()) === "1 of 1 loaded", 20000).catch(
-      async (error) => {
-        throw new Error(`${error.message} (the count says ${JSON.stringify(await count())})`);
-      },
-    );
-    if (!(await visible(target))) throw new Error("the match is not on screen");
+    if (atBottomEdge !== oldest) {
+      const metrics = await main.evaluate(`(() => {
+        const t = document.getElementById("history");
+        const lines = Array.from(document.querySelectorAll("#history .line"));
+        const i = lines.findIndex((l) => l.textContent === ${JSON.stringify(oldest)});
+        const el = lines[i];
+        return JSON.stringify({ scrollTop: t.scrollTop, scrollHeight: t.scrollHeight, clientHeight: t.clientHeight,
+          boxHeight: t.getBoundingClientRect().height, count: lines.length, index: i, first: lines[0]?.textContent,
+          last: lines.at(-1)?.textContent, offsetTop: el?.offsetTop, offsetHeight: el?.offsetHeight,
+          panes: document.getElementById("panes").getBoundingClientRect().height,
+          row: document.getElementById("history-row").getBoundingClientRect().height,
+          live: document.getElementById("terminal-row").getBoundingClientRect().height,
+          basis: document.getElementById("history-row").style.flexBasis, window: innerHeight });
+      })()`);
+      throw new Error(`the line at the history pane's bottom edge is ${atBottomEdge}, not ${oldest}: ${metrics}`);
+    }
+    const lines = await historyLines();
+    if (!lines.includes(`paging line ${number(oldest) - 1}`)) throw new Error("the line before the oldest isn't in the pane");
+    // The live scrollback goes on as before, below.
+    latestSocket.write("said while reading history\r\n");
+    await waitFor("live output below the pane", async () => (await main.lineTexts()).at(-1) === "said while reading history", 3000);
+    if ((await historyLines()).includes("said while reading history")) throw new Error("live output went into the history pane");
+    await typingReachesServer(main, "while reading history");
+  });
+
+  await check("the history pane pages back as far as the log goes, held to a bounded size", async () => {
+    for (let i = 0; i < 12; i++) {
+      const first = (await historyLines())[0];
+      await scrollHistory(true);
+      await waitFor("an older page", async () => (await historyLines())[0] !== first, 5000).catch(() => {});
+      if ((await historyLines())[0] === first) break;
+    }
+    const lines = await historyLines();
+    if (lines.length > 35000) throw new Error(`${lines.length} lines held`);
+    const numbers = lines.filter((line) => line.startsWith("paging line ")).map(number);
+    if (numbers[0] !== 0) throw new Error(`paging back stopped at paging line ${numbers[0]}`);
+    numbers.forEach((n, i) => {
+      if (i > 0 && n !== numbers[i - 1] + 1) throw new Error(`paging line ${numbers[i - 1]} is followed by ${n}`);
+    });
+  });
+
+  await check("Escape and End close the history pane; scrolling down past the end of the log does too", async () => {
     await main.key("Escape", "Escape", 27);
-    await typingReachesServer(main, "look");
-    await sleep(300);
-    if (!(await visible(target))) throw new Error("sending a command moved the view");
+    await waitFor("Escape to close it", async () => !(await historyOpen()), 3000);
+    await main.evaluate(`document.getElementById("terminal").scrollTop = 0`);
+    await main.key("PageUp", "PageUp", 33);
+    await waitFor("Page Up at the top to open it", historyOpen, 5000);
     await main.key("End", "End", 35);
-    await waitFor(
-      "the newest line on screen",
-      async () => {
-        const lines = await main.lineTexts();
-        return lines.includes("said while far back") && (await visible(lines.at(-1)));
-      },
-      15000,
+    await waitFor("End to close it", async () => !(await historyOpen()), 3000);
+    const atBottom = await main.evaluate(
+      `(() => { const t = document.getElementById("terminal"); return t.scrollHeight - t.scrollTop - t.clientHeight < 4; })()`,
     );
+    expectEqual(atBottom, true, "the live scrollback at its newest line");
+    await main.evaluate(`document.getElementById("terminal").scrollTop = 0`);
+    await sleep(100);
+    await wheel("terminal", -100);
+    await waitFor("the history pane to open", historyOpen, 5000);
+    await waitFor("history in it", async () => (await historyLines()).length > 0, 10000);
+    for (let i = 0; i < 20 && (await historyOpen()); i++) {
+      await scrollHistory(false);
+      await sleep(150);
+      await wheel("history", 100);
+      await sleep(150);
+    }
+    expectEqual(await historyOpen(), false, "the pane, after scrolling down past the end of the log");
   });
 
   // Launching again opens a second window in the running instance; it starts

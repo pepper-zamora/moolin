@@ -12,13 +12,26 @@
   </head>
   <body>
     <div id="app">
-      <div id="terminal-row">
-        <!-- Per-line timestamp column; a sibling of the terminal rather than
-             part of its buffer, kept scroll-synced in renderer.ts. -->
-        <div id="gutter" hidden></div>
-        <div id="terminal"></div>
-        <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
-        <canvas id="search-ruler" hidden></canvas>
+      <div id="panes">
+        <!-- The history pane: a read-only window onto the character's log,
+             above the live scrollback, opened by scrolling up past the live
+             scrollback's top (see history-pane.ts). -->
+        <div id="history-row" class="scrollback-row" hidden>
+          <div id="history-gutter" class="gutter" hidden></div>
+          <div id="history" class="scrollback" aria-label="History"></div>
+        </div>
+        <div id="history-divider" role="separator" aria-orientation="horizontal" title="Drag to resize" hidden>
+          <span>History: Escape closes</span>
+          <button id="history-close" type="button" tabindex="-1" title="Close the history (Escape)" aria-label="Close the history">&#x2715;</button>
+        </div>
+        <div id="terminal-row" class="scrollback-row">
+          <!-- Per-line timestamp column; a sibling of the terminal rather than
+               part of its buffer, kept scroll-synced in renderer.ts. -->
+          <div id="gutter" class="gutter" hidden></div>
+          <div id="terminal" class="scrollback"></div>
+          <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
+          <canvas id="search-ruler" hidden></canvas>
+        </div>
         <!-- Scrollback search (Ctrl+F), floating over the terminal's top
              right; driven by find-widget.ts. -->
         <div id="find-widget" role="search" hidden>

@@ -12,19 +12,17 @@ renames that section to the new version and date.
 
 ### Added
 
-- **Endless scroll.** Scrolling to the top of the window pages older history in
-  from the character's log, 5,000 lines at a time, instead of stopping at the
-  newest 20,000. The window holds at most 30,000 lines, letting go of those
-  furthest from where you are reading and paging them in again as you scroll
-  back. Far enough back, new output isn't shown until you scroll down to it;
-  End (or clearing the screen) goes to the newest line in one press, and sending
-  a command leaves you where you are. Find's next and previous search the whole
-  log, not just the lines loaded. Back at the bottom the window keeps its
-  usual 20,000 lines, and a reload or a reconnect starts from the newest 20,000
-  as before. Only the log can be paged: a window with no log has what it had.
-  Older pages start in the default colour. Known limit: reloading a window just
-  as another window on the same character logs a line this one has not been
-  sent yet shows that line twice.
+- **History pane.** Scrolling up past the top of the scrollback (the mouse
+  wheel, or Page Up) splits the window: a history pane opens above, at the lines
+  just before the scrollback's oldest, and pages back through the character's
+  log, 5,000 lines at a time, as far as it goes, instead of stopping at the
+  newest 20,000. The scrollback below carries on with new output and the input
+  line. Drag the bar between them to resize; Escape, End, the bar's close
+  button, or scrolling down past the end of the log close the pane. It holds at
+  most 30,000 lines. Only the log can be paged: a window with no log has what
+  it had. Pages start in the default colour. Known limit: reloading a window
+  just as another window on the same character logs a line this one has not
+  been sent yet shows that line twice.
 - A "Clear the screen when a Pueblo server asks" setting (Global, with World
   and Character able to override it). A Pueblo server's
   `<xch_page clear=text>` is now ignored by default, since some servers send

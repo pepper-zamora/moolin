@@ -158,6 +158,16 @@ export class ScrollbackView {
     this.options.onHover(link ? { link } : url ? { url } : null);
   }
 
+  // The scrolling element the lines are in.
+  get element(): HTMLElement {
+    return this.el;
+  }
+
+  // The unfinished last line, if any (see LineStream.openLine).
+  get openLine(): Line | null {
+    return this.stream.openLine;
+  }
+
   // A mouse button is down in the scrollback: a click or a drag selection.
   isSelecting(): boolean {
     return this.held.isSelecting();
@@ -182,6 +192,16 @@ export class ScrollbackView {
 
   setHonorClear(honorClear: boolean): void {
     this.stream.honorClear = honorClear;
+  }
+
+  // Whether output is read as Pueblo, as the connection says; history read on
+  // its own assumes it too (see LineStream.read).
+  get puebloEnabled(): boolean {
+    return this.stream.puebloEnabled;
+  }
+
+  setPuebloEnabled(enabled: boolean): void {
+    this.stream.setPuebloEnabled(enabled);
   }
 
   // Every line, drawn or not yet.
@@ -362,12 +382,6 @@ export class ScrollbackView {
     return this.el.scrollHeight - this.el.scrollTop - this.el.clientHeight < this.el.clientHeight * NEAR_EDGE_SCREENS;
   }
 
-  // Whether the view is at the bottom, with more than a screen above it (when
-  // the content is hardly longer than the view, the bottom is also the top).
-  settledAtBottom(): boolean {
-    return this.stuck && this.el.scrollHeight >= this.el.clientHeight * 2;
-  }
-
   scrollToBottom(): void {
     this.scrollToBottomNow();
   }
@@ -451,15 +465,6 @@ export class ScrollbackView {
     this.keepingTop(() => this.linesEl.append(this.drawn(lines)));
     this.emitChange();
     return lines.length;
-  }
-
-  // Adds the history that leads up to live output below the lines held (see
-  // LineStream.catchUp), without moving what is on screen.
-  catchUp(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): void {
-    this.flush();
-    this.stream.catchUp(chunks, times);
-    this.stuck = false;
-    this.keepingTop(() => this.flush());
   }
 
   // Drops the oldest `count` lines, without moving what is on screen.
@@ -628,6 +633,19 @@ export class ScrollbackView {
     const top = el.offsetTop - this.el.scrollTop;
     if (top >= 0 && top + el.offsetHeight <= this.el.clientHeight) return;
     el.scrollIntoView({ block: "center" });
+  }
+
+  // Scrolls so line `index` is in view: centred, unless it already is, or at
+  // the bottom edge.
+  revealLineAt(index: number, at: "center" | "bottom" = "center"): void {
+    const line = this.allLines()[index];
+    if (!line?.el) return;
+    if (at === "center") {
+      this.revealLine(line);
+      return;
+    }
+    this.el.scrollTop = line.el.offsetTop + line.el.offsetHeight - this.el.clientHeight;
+    this.stuck = this.atBottom();
   }
 
   // The line's position, and the scrollable height, for the search ruler.

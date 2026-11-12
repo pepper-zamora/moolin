@@ -72,14 +72,16 @@ export interface PaneView {
   dropBack(count: number): void;
   // Replaces every line, with the view at the top.
   showHistory(chunks: ReadonlyArray<Uint8Array>, times: ReadonlyArray<number | null>): number;
-  // Scrolls line `index` into view, unless it is already.
-  revealLineAt(index: number): void;
+  // Scrolls line `index` into view: centred unless it is already, or at the
+  // bottom edge.
+  revealLineAt(index: number, at?: "center" | "bottom"): void;
   scrollToBottom(): void;
   isAtBottom(): boolean;
 }
 
-// Where the pane should be once a page is shown: a line in it, or its bottom.
-export type PanePlace = { line: number } | "bottom";
+// Where the pane should be once a page is shown: a line in it (in view, or at
+// the bottom edge), or the page's bottom.
+export type PanePlace = { line: number; at?: "center" | "bottom" } | "bottom";
 
 // The history pane's lines: a run of a chain's pages, oldest first, paged in
 // as the view nears its top or bottom and dropped from the end away from the
@@ -116,28 +118,39 @@ export class LogPane {
     return this.pages.at(-1)?.k === 0 && this.view.isAtBottom();
   }
 
-  // Shows page k of `chain` (with what is around it paged in as needed) at
-  // `place`. If the pane already holds that line, it only scrolls to it.
+  // Shows page k of `chain` at `place`: by scrolling to it if the pane holds
+  // it, otherwise in place of everything held. Either way the pages either side
+  // are paged in first, so a line near an end of its page can still be put where
+  // it is wanted, with lines above and below it.
   async show(chain: LogChain, k: number, place: PanePlace): Promise<void> {
-    const index = this.indexOf(chain, k, place);
-    if (index !== null) {
-      this.view.revealLineAt(index);
-      return;
-    }
     const mine = ++this.shows;
     await this.run(async () => {
       if (this.shows !== mine) return;
-      const page = await chain.page(k);
-      if (this.shows !== mine) return;
-      if (!page) {
-        this.stale();
-        return;
+      if (this.indexOf(chain, k, place) === null) {
+        const page = await chain.page(k);
+        if (this.shows !== mine) return;
+        if (!page) return this.stale();
+        this.chain = chain;
+        this.pages = [{ k, lines: this.view.showHistory(page.chunks, page.times) }];
+        if (place === "bottom") {
+          this.view.scrollToBottom();
+          return;
+        }
       }
-      this.chain = chain;
-      const lines = this.view.showHistory(page.chunks, page.times);
-      this.pages = [{ k, lines }];
-      if (place === "bottom") this.view.scrollToBottom();
-      else this.view.revealLineAt(Math.min(place.line, lines - 1));
+      if (place !== "bottom") {
+        for (const side of [k + 1, k - 1]) {
+          if (!chain.has(side) || this.pages.some((page) => page.k === side)) continue;
+          const next = await chain.page(side);
+          if (this.shows !== mine) return;
+          if (!next) return this.stale();
+          if (side > k) this.pages.unshift({ k: side, lines: this.view.prepend(next.chunks, next.times) });
+          else this.pages.push({ k: side, lines: this.view.append(next.chunks, next.times) });
+        }
+      }
+      const index = this.indexOf(chain, k, place);
+      if (index === null) return;
+      this.view.revealLineAt(index, place === "bottom" ? "bottom" : place.at);
+      this.keepToCap("back");
     });
     this.scrolled();
   }
@@ -250,4 +263,39 @@ export class LogPane {
     this.close();
     this.onStale();
   }
+}
+
+// Finds the line `distance` lines from the end of `chain` (1 for the last), as
+// page and line within it: where the live scrollback's oldest line is in the
+// log, given how many of its lines are in the log after it. The count can be a
+// little out (a line the log has that the window wasn't sent, an unfinished
+// line), so the line with `text` nearest the count is taken, if there is one
+// within reach. Pages are read into lines with `read`, as the pane reads them.
+// Null if the log no longer fits the chain; the log's first line if the
+// distance reaches past its start.
+export async function locateFromEnd(
+  chain: LogChain,
+  read: (chunks: ReadonlyArray<Uint8Array>, times: ReadonlyArray<number | null>) => ReadonlyArray<{ text: string }>,
+  distance: number,
+  text: string,
+  reach = 200,
+): Promise<{ k: number; line: number } | null> {
+  let after = 0;
+  for (let k = 0; chain.has(k); k++) {
+    const page = await chain.page(k);
+    if (!page) return null;
+    const lines = read(page.chunks, page.times);
+    if (after + lines.length < distance && chain.has(k + 1)) {
+      after += lines.length;
+      continue;
+    }
+    const expected = Math.max(0, lines.length - (distance - after));
+    for (let offset = 0; offset <= reach; offset++) {
+      for (const line of [expected - offset, expected + offset]) {
+        if (line >= 0 && line < lines.length && lines[line].text === text) return { k, line };
+      }
+    }
+    return { k, line: expected };
+  }
+  return null;
 }
