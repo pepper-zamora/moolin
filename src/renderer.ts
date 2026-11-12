@@ -11,6 +11,7 @@ import type { SecurityInfo } from "./security";
 import { LinkMenu } from "./link-menu";
 import { LiveReplay } from "./live-replay";
 import { linkCommands } from "./pueblo";
+import { SCROLLBACK_LINES, type LogCursor } from "./history-paging";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import { fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
 import { chooseSelectAllTarget, type SelectAllTarget } from "./select-all";
@@ -36,9 +37,6 @@ const MAX_INPUT_LINES = 8;
 const initialFont = window.moolin.initialFont;
 let preferredFontSize = initialFont.fontSize;
 let fontFamily = fontFamilyFor(initialFont.fontId);
-
-// Lines kept in the scrollback; the oldest are dropped past this.
-const SCROLLBACK_LINES = 20000;
 
 function element<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id);
@@ -482,11 +480,28 @@ document.addEventListener("contextmenu", (event) => {
   window.moolin.showContextMenu({ hasSelection, selectAllTarget });
 });
 
-// Replays buffered history (the in-memory buffer on reload, or a world's log
-// on connect), giving each line the recorded arrival time that goes with it.
+// The log's cursor for the history before the lines the view was built from
+// (the replay), and before the oldest line it holds now; null when there is no
+// more to page in. Older pages are added in front, so the second moves back
+// while the first stays put; once the view is back at the bottom the pages are
+// dropped and the second returns to the first.
+let replayBefore: LogCursor | null = null;
+let heldBefore: LogCursor | null = null;
+// Whether the replay came from the log, which only then can be paged back through.
+let fromLog = false;
+// Counts the replays written, so a page that was fetched for an earlier one is
+// not added to a later.
+let replays = 0;
+let loadingOlder = false;
+
+// Replays history (the log's tail, or the in-memory buffer when there is no log
+// to page from), giving each line the recorded arrival time that goes with it.
 // Lines with no recorded time (null — old history, or Moolin's own lines) get
 // no stamp (see GAPS.md §8).
 function writeReplay(replay: ScrollbackReplay): void {
+  replays++;
+  fromLog = replay.fromLog;
+  replayBefore = heldBefore = replay.before;
   view.replay(replay.chunks, replay.times, replay.pueblo, replay.greetingOpen);
 }
 
@@ -501,13 +516,15 @@ function applyData(data: string | Uint8Array, time: number | null): void {
   view.write(data, time);
 }
 
-// Replay the main process's in-memory scrollback buffer (survives a reload,
-// and catches a new window up on what was written before its page loaded),
-// then follow live output. Subscribing before fetching, and letting LiveReplay
-// drop what the replay already contains, keeps any line from being lost or
-// shown twice (see live-replay.ts).
+let live: LiveReplay;
+
+// Replay the main process's scrollback (it survives a reload, and catches a new
+// window up on what was written before its page loaded), then follow live
+// output. Subscribing before fetching, and letting LiveReplay drop what the
+// replay already contains, keeps any line from being lost or shown twice (see
+// live-replay.ts).
 async function loadScrollback(): Promise<void> {
-  const live = new LiveReplay(writeReplay, (event) => {
+  live = new LiveReplay(applyReset, (event) => {
     if (event.kind === "data") applyData(event.data, event.time);
     else if (event.kind === "greetingClosed") view.closeGreeting();
     else applyReset(event.replay);
@@ -520,6 +537,61 @@ async function loadScrollback(): Promise<void> {
   live.replay(replay);
 }
 void loadScrollback();
+
+// Fetches the replay again, to start over from the log as it is now. Keeps the
+// view where it was, measured from the bottom, since the newest lines are the
+// same.
+async function replayAgain(): Promise<boolean> {
+  const distance = view.distanceFromBottom();
+  live.hold();
+  try {
+    live.replay(await window.moolin.getScrollback());
+  } catch (error) {
+    live.resume();
+    window.moolin.log("warn", "renderer", "could not fetch the log again:", String(error));
+    return false;
+  }
+  view.scrollToDistanceFromBottom(distance);
+  return true;
+}
+
+// Whether the log has history the view could show above its oldest line: what
+// came before the replay, or lines trimmed off the top since.
+function olderAvailable(): boolean {
+  return fromLog && (heldBefore !== null || view.hasTrimmed);
+}
+
+// Adds the page of history before the oldest line held, for as long as the view
+// is near the top and there is more.
+async function loadOlder(): Promise<void> {
+  if (loadingOlder) return;
+  loadingOlder = true;
+  try {
+    while (olderAvailable() && view.nearTop()) {
+      // Lines trimmed off the top since the replay are not what the cursor
+      // follows, so start over from a replay that is exact.
+      if (view.hasTrimmed && !(await replayAgain())) return;
+      const mine = replays;
+      const request = heldBefore;
+      if (request === null) return;
+      const page = await window.moolin.getHistoryPage({ before: request });
+      if (replays !== mine) continue; // a reset or a new replay came first
+      if (page.bytes.length > 0) view.prepend([page.bytes], page.times);
+      const stuck = page.before?.offset === request.offset && page.before.skip === request.skip;
+      heldBefore = stuck ? null : page.before;
+    }
+  } catch (error) {
+    heldBefore = null;
+    window.moolin.log("warn", "renderer", "could not page back through the history:", String(error));
+  } finally {
+    loadingOlder = false;
+  }
+}
+
+view.onScroll(() => {
+  if (view.releasePaged()) heldBefore = replayBefore;
+  if (olderAvailable() && view.nearTop()) void loadOlder();
+});
 
 window.moolin.worlds.onOpen((options) => void worldsDialog.open(options));
 worldsDialog.dialog.addEventListener("close", () => {

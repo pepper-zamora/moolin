@@ -117,6 +117,18 @@ export class LineStream {
     this.link = null;
   }
 
+  // Adds older history in front of the lines held, and returns the lines it
+  // made, oldest first. They are read on their own, so they start with no style
+  // and no link; the connection's Pueblo mode is assumed, and a server's clears
+  // in history are not acted on.
+  prepend(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): Line[] {
+    const older = new LineStream(this.log);
+    older.replay(chunks, times, this.pueblo.enabled, false);
+    const lines = older.builder.lines;
+    this.builder.prepend(lines);
+    return lines;
+  }
+
   private ingest(data: string | Uint8Array, source: TimeSource): void {
     const text = typeof data === "string" ? data : this.decoder.decode(data, { stream: true });
     if (text === "") return;

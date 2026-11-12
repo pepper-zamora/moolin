@@ -23,8 +23,9 @@ export type BuilderToken =
 
 // A line of scrollback: what the DOM view draws, and what search reads.
 export interface Line {
-  // Unique and increasing for the life of the builder, so a line can be told
-  // apart from any other even after the ones before it are trimmed.
+  // Unique and increasing along the lines (history added in front takes ids
+  // below the rest), so a line can be told apart from any other even after the
+  // ones before it are trimmed.
   readonly id: number;
   // When the line arrived (epoch ms), or null for Moolin's own lines and
   // history with no recorded time. Set when the line is closed, as the
@@ -53,6 +54,8 @@ export class LineBuilder {
   // The line the last "break" ended, while it still has no time.
   private lastBreak: Line | null = null;
   private nextId = 1;
+  // The id before the oldest line's, for lines added in front (see prepend).
+  private oldestId = 0;
 
   // How many lines have changed since the last takeDirty().
   get dirtyCount(): number {
@@ -136,6 +139,14 @@ export class LineBuilder {
     const dirty = this.dirty;
     this.dirty = [];
     return dirty;
+  }
+
+  // Puts older lines, made by another builder, in front of the ones held. They
+  // get ids below every other line's, still increasing along the lines, and
+  // stay as they are: not open, and not due to be redrawn.
+  prepend(older: ReadonlyArray<Line>): void {
+    for (let i = older.length - 1; i >= 0; i--) (older[i] as { id: number }).id = --this.oldestId;
+    this.lines = [...older, ...this.lines];
   }
 
   // Drops the oldest `count` lines, returning them.

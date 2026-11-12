@@ -66,3 +66,25 @@ test("a greeting closing is ordered with the data like any other live event", ()
   live.replay(replay(["a", "b"], 3));
   assert.deepEqual(shown, ["replay:ab", "greeting-closed"]);
 });
+
+test("holding live events again lets a replay start over without losing or repeating any", () => {
+  const { live, shown } = recorder();
+  live.replay(replay(["old"], 1));
+  live.receive(data("a", 2));
+  live.hold();
+  live.receive(data("b", 3)); // in the replay fetched next
+  live.receive(data("c", 4)); // not in it
+  live.replay(replay(["old a b"], 3));
+  assert.deepEqual(shown, ["replay:old", "data:a", "replay:old a b", "data:c"]);
+});
+
+test("held events are let through when the replay could not be fetched", () => {
+  const { live, shown } = recorder();
+  live.replay(replay(["old"], 1));
+  live.hold();
+  live.receive(data("a", 2));
+  assert.deepEqual(shown, ["replay:old"]);
+  live.resume();
+  live.receive(data("b", 3));
+  assert.deepEqual(shown, ["replay:old", "data:a", "data:b"]);
+});

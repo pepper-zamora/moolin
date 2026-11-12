@@ -582,6 +582,38 @@ try {
     await waitFor("new output after clearing", async () => (await visibleText()).includes("after the clear"), 3000);
   });
 
+  // A flood longer than the scrollback trims the view to its newest 20,000
+  // lines; scrolling to the top fetches them again from the log and then pages
+  // the 5,000 before them in, without moving what was on screen.
+  await check("scrolling to the top pages older history in, and letting go of it at the bottom drops it", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    const total = 26000;
+    let burst = "";
+    for (let i = 0; i < total; i++) burst += `paging line ${i}\r\n`;
+    latestSocket.write(burst);
+    await waitFor("the flood to be shown", async () => (await main.lineTexts()).at(-1) === `paging line ${total - 1}`, 30000);
+    const topOf = (text) =>
+      main.evaluate(`(() => {
+        const box = document.getElementById("terminal").getBoundingClientRect();
+        const line = Array.from(document.querySelectorAll("#terminal .line")).find((l) => l.textContent === ${JSON.stringify(text)});
+        return line ? line.getBoundingClientRect().top - box.top : null;
+      })()`);
+    const kept = (await main.lineTexts())[0];
+    await main.evaluate(`document.getElementById("terminal").scrollTop = 0`);
+    await waitFor("older history to be paged in", async () => (await main.lineCount()) >= 25000, 20000).catch(async (error) => {
+      throw new Error(`${error.message} (${await main.lineCount()} lines, first ${(await main.lineTexts())[0]})`);
+    });
+    const lines = await main.lineTexts();
+    expectEqual(lines.length, 25000, "lines after paging");
+    expectEqual(lines[0], `paging line ${total - 25000}`, "oldest line after paging");
+    expectEqual(lines.at(-1), `paging line ${total - 1}`, "newest line after paging");
+    const top = await topOf(kept);
+    if (top === null || top < -2 || top > 400) throw new Error(`the line that was at the top moved to ${top}px`);
+    await main.evaluate(`document.getElementById("terminal").scrollTop = document.getElementById("terminal").scrollHeight`);
+    await waitFor("the older history to be let go of", async () => (await main.lineCount()) === 20000, 15000);
+    expectEqual((await main.lineTexts())[0], `paging line ${total - 20000}`, "oldest line after letting go");
+  });
+
   // Launching again opens a second window in the running instance; it starts
   // disconnected, and (usually) takes focus from the first.
   console.log("smoke: a second, disconnected window");

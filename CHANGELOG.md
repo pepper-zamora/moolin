@@ -12,6 +12,13 @@ renames that section to the new version and date.
 
 ### Added
 
+- **Endless scroll.** Scrolling to the top of the window pages older history in
+  from the character's log, 5,000 lines at a time, instead of stopping at the
+  newest 20,000. The older lines are dropped again when you scroll back to
+  the bottom, and a reload or a reconnect starts from the newest 20,000 as
+  before. Only the log can be paged: a window with no log has what it had.
+  Known limit: reloading a window just as another window on the same character
+  logs a line this one has not been sent yet shows that line twice.
 - A "Clear the screen when a Pueblo server asks" setting (Global, with World
   and Character able to override it). A Pueblo server's
   `<xch_page clear=text>` is now ignored by default, since some servers send

@@ -100,6 +100,12 @@ from source never check at startup.
 - **Scrollback that survives a reload.** 20,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
+- **Endless scroll.** Scroll to the top and the window pages older history in
+  from the character's log, 5,000 lines at a time, as far back as the log
+  goes. The scrollbar then covers what has been loaded, not the whole log,
+  and the older lines are dropped again when you scroll back to the bottom.
+  Searching covers what is loaded. A window with no log (locked, or a disk
+  error) has only its 20,000 lines.
 - **Pueblo.** On a world that speaks it, links are clickable (right-click
   one with several commands to choose), and the status bar shows what a link
   will send or open while the pointer is on it. See

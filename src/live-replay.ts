@@ -31,7 +31,21 @@ export class LiveReplay {
     else this.apply(event);
   }
 
-  // The initial replay. Writes it, then whatever held events it doesn't cover.
+  // Holds live events again, for a replay that is about to be fetched to start
+  // over from (see replay).
+  hold(): void {
+    this.held ??= [];
+  }
+
+  // Lets held events through without a replay, when fetching one failed.
+  resume(): void {
+    const held = this.held ?? [];
+    this.held = null;
+    for (const event of held) this.apply(event);
+  }
+
+  // A replay: the initial one, or one that starts over. Writes it, then
+  // whatever held events it doesn't cover.
   replay(replay: ScrollbackReplay): void {
     this.onReplay(replay);
     this.replayedThrough = replay.seq;
