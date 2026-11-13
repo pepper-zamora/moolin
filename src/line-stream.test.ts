@@ -332,3 +332,79 @@ test("a replay of a Pueblo connection still finds the greeting that turned it on
   s.write("<b>live</b>\r\n", 4);
   assert.equal(s.lines[3].text, "live", "tags are still read; only a new greeting is ignored");
 });
+
+test("older history goes in front of the lines held, with its own times", () => {
+  const s = new LineStream();
+  s.write("live one\r\nlive two\r\n", 30);
+  const added = s.prepend([Buffer.from("old one\r\nold two\r\n")], [10, 20]);
+  assert.deepEqual(
+    added.map((l) => l.text),
+    ["old one", "old two"],
+  );
+  assert.deepEqual(view(s), [
+    ["old one", 10],
+    ["old two", 20],
+    ["live one", 30],
+    ["live two", 30],
+  ]);
+  s.write("live three\r\n", 40);
+  assert.equal(s.lines.length, 5, "new output still follows the lines held");
+});
+
+test("older history starts with no style, whatever style the lines held were left in", () => {
+  const s = new LineStream();
+  s.write("\x1b[31mred", 5);
+  s.write("\r\n", 5);
+  s.prepend([Buffer.from("plain\r\n\x1b[32mgreen\x1b[0m\r\n")], [1, 2]);
+  assert.deepEqual(
+    s.lines.map((l) => l.text),
+    ["plain", "green", "red"],
+  );
+  const keys = s.lines.map((l) => l.runs?.[0].style.key);
+  assert.notEqual(keys[0], keys[1]);
+  assert.notEqual(keys[0], keys[2]);
+  assert.equal(s.lines[1].runs?.length, 1, "the green stops at the reset");
+});
+
+test("older history is read as Pueblo when the connection is, and not otherwise", () => {
+  const plain = new LineStream();
+  plain.write("x\r\n", 5);
+  plain.prepend([Buffer.from("a<br>b\r\n")], [1]);
+  assert.equal(plain.lines[0].text, "a<br>b");
+  const pueblo = new LineStream();
+  pueblo.write(GREETING, 1);
+  pueblo.prepend([Buffer.from("a<br>b\r\n")], [2]);
+  assert.deepEqual(
+    pueblo.lines.slice(0, 2).map((l) => l.text),
+    ["a", "b"],
+  );
+});
+
+test("a server's clear in older history is not acted on", () => {
+  const s = new LineStream();
+  s.honorClear = true;
+  s.screenRows = 3;
+  s.write(GREETING, 1);
+  s.write("live\r\n", 2);
+  const before = s.lines.length;
+  s.prepend([Buffer.from('old\r\n<xch_page clear="text">after\r\n')], [3, 4]);
+  assert.equal(s.lines.length, before + 2);
+});
+
+test("newer history goes after the lines held, read on its own", () => {
+  const s = new LineStream();
+  s.write("one\r\n", 1);
+  s.write("\x1b[31mred\r\n", 2);
+  const made = s.append([Buffer.from("plain\r\nnext\r\n")], [3, 4]);
+  assert.deepEqual(
+    made.map((l) => l.text),
+    ["plain", "next"],
+  );
+  assert.deepEqual(view(s), [
+    ["one", 1],
+    ["red", 2],
+    ["plain", 3],
+    ["next", 4],
+  ]);
+  assert.notEqual(s.lines[1].runs?.[0].style.key, s.lines[2].runs?.[0].style.key, "the red doesn't carry over");
+});

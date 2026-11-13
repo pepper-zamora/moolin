@@ -1,5 +1,6 @@
 import type { GlobalSettings, World, WorldsLoadResult } from "./worlds-types";
 import type { WindowState } from "./connection-manager";
+import type { HistoryPage, HistoryRequest } from "./history-paging";
 import type { ScrollbackReplay } from "./scrollback-buffer";
 import type { SelectAllTarget } from "./select-all";
 import type { FontStyle } from "./fonts";
@@ -23,6 +24,8 @@ declare global {
       sendInput(text: string): void;
       sendResize(cols: number, rows: number): void;
       getScrollback(): Promise<ScrollbackReplay>;
+      getHistoryPage(request: HistoryRequest): Promise<HistoryPage>;
+      onHistoryRewritten(callback: () => void): void;
       onTerminalReset(callback: (replay: ScrollbackReplay) => void): void;
       onGreetingClosed(callback: (seq: number) => void): void;
       getConnectionState(): Promise<WindowState>;
@@ -45,6 +48,7 @@ declare global {
       onRedoRequested(callback: () => void): void;
       onFindRequested(callback: (action: "open" | "next" | "previous") => void): void;
       onClearScreenRequested(callback: () => void): void;
+      onHistoryPaneRequested(callback: () => void): void;
       onToggleTimestamps(callback: (show: boolean) => void): void;
       onSetFont(callback: (font: { fontFamily: string; fontSize: number; fontStyle: FontStyle }) => void): void;
       initialFont: { fontId: string; fontSize: number; fontStyle: FontStyle };

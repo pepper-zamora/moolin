@@ -1,3 +1,4 @@
+import type { LogCursor } from "./history-paging";
 import { countLineFeeds } from "./line-feeds";
 
 export type TerminalChunk = string | Uint8Array;
@@ -20,6 +21,13 @@ export interface ScrollbackReplay {
   // Whether the server's greeting could still switch Pueblo on (no line has
   // been sent to the server yet).
   greetingOpen: boolean;
+  // Whether this was read from the session log, which can then be paged back
+  // through (see HistoryRequest); otherwise it is the in-memory buffer.
+  fromLog: boolean;
+  // For a replay from the log, the cursor for the history before it: it starts
+  // at a line, and this is where the line before it ends. Null when there is
+  // nothing older.
+  before: LogCursor | null;
 }
 
 function byteLength(data: TerminalChunk): number {

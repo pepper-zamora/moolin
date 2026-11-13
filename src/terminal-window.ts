@@ -1,12 +1,28 @@
 import { BrowserWindow, Menu } from "electron";
 import { ConnectionManager, type WindowState } from "./connection-manager";
 import { ScrollbackBuffer, type ScrollbackReplay, type TerminalChunk } from "./scrollback-buffer";
+import {
+  PAGE_BYTES,
+  PAGE_LINES,
+  SCROLLBACK_LINES,
+  STALE_PAGE,
+  type HistoryPage,
+  type HistoryRequest,
+} from "./history-paging";
 import { IpcChannels } from "./ipc-channels";
+import type { LogPage } from "./log-format";
 import { log } from "./logger";
-import { WindowLog, type LogHistory, type SessionLogRegistry } from "./session-log";
+import { WindowLog, type SessionLogRegistry } from "./session-log";
 import type { ConnectTarget } from "./worlds-types";
 
 const MAX_SCROLLBACK_BYTES = 2 * 1024 * 1024;
+
+// `replay` with its history taken from the log: `page`, and after it the
+// unfinished line the window has yet to log.
+function withPage(replay: ScrollbackReplay, page: LogPage, held: Uint8Array): ScrollbackReplay {
+  const chunks = [page.bytes, held].filter((chunk) => chunk.length > 0);
+  return { ...replay, chunks, times: page.times, fromLog: true, before: page.before };
+}
 
 export interface TerminalWindowHandlers {
   // Connected/secure state changed — refresh this window's menu.
@@ -69,12 +85,7 @@ export class TerminalWindow {
       },
     });
     const id = this.window.id;
-    this.sessionLog = new WindowLog(options.logs, options.logRoot, () => {
-      // Another window had the log and has let go of it: this one logs now.
-      if (this.window.isDestroyed()) return;
-      this.writeStatus("\x1b[33m[logging resumed: no other window is using this log]\x1b[0m\r\n");
-      this.send(IpcChannels.connectionState, this.getState());
-    });
+    this.sessionLog = new WindowLog(options.logs, options.logRoot);
 
     this.connection = new ConnectionManager(
       {
@@ -150,25 +161,25 @@ export class TerminalWindow {
     if (!this.window.isDestroyed()) this.window.webContents.send(channel, ...args);
   }
 
-  // Switches to `target`'s log. If this window gets to own it, the scrollback
-  // is replaced by the log's tail; otherwise (another window is connected to
-  // the same world/character and logging it) the window starts empty and
-  // doesn't log, so nothing is recorded twice. The status bar shows which
-  // (see getState).
+  // Switches to `target`'s log, shared with any other window connected to the
+  // same world and character (it keeps one copy of each line they all receive),
+  // and replaces the scrollback with the log's tail. If the log can't be
+  // opened the window starts empty and doesn't log; the status bar shows
+  // whether it is logging (see getState).
   private startLog(target: ConnectTarget): void {
-    let history: LogHistory = { bytes: new Uint8Array(), times: [] };
+    let history: LogPage = { bytes: new Uint8Array(), times: [], before: null, after: null, end: null };
     let unavailable: string | null = null;
     try {
-      history = this.sessionLog.open(target.world, target.character, MAX_SCROLLBACK_BYTES);
+      history = this.sessionLog.open(target.world, target.character, MAX_SCROLLBACK_BYTES, SCROLLBACK_LINES);
     } catch (error) {
       // Couldn't find or rename its folder; connect anyway, without a log.
       unavailable = (error as Error).message;
       log("error", "main", `window ${this.window.id} log unavailable:`, unavailable);
     }
-    log("debug", "main", `window ${this.window.id} log`, this.sessionLog.file ?? "owned by another window");
+    log("debug", "main", `window ${this.window.id} log`, this.sessionLog.file ?? "none");
     this.scrollback.reset(history.bytes.length > 0 ? [history.bytes] : [], history.times);
     this.seq++;
-    this.send(IpcChannels.terminalReset, this.getScrollback());
+    this.send(IpcChannels.terminalReset, this.replayOf(this.sessionLog.logging ? history : null, new Uint8Array()));
     if (unavailable) this.writeStatus(`\x1b[33m[not logging: ${unavailable}]\x1b[0m\r\n`);
   }
 
@@ -186,7 +197,7 @@ export class TerminalWindow {
   }
 
   // Appends to the scrollback, both live and in the replay buffer, and to the
-  // session log if this window owns one. `time` is the line's arrival time, or
+  // session log if this window is writing one. `time` is the line's arrival time, or
   // null for lines that carry no timestamp.
   private write(data: TerminalChunk, time: number | null): void {
     this.sessionLog.append(data, time);
@@ -196,16 +207,64 @@ export class TerminalWindow {
 
   getState(): WindowState {
     const connection = this.connection.getState();
-    return { ...connection, logging: connection.status !== "disconnected" && this.sessionLog.owned };
+    return { ...connection, logging: connection.status !== "disconnected" && this.sessionLog.logging };
   }
 
-  getScrollback(): ScrollbackReplay {
-    return {
-      chunks: this.scrollback.snapshot(),
-      times: this.scrollback.snapshotTimes(),
+  // What a window that has just loaded (or reloaded) shows. From the log when
+  // there is one, since it holds what every window on the character was sent,
+  // and so can be paged back from the line this starts at; otherwise from the
+  // buffer, with nothing to page. A line another window has logged but this
+  // one has not been sent yet is in the log, so it is shown now and again when
+  // it arrives; the gap is the few milliseconds between two connections.
+  async getScrollback(): Promise<ScrollbackReplay> {
+    // The read starts here, so the page, the unfinished line and the sequence
+    // number below all describe the same moment.
+    const reading = this.sessionLog.page(
+      { before: null },
+      { maxBytes: MAX_SCROLLBACK_BYTES, maxLines: SCROLLBACK_LINES },
+    );
+    const held = this.sessionLog.held();
+    const now = this.replayOf(null, held);
+    const page = await reading;
+    return page ? withPage(now, page, held) : now;
+  }
+
+  // A replay of `page` and the unfinished line after it, or of the buffer when
+  // there is no page, numbered with the writes so far.
+  private replayOf(page: LogPage | null, held: Uint8Array): ScrollbackReplay {
+    const replay: ScrollbackReplay = {
       seq: this.seq,
       pueblo: this.connection.isPueblo(),
       greetingOpen: this.connection.isGreetingOpen(),
+      chunks: this.scrollback.snapshot(),
+      times: this.scrollback.snapshotTimes(),
+      fromLog: false,
+      before: null,
+    };
+    return page ? withPage(replay, page, held) : replay;
+  }
+
+  // The page of the log before or after a cursor, for scrolling through more
+  // history than the window holds. One that reaches the end of the log carries
+  // the window's unfinished line and says which writes it covers, so the window
+  // can go on from it with live output.
+  async getHistoryPage(request: HistoryRequest): Promise<HistoryPage> {
+    const from = "before" in request ? { before: request.before } : { after: request.after };
+    const reading = this.sessionLog.page(from, { maxBytes: PAGE_BYTES, maxLines: PAGE_LINES, lenient: true });
+    const held = this.sessionLog.held();
+    const seq = this.seq;
+    const page = await reading;
+    if (!page) return STALE_PAGE;
+    const chunks = [page.bytes];
+    if ("after" in request && page.after === null) chunks.push(held);
+    return {
+      chunks: chunks.filter((chunk) => chunk.length > 0),
+      times: page.times,
+      before: page.before,
+      after: page.after,
+      end: page.end,
+      seq,
+      stale: false,
     };
   }
 }

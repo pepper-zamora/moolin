@@ -45,9 +45,14 @@ as mandatory locally regardless: CI reports a problem only after it's pushed.
 The TLS tests shell out to `openssl` to generate a throwaway certificate, so
 it must be on `PATH`. If you touch anything under terminal rendering, the
 Worlds dialog, or focus/keyboard handling, also run `npm run smoke` (Linux
-and macOS; needs a real display, or `xvfb-run` on headless Linux) — it drives
-a real window over the Chrome DevTools Protocol and catches things
-unit tests can't, such as focus ending up in the wrong element.
+and macOS). It drives a real window over the Chrome DevTools Protocol and
+catches things unit tests can't, such as focus ending up in the wrong
+element. On Linux it runs in a private display (Xvfb, or a headless Weston)
+when either is installed; without them its windows open on the user's
+desktop and steal keyboard focus while it runs, so ask before running it
+then. `MOOLIN_SMOKE_DISPLAY=weston` runs Electron on Wayland rather than X11;
+a change to anything the display server handles (clipboard, window focus)
+is worth a run of each.
 
 ## Code style
 

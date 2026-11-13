@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -10,6 +10,12 @@ import { Security } from "./security";
 import { SessionLogRegistry } from "./session-log";
 import { newCharacter, newWorld } from "./world-utils";
 import { readWorldsFile, saveWorlds } from "./worlds";
+
+// Temporary folders the tests make, removed once they have all run.
+const tempDirs: string[] = [];
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 // What a key file with these contents stands in for: their SHA-256.
 const fileSecret = (contents: string | Uint8Array): Buffer => crypto.createHash("sha256").update(contents).digest();
@@ -30,6 +36,7 @@ interface Setup {
 // builds another over the same files, as a restart would.
 function setup(): Setup {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-security-"));
+  tempDirs.push(dir);
   const worldsPath = path.join(dir, "worlds");
   const logRoot = path.join(dir, "Moolin");
   const world = {
@@ -40,7 +47,7 @@ function setup(): Setup {
   saveWorlds(worldsPath, [world]);
   const logFile = path.join(logRoot, "w1.Moo", "c1.Cow", "moolin.log");
   const registry = new SessionLogRegistry(undefined, () => PLAIN);
-  const log = registry.claim("c1", () => logFile);
+  const log = registry.attach("c1", () => logFile);
   assert.ok(log);
   log.history(1);
   log.append("said in private\r\n", 1);
@@ -157,7 +164,7 @@ test("it can be turned on again after being turned off, with a different phrase"
 test("turning it on or off is refused while a log is being written, and changes nothing", async () => {
   const t = setup();
   const s = t.make();
-  const open = t.registry.claim("c1", () => t.logFile);
+  const open = t.registry.attach("c1", () => t.logFile);
   assert.ok(open);
   const before = fs.readFileSync(t.worldsPath, "utf8");
   const refused = await s.enable(phrase("a"), "phrase");
@@ -167,7 +174,7 @@ test("turning it on or off is refused while a log is being written, and changes 
   open.close();
 
   await s.enable(phrase("a"), "phrase");
-  const again = t.registry.claim("c1", () => t.logFile);
+  const again = t.registry.attach("c1", () => t.logFile);
   assert.ok(again);
   assert.equal((await s.disable()).ok, false);
   assert.equal(s.state(), "unlocked");
@@ -219,34 +226,34 @@ test("turning it off is refused, and encryption stays on, while a log can't be c
   assert.equal((await s.disable()).ok, true);
 });
 
-test("no window can claim a log while encryption is being turned on, off or unlocked", async () => {
+test("no window can attach to a log while encryption is being turned on, off or unlocked", async () => {
   const t = setup();
   const s = t.make();
-  const claimNow = (): unknown => {
+  const attachNow = (): unknown => {
     try {
-      return t.registry.claim("c1", () => t.logFile);
+      return t.registry.attach("c1", () => t.logFile);
     } catch (error) {
       return error;
     }
   };
   const pending = s.enable(phrase("a"), "phrase");
-  const during = claimNow();
+  const during = attachNow();
   assert.ok(during instanceof Error && /changing its encryption/.test(during.message), "during the key derivation");
   assert.equal((await pending).ok, true);
-  const after = claimNow();
+  const after = attachNow();
   assert.ok(after && !(after instanceof Error), "free again afterwards");
   (after as { close(): void }).close();
 
   const restarted = t.make();
   const unlocking = restarted.unlock(phrase("a"));
-  const duringUnlock = claimNow();
-  assert.ok(duringUnlock instanceof Error, "claims are refused while locked or unlocking");
+  const duringUnlock = attachNow();
+  assert.ok(duringUnlock instanceof Error, "attaching is refused while locked or unlocking");
   assert.equal((await unlocking).ok, true);
 
   const disabling = restarted.disable();
-  assert.ok(claimNow() instanceof Error, "while turning it off");
+  assert.ok(attachNow() instanceof Error, "while turning it off");
   assert.equal((await disabling).ok, true);
-  const last = claimNow();
+  const last = attachNow();
   assert.ok(last && !(last instanceof Error));
   (last as { close(): void }).close();
 });

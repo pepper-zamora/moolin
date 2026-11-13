@@ -21,6 +21,8 @@ function recorder(): { live: LiveReplay; shown: string[] } {
 
 const data = (text: string, seq: number): LiveEvent => ({ kind: "data", data: text, time: null, seq });
 const replay = (chunks: string[], seq: number): ScrollbackReplay => ({
+  fromLog: false,
+  before: null,
   chunks,
   times: [],
   seq,

@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -17,15 +17,28 @@ import {
   parseHeader,
   prepareForAppend,
   readLogHistory,
+  readLogPage,
+  readLogPageSoon,
+  type LogCursor,
   type LogFormat,
   type LogMode,
+  type PageFrom,
+  type PageLimits,
 } from "./log-format";
 import { SessionLogRegistry } from "./session-log";
+
+// Temporary folders the tests make, removed once they have all run.
+const tempDirs: string[] = [];
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 const CHEAP = { N: 1 << 14, r: 8, p: 1 };
 
 function tempFile(): string {
-  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "moolin-logfmt-")), "moolin.log");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-logfmt-"));
+  tempDirs.push(dir);
+  return path.join(dir, "moolin.log");
 }
 
 async function encryptedMode(phrase = "x"): Promise<LogMode & { kind: "encrypted" }> {
@@ -35,7 +48,7 @@ async function encryptedMode(phrase = "x"): Promise<LogMode & { kind: "encrypted
 
 // Writes `appends` through a SessionLog in `mode`.
 function writeLog(file: string, mode: LogMode, appends: Array<[string | Uint8Array, number | null]>): void {
-  const log = new SessionLogRegistry(undefined, () => mode).claim(file, () => file);
+  const log = new SessionLogRegistry(undefined, () => mode).attach(file, () => file);
   assert.ok(log);
   log.history(1);
   for (const [data, time] of appends) log.append(data, time);
@@ -139,6 +152,247 @@ test("history keeps the newest bytes from a line boundary, with the times that g
     assert.deepEqual(tail.times, [2, 3]);
     assert.equal(text(readLogHistory(file, mode, 3)), "", "no line boundary within reach");
   }
+});
+
+// A page that must be there.
+function pageOf(file: string, mode: LogMode, from: PageFrom, limits: PageLimits) {
+  const page = readLogPage(file, mode, from, limits);
+  assert.ok(page, "a page");
+  return page;
+}
+
+// Pages back through the whole log from its end, newest page first.
+function pagesBack(file: string, mode: LogMode, limits: { maxBytes: number; maxLines?: number }) {
+  const pages: Array<{ text: string; times: Array<number | null>; before: LogCursor | null }> = [];
+  let before: LogCursor | null = null;
+  for (let i = 0; i < 1000; i++) {
+    const page = pageOf(file, mode, { before }, { ...limits, lenient: true });
+    pages.push({ text: text(page), times: page.times, before: page.before });
+    before = page.before;
+    if (!before) return pages;
+  }
+  throw new Error("paging back did not end");
+}
+
+// Pages forward from `after` to the end of the log.
+function pagesForward(file: string, mode: LogMode, after: LogCursor, limits: { maxBytes: number; maxLines?: number }) {
+  const pages: Array<{ text: string; times: Array<number | null> }> = [];
+  let cursor = after;
+  for (let i = 0; i < 1000; i++) {
+    const page = pageOf(file, mode, { after: cursor }, { ...limits, lenient: true });
+    assert.deepEqual(page.before, cursor, "a page starts where it was asked to");
+    pages.push({ text: text(page), times: page.times });
+    if (!page.after) return pages;
+    cursor = page.after;
+  }
+  throw new Error("paging forward did not end");
+}
+
+// Records of different sizes, one holding several lines, so pages end inside records.
+function variedLog(file: string, mode: LogMode): { expected: string; times: Array<number | null> } {
+  const appends: Array<[string, number | null]> = [];
+  let expected = "";
+  const times: Array<number | null> = [];
+  for (let i = 0; i < 40; i++) {
+    const data = i % 7 === 0 ? `multi ${i} a\r\nmulti ${i} b\r\nmulti ${i} c\r\n` : `line ${i} of the log\r\n`;
+    const time = i % 5 === 0 ? null : 1000 + i;
+    appends.push([data, time]);
+    expected += data;
+    for (let k = 0; k < data.split("\n").length - 1; k++) times.push(time);
+  }
+  writeLog(file, mode, appends);
+  return { expected, times };
+}
+
+const VARIED_LIMITS = [{ maxBytes: 60 }, { maxBytes: 100_000, maxLines: 7 }, { maxBytes: 1000, maxLines: 13 }];
+
+test("pages back through a log reproduce it exactly, with their times", async () => {
+  for (const mode of [PLAIN, await encryptedMode()]) {
+    const file = tempFile();
+    const { expected, times } = variedLog(file, mode);
+    for (const limits of VARIED_LIMITS) {
+      const pages = pagesBack(file, mode, limits);
+      assert.ok(pages.length > 1, "more than one page");
+      assert.equal(
+        pages
+          .map((page) => page.text)
+          .reverse()
+          .join(""),
+        expected,
+      );
+      assert.deepEqual(
+        pages
+          .map((page) => page.times)
+          .reverse()
+          .flat(),
+        times,
+      );
+      for (const page of pages) {
+        assert.ok(page.text === "" || page.text.endsWith("\n"));
+        if (limits.maxLines) assert.ok(page.times.length <= limits.maxLines);
+      }
+    }
+  }
+});
+
+test("a page asked for again by where it ends is the same page, even after the log has grown", async () => {
+  for (const mode of [PLAIN, await encryptedMode()]) {
+    const file = tempFile();
+    variedLog(file, mode);
+    for (const limits of VARIED_LIMITS) {
+      const full = { ...limits, lenient: true };
+      const pages = [];
+      for (let before: LogCursor | null = null, i = 0; i === 0 || before !== null; i++) {
+        const page = pageOf(file, mode, { before }, full);
+        assert.ok(page.end, "a page of a log with lines in has an end");
+        pages.push(page);
+        before = page.before;
+      }
+      assert.deepEqual(pages[0].end, { offset: fs.statSync(file).size, skip: 0 }, "the tail ends at the log's end");
+      writeLog(file, mode, [["more after the pages were read\r\n", 5]]);
+      for (const page of pages) {
+        const again = pageOf(file, mode, { before: page.end }, full);
+        assert.equal(text(again), text(page));
+        assert.deepEqual(again.times, page.times);
+        assert.deepEqual(again.before, page.before);
+      }
+    }
+  }
+});
+
+test("pages forward from any page's start reproduce the rest of the log exactly", async () => {
+  for (const mode of [PLAIN, await encryptedMode()]) {
+    const file = tempFile();
+    const { expected, times } = variedLog(file, mode);
+    for (const limits of VARIED_LIMITS) {
+      const back = pagesBack(file, mode, limits);
+      for (let i = 0; i < back.length; i++) {
+        const start = back[i].before;
+        if (!start) continue;
+        // What lies after the start, from the pages back.
+        const newer = back.slice(0, i + 1).reverse();
+        const rest = newer.map((page) => page.text).join("");
+        const restTimes = newer.flatMap((page) => page.times);
+        const forward = pagesForward(file, mode, start, limits);
+        assert.equal(forward.map((page) => page.text).join(""), rest, `from page ${i}`);
+        assert.deepEqual(
+          forward.flatMap((page) => page.times),
+          restTimes,
+        );
+        for (const page of forward.slice(0, -1)) {
+          assert.ok(page.text.endsWith("\n"), "a page that isn't the last ends at a line boundary");
+          if (limits.maxLines) assert.ok(page.times.length <= limits.maxLines);
+        }
+      }
+      assert.ok(expected.endsWith(back[0].text));
+      assert.ok(times.length > 0);
+    }
+  }
+});
+
+test("a page forward that reaches the end has no cursor after it, and keeps an unfinished last line", () => {
+  const file = tempFile();
+  writeLog(file, PLAIN, [
+    ["aaaa\r\n", 1],
+    ["bbbb\r\n", 2],
+    ["prompt> ", 3],
+  ]);
+  const tail = pageOf(file, PLAIN, { before: null }, { maxBytes: 9 });
+  assert.equal(text(tail), "prompt> ", "a page back from the end keeps the unfinished line too");
+  assert.ok(tail.before);
+  const rest = pageOf(file, PLAIN, { before: tail.before }, { maxBytes: 100 });
+  assert.equal(text(rest), "aaaa\r\nbbbb\r\n");
+  assert.equal(rest.before, null);
+  const forward = pageOf(file, PLAIN, { after: tail.before }, { maxBytes: 100 });
+  assert.equal(text(forward), "prompt> ");
+  assert.equal(forward.after, null);
+  const fromStart = pageOf(file, PLAIN, { after: null }, { maxBytes: 7 });
+  assert.equal(text(fromStart), "aaaa\r\n", "cut back to a line boundary");
+  assert.equal(fromStart.before, null, "nothing older than the start");
+  assert.deepEqual(
+    fromStart.after,
+    pageOf(file, PLAIN, { after: fromStart.after as LogCursor }, { maxBytes: 7 }).before,
+  );
+});
+
+test("a page that starts at the end of the log is its tail, and one at the start has nothing before it", () => {
+  const file = tempFile();
+  writeLog(file, PLAIN, [
+    ["aaaa\r\n", 1],
+    ["bbbb\r\n", 2],
+    ["cccc\r\n", 3],
+  ]);
+  const tail = pageOf(file, PLAIN, { before: null }, { maxBytes: 14 });
+  assert.equal(text(tail), "bbbb\r\ncccc\r\n");
+  assert.ok(tail.before);
+  assert.equal(tail.after, null);
+  const rest = pageOf(file, PLAIN, { before: tail.before }, { maxBytes: 14 });
+  assert.equal(text(rest), "aaaa\r\n");
+  assert.equal(rest.before, null);
+  assert.deepEqual(rest.after, tail.before);
+  assert.equal(text(pageOf(file, PLAIN, { before: null }, { maxBytes: 1000 })), "aaaa\r\nbbbb\r\ncccc\r\n");
+  assert.equal(pageOf(file, PLAIN, { before: null }, { maxBytes: 1000 }).before, null);
+});
+
+test("a lenient page moves on even when no line boundary is in reach", () => {
+  const file = tempFile();
+  writeLog(file, PLAIN, [
+    ["x".repeat(50), 1],
+    [`${"y".repeat(50)}\r\n`, 2],
+  ]);
+  assert.equal(text(pageOf(file, PLAIN, { before: null }, { maxBytes: 10 })), "");
+  const page = pageOf(file, PLAIN, { before: null }, { maxBytes: 10, lenient: true });
+  assert.equal(text(page), `${"y".repeat(50)}\r\n`);
+  assert.ok(page.before);
+  const older = pageOf(file, PLAIN, { before: page.before }, { maxBytes: 10, lenient: true });
+  assert.deepEqual([text(older), older.before], ["x".repeat(50), null]);
+  const start = { offset: "MOOLIN-LOG 1 plain\n".length, skip: 0 };
+  const forward = pageOf(file, PLAIN, { after: start }, { maxBytes: 10, lenient: true });
+  assert.equal(text(forward), "x".repeat(10), "cut mid-line when it must be");
+  assert.deepEqual(forward.after, { offset: start.offset, skip: 10 });
+  const next = pageOf(file, PLAIN, { after: forward.after as LogCursor }, { maxBytes: 100, lenient: true });
+  assert.equal(text(next), `${"x".repeat(40)}${"y".repeat(50)}\r\n`);
+});
+
+test("a cursor that does not fit the log gives no page", () => {
+  const file = tempFile();
+  writeLog(file, PLAIN, [
+    ["one\r\n", 1],
+    ["two\r\n", 2],
+  ]);
+  const second = pageOf(file, PLAIN, { before: null }, { maxBytes: 6 }).before;
+  assert.ok(second);
+  for (const cursor of [
+    { offset: 0, skip: 0 },
+    { offset: 99999, skip: 0 },
+    { offset: second.offset + 1, skip: 0 },
+    { offset: second.offset, skip: 99 },
+  ]) {
+    assert.equal(readLogPage(file, PLAIN, { before: cursor }, { maxBytes: 100 }), null, JSON.stringify(cursor));
+    assert.equal(readLogPage(file, PLAIN, { after: cursor }, { maxBytes: 100 }), null, JSON.stringify(cursor));
+  }
+  assert.equal(readLogPage(tempFile(), PLAIN, { after: second }, { maxBytes: 100 }), null, "a log that is gone");
+});
+
+test("reading a page a block at a time gives the same page, and gives way to other work", async () => {
+  const mode = await encryptedMode();
+  const file = tempFile();
+  writeLog(
+    file,
+    mode,
+    Array.from({ length: 5000 }, (_, i) => [`line number ${i} of a long log\r\n`, i] as [string, number]),
+  );
+  let turns = 0;
+  const tick = (): void => {
+    turns++;
+    if (turns < 1000) setImmediate(tick);
+  };
+  setImmediate(tick);
+  const limits = { maxBytes: 1_000_000, maxLines: 4000 };
+  const soon = await readLogPageSoon(file, mode, { before: null }, limits);
+  assert.ok(turns > 1, "other work ran while it read");
+  assert.deepEqual(soon, readLogPage(file, mode, { before: null }, limits));
+  turns = 1000;
 });
 
 test("history of a long log reads only what it needs, but all of that", () => {
@@ -316,7 +570,7 @@ test("a session log reports a file that is not a log, and leaves it alone", () =
   const file = tempFile();
   fs.writeFileSync(file, "before\r\n");
   const registry = new SessionLogRegistry(undefined, () => PLAIN);
-  const log = registry.claim("k", () => file);
+  const log = registry.attach("k", () => file);
   assert.ok(log);
   log.append("after\r\n", 5);
   assert.equal(log.isOpen, false, "logging stopped");
