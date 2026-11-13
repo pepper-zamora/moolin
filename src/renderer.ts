@@ -185,7 +185,7 @@ const historyPane: HistoryPane = new HistoryPane(
   scrollbackOptions(() => view),
   view,
   (request) => window.moolin.getHistoryPage(request),
-  () => lastReplay?.fromLog === true && (lastReplay.before !== null || view.hasTrimmed),
+  () => lastReplay?.fromLog === true,
   (open) => {
     if (!open) view.scrollToBottom();
   },
@@ -472,7 +472,7 @@ window.moolin.onHistoryPaneRequested(() => toggleHistoryPane());
 // before the scrollback's oldest line, or closes it.
 function toggleHistoryPane(): void {
   if (historyPane.isOpen) historyPane.close();
-  else void historyPane.openAbove();
+  else void historyPane.openHere();
 }
 window.moolin.onToggleTimestamps((show) => {
   // The gutter takes its width from the scrollback when shown (and gives it
@@ -540,7 +540,7 @@ document.addEventListener(
       // scrollback opens it.
       const up = event.key === "PageUp";
       if (historyPane.isOpen) historyPane.view.scrollPages(up ? -1 : 1);
-      else if (up && view.scrollTop() <= 0) void historyPane.openAbove();
+      else if (up && view.scrollTop() <= 0) void historyPane.openHere();
       else view.scrollPages(up ? -1 : 1);
     } else if (
       event.key === "End" &&

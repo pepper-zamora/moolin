@@ -100,22 +100,24 @@ from source never check at startup.
 - **Scrollback that survives a reload.** 20,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
-- **History pane.** Scroll up past the top of the scrollback (the mouse
-  wheel, or Page Up), or choose View > History Pane (Ctrl+Shift+H), and the
-  window splits: a history pane opens above it, at
-  the lines just before the scrollback's oldest, read from the character's log,
-  and pages further back, 5,000 lines at a time, as far as the log goes. The
-  scrollback below carries on as it was, with new output and the input line,
-  so you can keep playing while you read. Drag the bar between them to share
-  the height; every window opens the pane at the height it was last left at.
-  Escape, End, Ctrl+Shift+H again, the bar's close button, or scrolling down
-  past the end of the log close the pane. Page Up and Page Down scroll it while it's
-  open. It holds at most 30,000 lines, letting go of those furthest from where
-  you are reading and paging them in again as you scroll back. A page starts
-  in the default colour, so a colour a server turned on in an earlier page and
-  never turned off isn't shown on it. A window with no log (locked, or a disk
-  error) has only its 20,000 lines of scrollback, and no history pane.
-  Turning encryption on or off rewrites the logs, which closes the pane.
+- **History pane.** Scroll the scrollback up at all (the mouse wheel, Page
+  Up, or its scrollbar), or choose View > History Pane (Ctrl+Shift+H), and the
+  window splits: a history pane opens above, at the line you scrolled to, read
+  from the character's log, and pages further back, 5,000 lines at a time, as
+  far as the log goes. The scrollback below goes back to the newest line and
+  stays there, with new output and the input line, so you can keep playing
+  while you read; all reading back happens in the pane, and the mouse wheel
+  over the scrollback scrolls the pane while it's open. Drag the bar between
+  them to share the height; every window opens the pane at the height it was
+  last left at. Escape, End, Ctrl+Shift+H again, the bar's close button, or
+  scrolling down past the end of the log close the pane. Page Up and Page Down
+  scroll it while it's open. It holds at most 30,000 lines, letting go of
+  those furthest from where you are reading and paging them in again as you
+  scroll back. A page starts in the default colour, so a colour a server
+  turned on in an earlier page and never turned off isn't shown on it. A
+  window with no log (locked, or a disk error) has no history pane, and its
+  20,000 lines of scrollback scroll back as usual. Turning encryption on or off
+  rewrites the logs, which closes the pane.
 - **Pueblo.** On a world that speaks it, links are clickable (right-click
   one with several commands to choose), and the status bar shows what a link
   will send or open while the pointer is on it. See
@@ -162,9 +164,10 @@ from source never check at startup.
   new output. With a log, the whole log is searched as well, from the newest
   line back, while you type: the count is of every match, newest first ("3 of
   25"), and says "…" while the search is still going. Enter (or F3, or ↑) goes
-  to the next older match, Shift+Enter (Shift+F3, ↓) the next newer, going
-  round at either end of the log. A match the scrollback holds is scrolled to
-  there; an older one opens the history pane at it, once it has been found. If
+  to the next older match, Shift+Enter (Shift+F3, ↓) the next newer, starting
+  from where the history pane is (or the newest line) and going round at
+  either end of the log. Each opens the history pane at it, once it has been
+  found, so the scrollback stays at the newest line. If
   a step has to wait on the search for more than a moment, the status bar says
   how far it has got and how many it has found. The search runs in the window,
   a page of the log at a time; without a log, it covers the scrollback alone.
@@ -327,7 +330,7 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Enter / Shift+Enter      | Send / insert a newline                                 |
 | Up / Down                | Previous / next command, from the first / last line     |
 | Ctrl+Up / Ctrl+Down      | Previous / next command, from anywhere                  |
-| Page Up / Page Down      | Scroll the scrollback, or the history pane while it's open; Page Up at the top opens it |
+| Page Up / Page Down      | Scroll the history pane; Page Up opens it (without a log, they scroll the scrollback) |
 | End                      | To the newest line, closing the history pane, when not there already (otherwise the end of the input line); Ctrl+End always |
 | Escape                   | Close the find box, else the history pane               |
 | Ctrl+Shift+H             | Open or close the history pane (View > History Pane)    |

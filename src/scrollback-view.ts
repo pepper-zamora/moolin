@@ -390,6 +390,30 @@ export class ScrollbackView {
     this.scrollToBottomNow();
   }
 
+  // The index of the line at the top of the view: the first at least half in it.
+  topLineIndex(): number {
+    return this.lineIndexAt(this.el.scrollTop + this.cellHeight / 2);
+  }
+
+  // The index of the line at the bottom of the view: the last at least half in it.
+  bottomLineIndex(): number {
+    return this.lineIndexAt(this.el.scrollTop + this.el.clientHeight - this.cellHeight / 2);
+  }
+
+  // The index of the line `y` pixels down the content.
+  private lineIndexAt(y: number): number {
+    const all = this.allLines();
+    let lo = 0;
+    let hi = all.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      const el = all[mid].el as HTMLElement;
+      if (el.offsetTop + el.offsetHeight <= y) lo = mid + 1;
+      else hi = mid;
+    }
+    return Math.min(lo, Math.max(0, all.length - 1));
+  }
+
   // The lines from a screen above the view to a screen below it, as the indexes
   // of the first and last.
   linesNearView(): { first: number; last: number } {
@@ -640,15 +664,16 @@ export class ScrollbackView {
   }
 
   // Scrolls so line `index` is in view: centred, unless it already is, or at
-  // the bottom edge.
-  revealLineAt(index: number, at: "center" | "bottom" = "center"): void {
+  // the top or bottom edge.
+  revealLineAt(index: number, at: "center" | "top" | "bottom" = "center"): void {
     const line = this.allLines()[index];
     if (!line?.el) return;
     if (at === "center") {
       this.revealLine(line);
       return;
     }
-    this.el.scrollTop = line.el.offsetTop + line.el.offsetHeight - this.el.clientHeight;
+    this.el.scrollTop =
+      at === "top" ? line.el.offsetTop : line.el.offsetTop + line.el.offsetHeight - this.el.clientHeight;
     this.stuck = this.atBottom();
   }
 

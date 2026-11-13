@@ -12,9 +12,6 @@ export interface LogHit {
 
 // The most hits a scan remembers; past that it goes on counting them.
 export const MAX_HITS = 100_000;
-// The newest hits' line text is kept, to line them up with the live
-// scrollback's matches (see alignLive), which keeps at most 1,000.
-const TEXT_HITS = 5_000;
 
 // Searches a whole chain of the log, from its end back to its start, a page at
 // a time, for every match: newest first, as the hits are numbered. The search
@@ -23,8 +20,6 @@ const TEXT_HITS = 5_000;
 // the history pane reads them, so a hit's line is the pane's line.
 export class LogScan {
   readonly hits: LogHit[] = [];
-  // The line text of the newest TEXT_HITS hits.
-  readonly texts: string[] = [];
   // How many matches there are in all (more than hits.length past MAX_HITS).
   count = 0;
   // How far back the scan has read, from 0 to 1.
@@ -63,7 +58,6 @@ export class LogScan {
           const { line, start, end } = matches[i];
           this.count++;
           if (this.hits.length < MAX_HITS) this.hits.push({ k, line: lineOf.get(line) ?? 0, start, end });
-          if (this.texts.length < TEXT_HITS) this.texts.push(line.text);
         }
         this.progress = this.chain.progress(k);
         this.wake();
@@ -99,31 +93,4 @@ export class LogScan {
     this.waiters = [];
     for (const wake of waiters) wake();
   }
-}
-
-// Which of a scan's newest hits are matches the live scrollback shows. The live
-// scrollback holds the newest lines, so its matches, newest first, are the
-// scan's first hits, after any that came in since the scan began. `live` is the
-// live scrollback's matches, newest first, as line text and start; `hits` the
-// scan's newest hits' text and start. Returns how many live matches are newer
-// than the scan's first hit (`newer`), and how many after those are the scan's
-// first hits (`shared`). Lined up by text, so a line one has and the other
-// doesn't (a line the window wasn't sent, say) only shifts the count.
-export function alignLive(
-  live: ReadonlyArray<{ text: string; start: number }>,
-  hits: ReadonlyArray<{ text: string; start: number }>,
-): { newer: number; shared: number } {
-  if (hits.length === 0) return { newer: live.length, shared: 0 };
-  const same = (a: { text: string; start: number }, b: { text: string; start: number }) =>
-    a.text === b.text && a.start === b.start;
-  // The first live match that, with the ones after it, matches the first hits.
-  let best = { newer: live.length, shared: 0 };
-  for (let newer = 0; newer < live.length; newer++) {
-    if (!same(live[newer], hits[0])) continue;
-    let shared = 0;
-    while (newer + shared < live.length && shared < hits.length && same(live[newer + shared], hits[shared])) shared++;
-    if (shared > best.shared) best = { newer, shared };
-    if (newer + shared === live.length || shared === hits.length) break;
-  }
-  return best;
 }

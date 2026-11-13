@@ -73,15 +73,15 @@ export interface PaneView {
   // Replaces every line, with the view at the top.
   showHistory(chunks: ReadonlyArray<Uint8Array>, times: ReadonlyArray<number | null>): number;
   // Scrolls line `index` into view: centred unless it is already, or at the
-  // bottom edge.
-  revealLineAt(index: number, at?: "center" | "bottom"): void;
+  // top or bottom edge.
+  revealLineAt(index: number, at?: "center" | "top" | "bottom"): void;
   scrollToBottom(): void;
   isAtBottom(): boolean;
 }
 
 // Where the pane should be once a page is shown: a line in it (in view, or at
-// the bottom edge), or the page's bottom.
-export type PanePlace = { line: number; at?: "center" | "bottom" } | "bottom";
+// the top or bottom edge), or the page's bottom.
+export type PanePlace = { line: number; at?: "center" | "top" | "bottom" } | "bottom";
 
 // The history pane's lines: a run of a chain's pages, oldest first, paged in
 // as the view nears its top or bottom and dropped from the end away from the
@@ -166,6 +166,18 @@ export class LogPane {
         return place.line < page.lines ? index + place.line : null;
       }
       index += page.lines;
+    }
+    return null;
+  }
+
+  // The page and line of `chain` that line `index` of the pane is, if the pane
+  // is on that chain.
+  placeOf(chain: LogChain, index: number): { k: number; line: number } | null {
+    if (chain !== this.chain) return null;
+    let start = 0;
+    for (const page of this.pages) {
+      if (index < start + page.lines) return { k: page.k, line: index - start };
+      start += page.lines;
     }
     return null;
   }
