@@ -10,6 +10,13 @@ renames that section to the new version and date.
 
 ## [Unreleased]
 
+### Changed
+
+- The font size you zoom to (Ctrl+= and Ctrl+-) is now saved as the font size
+  preference, so new windows and the next run start at it, and the Preferences
+  dialog shows it. Before, zooming changed only the window it was done in.
+  Actual Size (Ctrl+0) goes back to the default size, 14, and saves that.
+
 ## [0.3.1] - 2026-11-06
 
 ### Added
