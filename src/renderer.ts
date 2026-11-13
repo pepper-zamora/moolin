@@ -536,12 +536,11 @@ document.addEventListener(
     } else if (mod && event.shiftKey && key === "h") {
       toggleHistoryPane();
     } else if (event.key === "PageUp" || event.key === "PageDown") {
-      // The history pane's while it's open; Page Up at the top of the live
-      // scrollback opens it.
-      const up = event.key === "PageUp";
-      if (historyPane.isOpen) historyPane.view.scrollPages(up ? -1 : 1);
-      else if (up && view.scrollTop() <= 0) void historyPane.openHere();
-      else view.scrollPages(up ? -1 : 1);
+      // With a log, they scroll the history pane (Page Up opens it); without
+      // one, the live scrollback.
+      const pages = event.key === "PageUp" ? -1 : 1;
+      if (lastReplay?.fromLog === true) historyPane.scrollPages(pages);
+      else view.scrollPages(pages);
     } else if (
       event.key === "End" &&
       !event.shiftKey &&
@@ -587,6 +586,7 @@ document.addEventListener("contextmenu", (event) => {
 function writeReplay(replay: ScrollbackReplay): void {
   view.replay(replay.chunks, replay.times, replay.pueblo, replay.greetingOpen);
   lastReplay = replay;
+  historyPane.logChanged();
 }
 
 // Starts over from a replay: the connect-time switch to a world's logged

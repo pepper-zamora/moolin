@@ -280,7 +280,7 @@ currently discards or never negotiates:
   new server output keeps arriving below while old output stays pinned above
   (Blightmud's `scroll_split`; similar in Mudlet/TinTin++).
   - **Done.** Moolin's history pane (`src/history-pane.ts`) opens as soon as
-    the scrollback is scrolled up, as Blightmud's split does, and reads back
+    you scroll up, as Blightmud's split does, and reads back
     through the character's whole log, not just the scrollback (see README,
     History pane). View > History Pane (Ctrl+Shift+H) opens it too, and the
     divider's position is remembered. Without a log there's no pane, and the

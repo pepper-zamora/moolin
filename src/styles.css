@@ -234,6 +234,14 @@ html, body {
   cursor: text;
 }
 
+/* With a log, the live scrollback always shows the newest lines, and reading
+   back happens in the history pane (see history-pane.ts); its scrollbar's
+   space stays, for the search ruler. */
+.scrollback.pinned {
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+}
+
 .scrollback.wrap-words {
   word-break: normal;
 }
@@ -287,7 +295,7 @@ html, body {
 }
 
 /* Strip over the scrollbar track marking search matches; drawn by find-widget.ts. */
-#search-ruler {
+.search-ruler {
   position: absolute;
   top: 0;
   right: 0;

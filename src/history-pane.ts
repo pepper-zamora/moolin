@@ -32,14 +32,14 @@ export interface HistoryPaneElements {
 }
 
 // The upper half of a split: a read-only window onto the character's log, where
-// all reading back happens, so the live scrollback below only ever shows the
-// newest lines. Scrolling the live scrollback up at all (the wheel, Page Up, its
-// scrollbar) opens it, at the line that scrolling reached, and puts the live
-// scrollback back at the newest line; while it is open, the wheel over the live
-// scrollback scrolls it instead. Escape, End, its close button, or scrolling
-// down past the end of the log close it. Nothing live is ever written to it.
-// Without a log there is nothing for it to read, and the live scrollback
-// scrolls back as it always has.
+// all reading back happens. With a log, the live scrollback below is pinned to
+// the newest lines and can't be scrolled itself: scrolling up over it (the
+// wheel, or Page Up) opens this pane first, with the live scrollback's top
+// line at its top, and the scrolling goes on in here; while it's open, the
+// wheel over the live scrollback scrolls this pane. Escape, End, its close
+// button, or scrolling down to the end of the log close it. Nothing live is
+// ever written to it. Without a log there is nothing for it to read, and the
+// live scrollback scrolls back as it always has.
 export class HistoryPane {
   readonly view: ScrollbackView;
   readonly gutter: TimestampGutter;
@@ -48,6 +48,10 @@ export class HistoryPane {
   private opens = 0;
   private opening = false;
   private fraction = storedFraction();
+  // Until when scrolling down counts as asked for (a turn of the wheel, Page
+  // Down), so reaching the end of the log by it closes the pane, while paging
+  // or placing a line there doesn't.
+  private downUntil = 0;
 
   constructor(
     private readonly els: HistoryPaneElements,
@@ -64,27 +68,28 @@ export class HistoryPane {
     this.view.setTrimming(false);
     this.gutter = new TimestampGutter(els.gutter, this.view);
     this.pane = new LogPane(this.view, () => this.close(), warn);
-    this.view.onScroll(() => this.pane.scrolled());
+    this.view.onScroll(() => {
+      this.pane.scrolled();
+      if (Date.now() < this.downUntil && this.pane.atEnd()) this.close();
+    });
 
-    live.onScroll(() => this.liveScrolled());
-    // A drag selecting upwards scrolls the live scrollback too; it opens the
-    // pane once the button is let go, not in the middle of the drag.
-    document.addEventListener("mouseup", () => setTimeout(() => this.liveScrolled()));
+    // Should the live scrollback be scrolled all the same (it can't be by hand
+    // while pinned), it goes back to the newest line.
+    live.onScroll(() => {
+      if (this.hasLog() && !live.isAtBottom() && !live.isSelecting()) live.scrollToBottom();
+    });
     live.element.addEventListener(
       "wheel",
       (event) => {
-        if (this.isOpen) {
-          event.preventDefault();
-          this.view.element.scrollBy({ top: event.deltaY });
-        } else if (event.deltaY < 0 && live.scrollTop() <= 0) {
-          // Too little in it to scroll: there's no scroll to go on.
-          void this.openHere();
-        }
+        if (!this.hasLog()) return;
+        event.preventDefault();
+        if (this.isOpen) this.scrollBy(event.deltaY);
+        else if (event.deltaY < 0) void this.openHere().then(() => this.scrollBy(event.deltaY));
       },
       { passive: false },
     );
     els.terminal.addEventListener("wheel", (event) => {
-      if (event.deltaY > 0 && this.pane.atEnd()) this.close();
+      if (event.deltaY > 0) this.goingDown();
     });
     els.close.addEventListener("mousedown", (event) => event.preventDefault());
     els.close.addEventListener("click", () => this.close());
@@ -95,12 +100,35 @@ export class HistoryPane {
     return !this.els.row.hidden;
   }
 
-  // The live scrollback was scrolled: away from the newest line, it opens the
-  // pane there, or (open already) goes back to the newest line.
-  private liveScrolled(): void {
-    if (!this.hasLog() || this.live.isAtBottom() || this.live.isSelecting()) return;
-    if (this.isOpen) this.live.scrollToBottom();
-    else void this.openHere();
+  // A replay came: with a log, the live scrollback is pinned to the newest line
+  // (reading back happens here); without one, it scrolls back itself, and the
+  // pane, with nothing to read, closes.
+  logChanged(): void {
+    this.live.element.classList.toggle("pinned", this.hasLog());
+    if (this.hasLog()) this.live.scrollToBottom();
+    else this.close();
+  }
+
+  // Page Up and Page Down while the pane is open, or Page Up opening it.
+  scrollPages(pages: number): void {
+    if (pages > 0) this.goingDown();
+    if (this.isOpen) this.view.scrollPages(pages);
+    else if (pages < 0) void this.openHere().then(() => this.view.scrollPages(pages));
+  }
+
+  // Scrolls the pane by `pixels` (the wheel over the live scrollback).
+  private scrollBy(pixels: number): void {
+    if (!this.isOpen) return;
+    if (pixels > 0) this.goingDown();
+    this.view.element.scrollBy({ top: pixels });
+  }
+
+  // Scrolling down was asked for: at the end of the log already, that closes
+  // the pane; otherwise reaching the end by it shortly will (see the pane's
+  // scroll listener).
+  private goingDown(): void {
+    if (this.pane.atEnd()) this.close();
+    else this.downUntil = Date.now() + 600;
   }
 
   // Opens with the line at the top of the live scrollback at its top, and puts
@@ -131,6 +159,7 @@ export class HistoryPane {
       if (!at || mine !== this.opens) return;
       this.show();
       this.live.scrollToBottom();
+      this.downUntil = 0;
       await this.pane.show(chain, at.k, { line: at.line, at: "top" });
     } finally {
       this.opening = false;

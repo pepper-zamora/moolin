@@ -105,6 +105,7 @@ export class FindWidget {
     regex: element<HTMLButtonElement>("find-regex"),
   };
   private readonly ruler: SearchRuler;
+  private readonly historyRuler: SearchRuler;
   // The live scrollback's matches, oldest first, and whether older ones were
   // left out past MATCH_LIMIT.
   private live: Array<Match<Line>> = [];
@@ -131,6 +132,7 @@ export class FindWidget {
     private readonly onClose: () => void,
   ) {
     this.ruler = new SearchRuler(element<HTMLCanvasElement>("search-ruler"), view);
+    this.historyRuler = new SearchRuler(element<HTMLCanvasElement>("history-ruler"), history.view);
     // New output (or a resize) can add, remove and move matches; the history
     // pane paging changes which of its lines are there to highlight.
     view.onChange(() => this.scheduleRefresh());
@@ -177,6 +179,7 @@ export class FindWidget {
     const wasOpen = this.isOpen();
     this.root.hidden = false;
     this.ruler.hidden = false;
+    this.historyRuler.hidden = false;
     this.input.focus();
     this.input.select();
     if (!wasOpen || selection.length > 0) this.find();
@@ -186,6 +189,7 @@ export class FindWidget {
     if (!this.isOpen()) return;
     this.root.hidden = true;
     this.ruler.hidden = true;
+    this.historyRuler.hidden = true;
     this.stopScan();
     this.steps++;
     this.current = null;
@@ -238,6 +242,7 @@ export class FindWidget {
     setHighlight("find-match", []);
     setHighlight("find-active", []);
     this.ruler.clear();
+    this.historyRuler.clear();
   }
 
   // The term or options changed: searches the live scrollback again, staying on
@@ -497,13 +502,17 @@ export class FindWidget {
     const current = this.current;
     let active: Range | null = null;
     let liveActive: Match<Line> | null = null;
+    let paneActive: Match<Line> | null = null;
     if (current?.kind === "live") {
       liveActive = current.match;
       active = this.view.rangeFor(current.match.line, current.match.start, current.match.end);
     } else if (current?.kind === "log" && this.scan) {
       const hit = this.scan.hits[current.hit];
       const line = hit ? this.history.lineAt(this.scan.chain, hit.k, hit.line) : null;
-      if (hit && line) active = this.history.view.rangeFor(line, hit.start, hit.end);
+      if (hit && line) {
+        active = this.history.view.rangeFor(line, hit.start, hit.end);
+        paneActive = { line, start: hit.start, end: hit.end };
+      }
     }
     const ranges = [
       ...this.live.map((m) => this.view.rangeFor(m.line, m.start, m.end)),
@@ -515,6 +524,8 @@ export class FindWidget {
     );
     setHighlight("find-active", active ? [active] : []);
     this.ruler.draw(this.live, liveActive);
+    if (this.history.isOpen) this.historyRuler.draw(this.paned, paneActive);
+    else this.historyRuler.clear();
     this.showCount(this.indexOf(current, order), order);
   }
 
