@@ -525,7 +525,14 @@ try {
 
   await check("double-clicking the scrollback leaves typing in the input area", async () => {
     await main.doubleClickScrollback();
-    expectEqual(await main.activeElement(), "input-area", "focus after the double-click");
+    // Focus may go to the page with the clicks, and comes back once the time
+    // for another click has passed (MULTI_CLICK_MS in renderer.ts); a busy
+    // machine can take a while longer.
+    await waitFor("focus back in the input area", async () => (await main.activeElement()) === "input-area", 3000).catch(
+      async () => {
+        throw new Error(`focus after the double-click: expected "input-area", got ${JSON.stringify(await main.activeElement())}`);
+      },
+    );
     await typingReachesServer(main, "after double-click");
   });
 
