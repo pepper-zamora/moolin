@@ -338,7 +338,7 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Ctrl+X / Ctrl+C / Ctrl+V | Cut / copy the selection / paste into the input area    |
 | Ctrl+Z                   | Undo in the input area                                  |
 | Ctrl+Shift+Z / Ctrl+Y    | Redo in the input area (Ctrl+Y only on Windows/Linux)   |
-| Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default font size                    |
+| Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default font size, saved as the font size preference |
 | Ctrl+R                   | Reload the window (the connection and scrollback stay)  |
 
 In the find box: Enter / Shift+Enter go to the next older / newer match,
@@ -533,7 +533,10 @@ sample makes obvious. Changes save and apply immediately:
 showTimestamps is this window's own setting too (same as the View menu's
 checkbox), while the font/size and update-check setting also become the
 default for windows opened after. There's no Save or Cancel — like the
-Worlds dialog, it saves as you go.
+Worlds dialog, it saves as you go. Zooming (Ctrl+= and Ctrl+-, or View >
+Zoom In and Zoom Out) saves the size too, so new windows and the next run
+start at the size you last zoomed to; Actual Size (Ctrl+0) goes back to the
+default, 14.
 
 Settings are kept in `preferences.json` in the usual per-app config folder:
 

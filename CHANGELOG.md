@@ -16,13 +16,14 @@ renames that section to the new version and date.
   wheel, or Page Up), or View > History Pane (Ctrl+Shift+H), splits the window:
   a history pane opens above, at the lines just before the scrollback's
   oldest, and pages back through the character's log, 5,000 lines at a time,
-  as far as it goes, instead of stopping at the newest 20,000. The scrollback below carries on with new output and the input
-  line. Drag the bar between them to resize (the height is remembered); Escape,
-  End, Ctrl+Shift+H, the bar's close button, or scrolling down past the end of
-  the log close the pane. It holds at most 30,000 lines. Only the log can be paged: a window with no log has what
-  it had. Pages start in the default colour. Known limit: reloading a window
-  just as another window on the same character logs a line this one has not
-  been sent yet shows that line twice.
+  as far as it goes, instead of stopping at the newest 20,000. The scrollback
+  below carries on with new output and the input line. Drag the bar between
+  them to resize (the height is remembered); Escape, End, Ctrl+Shift+H, the
+  bar's close button, or scrolling down past the end of the log close the
+  pane. It holds at most 30,000 lines. Only the log can be paged: a window
+  with no log has what it had. Pages start in the default colour. Known limit:
+  reloading a window just as another window on the same character logs a line
+  this one has not been sent yet shows that line twice.
 - **Find searches the whole log.** With a log, Find searches all of it as well
   as the scrollback, in the background from the newest line back, and counts
   every match ("3 of 25"). A match only the log holds opens the history pane
@@ -34,14 +35,19 @@ renames that section to the new version and date.
 - **Windows connected to the same character now share one log.** Before, the
   first window to connect owned the log and the others logged nothing and
   started with no history, until that window let go of it (0.3.1). Now every
-  window logs and reads the same history, and a line that several windows receive within five seconds of each other
-  is written once, since servers that allow several connections to a
-  character send all of its output to each. Closing one window no longer
-  stops logging for the others. The status bar's "no" sign now means the log
-  couldn't be opened (locked, or a disk error).
+  window logs and reads the same history, and a line that several windows
+  receive within five seconds of each other is written once, since servers
+  that allow several connections to a character send all of its output to
+  each. Closing one window no longer stops logging for the others. The status
+  bar's "no" sign now means the log couldn't be opened (locked, or a disk
+  error).
 - Find's Enter and F3 now go to the next older match (up the scrollback), and
   Shift+Enter and Shift+F3 the next newer. On macOS, Cmd+G and Cmd+Shift+G do
   the same.
+- The font size you zoom to (Ctrl+= and Ctrl+-) is now saved as the font size
+  preference, so new windows and the next run start at it, and the Preferences
+  dialog shows it. Before, zooming changed only the window it was done in.
+  Actual Size (Ctrl+0) goes back to the default size, 14, and saves that.
 
 ## [0.3.1] - 2026-11-06
 

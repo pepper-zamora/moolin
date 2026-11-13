@@ -14,7 +14,15 @@ import { linkCommands } from "./pueblo";
 import { SCROLLBACK_LINES } from "./history-paging";
 import { HistoryPane } from "./history-pane";
 import type { ScrollbackReplay } from "./scrollback-buffer";
-import { applyFontStyle, type FontStyle, fontFamilyFor, MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "./fonts";
+import {
+  applyFontStyle,
+  type FontStyle,
+  fontFamilyFor,
+  DEFAULT_FONT_SIZE,
+  MIN_FONT_SIZE,
+  MAX_FONT_SIZE,
+  FONT_SIZE_STEP,
+} from "./fonts";
 import { chooseSelectAllTarget, type SelectAllTarget } from "./select-all";
 import { ScrollbackView, type ScrollbackViewOptions } from "./scrollback-view";
 import { TimestampGutter } from "./timestamp-gutter";
@@ -31,12 +39,10 @@ const APP_NAME = "Moolin";
 // Configurable cap; the actual limit is also capped at 1/4 of the window height.
 const MAX_INPUT_LINES = 8;
 
-// The default font/size this window's terminal starts with, from main.ts via
-// argv (see parseFontArgs); kept mutable so "Actual Size" (direction 0 below)
-// and a newly saved Preferences default track the latest choice, not the
-// value this window happened to start with.
+// The font/size this window's terminal starts with, from main.ts via argv (see
+// parseFontArgs): the saved preference, which zooming and the Preferences
+// dialog both change.
 const initialFont = window.moolin.initialFont;
-let preferredFontSize = initialFont.fontSize;
 let fontFamily = fontFamilyFor(initialFont.fontId);
 let fontStyle = initialFont.fontStyle;
 
@@ -704,22 +710,23 @@ window.moolin.onConnectionState(applyConnectionState);
 // Terminal-native "zoom": resizes the actual font (and re-fits cols/rows),
 // rather than Chromium's CSS page zoom, which would scale the scrollbar and
 // leave the cols/rows the server was told out of step.
-// direction 0 ("Actual Size") resets to the preferred size, not a fixed one,
-// so it tracks whatever's currently saved in the Preferences dialog.
+// The size zoomed to is saved as the font size preference, so new windows and
+// the next run start at it, and the Preferences dialog shows it; direction 0
+// ("Actual Size") goes back to the default size.
 window.moolin.onZoom((direction) => {
   const current = view.fontSize;
   const next =
     direction === 0
-      ? preferredFontSize
+      ? DEFAULT_FONT_SIZE
       : Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, current + direction * FONT_SIZE_STEP));
   window.moolin.log("debug", "renderer", "zoom", direction, "-> fontSize", next);
   applyFont(fontFamily, next);
+  void window.moolin.preferences.save({ fontSize: next });
 });
 
-// A new default font/size saved in the Preferences dialog; applies
-// immediately to this window, same as zoom, but can also change the family.
+// A new default font/size saved in the Preferences dialog (or by zooming);
+// applies immediately to this window, and can also change the family.
 window.moolin.onSetFont(({ fontFamily: family, fontSize, fontStyle: style }) => {
-  preferredFontSize = fontSize;
   applyFont(family, fontSize, style);
 });
 

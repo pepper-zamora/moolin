@@ -749,10 +749,11 @@ ipcMain.on(IpcChannels.terminalInitialSize, (event, rawSize: unknown) => {
   windowManager.applyInitialSize(event.sender, size);
 });
 
-// The Preferences dialog's changes save and apply immediately: showTimestamps
-// is this window's own per-window state (same as the View menu's checkbox),
-// while checkForUpdates and the font/size also become the default for new
-// windows; a font change additionally re-renders this window's terminal.
+// The Preferences dialog's changes save and apply immediately (as does the
+// font size a window zooms to): showTimestamps is this window's own per-window
+// state (same as the View menu's checkbox), while checkForUpdates and the
+// font/size also become the default for new windows; a font change
+// additionally re-renders this window's terminal.
 ipcMain.handle(IpcChannels.preferencesSave, (event, rawPartial: unknown) => {
   if (!terminalFor(event)) return;
   if (typeof rawPartial !== "object" || rawPartial === null) return ignoreBad(IpcChannels.preferencesSave, rawPartial);
