@@ -10,6 +10,8 @@ renames that section to the new version and date.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-13
+
 ### Added
 
 - **History pane.** Scrolling up over the scrollback (the mouse wheel, or Page
@@ -42,9 +44,9 @@ renames that section to the new version and date.
   each. Closing one window no longer stops logging for the others. The status
   bar's "no" sign now means the log couldn't be opened (locked, or a disk
   error).
-- Find's Enter and F3 now go to the next older match (up the scrollback), and
-  Shift+Enter and Shift+F3 the next newer. On macOS, Cmd+G and Cmd+Shift+G do
-  the same.
+- **Breaking:** Find's Enter and F3 now go to the next older match (up the
+  scrollback), and Shift+Enter and Shift+F3 the next newer. On macOS, Cmd+G
+  and Cmd+Shift+G do the same.
 - The font size you zoom to (Ctrl+= and Ctrl+-) is now saved as the font size
   preference, so new windows and the next run start at it, and the Preferences
   dialog shows it. Before, zooming changed only the window it was done in.
@@ -242,7 +244,8 @@ The first public release.
   portable exe) and macOS (dmg and zip, Apple silicon and Intel). The
   Windows and macOS builds are unsigned.
 
-[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/pepper-zamora/moolin/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/pepper-zamora/moolin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/pepper-zamora/moolin/compare/v0.1.1...v0.3.0
 [0.1.1]: https://github.com/pepper-zamora/moolin/compare/v0.1.0...v0.1.1
