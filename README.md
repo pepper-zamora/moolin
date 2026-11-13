@@ -100,6 +100,25 @@ from source never check at startup.
 - **Scrollback that survives a reload.** 20,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
+- **History pane.** Scroll up over the scrollback (the mouse wheel, or Page
+  Up), or choose View > History Pane (Ctrl+Shift+H), and the window splits
+  before anything scrolls: a history pane opens above, starting at the
+  scrollback's top line, read from the character's log, and the scrolling goes
+  on in it, back 5,000 lines at a time, as far as the log goes. The scrollback
+  below stays at the newest line, with new output and the input line, so you
+  can keep playing while you read: with a log, it can't be scrolled itself,
+  all reading back happens in the pane, and the mouse wheel over the
+  scrollback scrolls the pane while it's open. Drag the bar between
+  them to share the height; every window opens the pane at the height it was
+  last left at. Escape, End, Ctrl+Shift+H again, the bar's close button, or
+  scrolling back down to the end of the log close the pane. Page Up and Page Down
+  scroll it while it's open. It holds at most 30,000 lines, letting go of
+  those furthest from where you are reading and paging them in again as you
+  scroll back. A page starts in the default colour, so a colour a server
+  turned on in an earlier page and never turned off isn't shown on it. A
+  window with no log (locked, or a disk error) has no history pane, and its
+  20,000 lines of scrollback scroll back as usual. Turning encryption on or off
+  rewrites the logs, which closes the pane.
 - **Pueblo.** On a world that speaks it, links are clickable (right-click
   one with several commands to choose), and the status bar shows what a link
   will send or open while the pointer is on it. See
@@ -114,15 +133,19 @@ from source never check at startup.
   `3f2a9c1e.LambdaMOO/7b0d44aa.Cowpernica/`, so worlds with the same name (or
   names differing only in case) get folders of their own, and renaming a
   world or character renames its folder to match. Connecting pre-populates
-  the scrollback with the last 2 MiB of the log. A log belongs to one window
-  at a time: the first window to connect to a world and character reads and
-  writes it until it disconnects (its last line is the "disconnected" one),
-  and other windows connected meanwhile don't log. When the window holding
-  the log disconnects or closes, a window that was waiting for it (the
-  first, if several) takes it over and logs from then on, saying so in its
-  scrollback; what it showed while it wasn't logging isn't added. The status
-  bar shows which: a scroll beside the security shield when the window is
-  logging, a red "no" sign when another window has the log. The log grows without bound for now; delete or
+  the scrollback with the last 20,000 lines of the log (at most 2 MiB). A character has one log,
+  shared by every window connected to it. Servers that allow several
+  connections to one character send all of its output to each, so a line that
+  several windows receive within five seconds of each other is written once
+  (lines that differ between connections, or an unfinished line such as a
+  prompt, can still appear more than once). Reloading a window (Ctrl+R)
+  while another window on the same character is receiving output shows what
+  the log holds, which can include a line the other window has logged and
+  this one has not yet been sent; when that line reaches this window it
+  appears a second time. The window is only a few milliseconds behind, so
+  this is rare. The status bar shows a scroll
+  beside the security shield when the window is logging, and a red "no" sign
+  when it couldn't open the log. The log grows without bound for now; delete or
   prune it as a whole. It isn't plain text: its first line says what it is
   (`MOOLIN-LOG 1 plain`), and every line after it is a numbered base64 record
   holding what was shown and when each line arrived, so a server that sends
@@ -137,8 +160,18 @@ from source never check at startup.
   [Preferences](#preferences)).
 - **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
   right of the window, with match-case, whole-word and regular-expression
-  toggles. Every match is highlighted, and marked beside the scrollbar, and
-  the matches update as new output arrives (the newest 1,000 are kept).
+  toggles. Every match on screen is highlighted, in the scrollback and the
+  history pane, and marked beside each one's scrollbar; the highlights follow
+  new output. With a log, the whole log is searched as well, from the newest
+  line back, while you type: the count is of every match, newest first ("3 of
+  25"), and says "…" while the search is still going. Enter (or F3, or ↑) goes
+  to the next older match, Shift+Enter (Shift+F3, ↓) the next newer, starting
+  from where the history pane is (or the newest line) and going round at
+  either end of the log. Each opens the history pane at it, once it has been
+  found, so the scrollback stays at the newest line. If
+  a step has to wait on the search for more than a moment, the status bar says
+  how far it has got and how many it has found. The search runs in the window,
+  a page of the log at a time; without a log, it covers the scrollback alone.
 - **Telnet negotiation** of ECHO (no local echo during password prompts),
   NAWS (window size), TTYPE and SGA; every other option is refused.
 - **Multi-line input** that grows as you type, with shell-like history and its
@@ -298,18 +331,21 @@ On macOS, use Cmd in place of Ctrl in all the shortcuts below.
 | Enter / Shift+Enter      | Send / insert a newline                                 |
 | Up / Down                | Previous / next command, from the first / last line     |
 | Ctrl+Up / Ctrl+Down      | Previous / next command, from anywhere                  |
-| Page Up / Page Down      | Scroll the scrollback                                   |
+| Page Up / Page Down      | Scroll the history pane; Page Up opens it (without a log, they scroll the scrollback) |
+| End                      | To the newest line, closing the history pane, when not there already (otherwise the end of the input line); Ctrl+End always |
+| Escape                   | Close the find box, else the history pane               |
+| Ctrl+Shift+H             | Open or close the history pane (View > History Pane)    |
 | Ctrl+L                   | Clear the screen (earlier output stays scrollable)      |
-| Ctrl+F                   | Find in the scrollback                                  |
-| F3 / Shift+F3            | Next / previous match                                   |
+| Ctrl+F                   | Find, in the scrollback and the log                     |
+| F3 / Shift+F3            | Next older / newer match (also Cmd+G / Cmd+Shift+G on macOS) |
 | Ctrl+A                   | Select all of the input line, or of the scrollback if something there is selected |
 | Ctrl+X / Ctrl+C / Ctrl+V | Cut / copy the selection / paste into the input area    |
 | Ctrl+Z                   | Undo in the input area                                  |
 | Ctrl+Shift+Z / Ctrl+Y    | Redo in the input area (Ctrl+Y only on Windows/Linux)   |
-| Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default font size                    |
+| Ctrl+= / Ctrl+- / Ctrl+0 | Larger / smaller / default font size, saved as the font size preference |
 | Ctrl+R                   | Reload the window (the connection and scrollback stay)  |
 
-In the find box: Enter / Shift+Enter go to the next / previous match,
+In the find box: Enter / Shift+Enter go to the next older / newer match,
 Alt+C / Alt+W / Alt+R toggle match case, whole word and regular expression,
 and Escape closes it.
 
@@ -501,7 +537,10 @@ sample makes obvious. Changes save and apply immediately:
 showTimestamps is this window's own setting too (same as the View menu's
 checkbox), while the font/size and update-check setting also become the
 default for windows opened after. There's no Save or Cancel — like the
-Worlds dialog, it saves as you go.
+Worlds dialog, it saves as you go. Zooming (Ctrl+= and Ctrl+-, or View >
+Zoom In and Zoom Out) saves the size too, so new windows and the next run
+start at the size you last zoomed to; Actual Size (Ctrl+0) goes back to the
+default, 14.
 
 Settings are kept in `preferences.json` in the usual per-app config folder:
 
@@ -553,6 +592,7 @@ UTC. Annotated tags carry their own date, so create them with
 | `npm run dev`       | Rebuild on change (reload the window to pick it up)      |
 | `npm test`          | Run the unit tests (`src/*.test.ts`, Node's test runner) |
 | `npm run smoke`     | Build, then drive the real app through focus, typing, copy and link checks (see below) |
+| `npm run try-log`   | Build, then open Moolin in a throwaway sandbox on a large made-up log (see below) |
 | `npm run typecheck` | Typecheck only                                          |
 | `npm run lint`      | Lint `src/` with [Biome](https://biomejs.dev/) (`npm run lint:fix` to apply safe fixes) |
 | `npm run format`    | Format `src/` with Biome (`npm run format:check` to check without writing) |
@@ -576,6 +616,18 @@ are committed, about 40 MB in all, along with the font's SIL Open Font
 License text (`font/LICENSE-IosevkaMoolin.md`). A face is only loaded when
 something uses it.
 
+`npm run try-log` (`scripts/make-test-log.mjs --try`) is for trying scrolling
+and searching on a lot of history. It makes a 50 MB session log out of War and
+Peace (downloaded once from Project Gutenberg into `.cache/`, which git
+ignores), dressed up as MU* output: wrapped lines, speech, poses and channel
+chatter in colour, a few of Moolin's own status lines, and arrival times
+spread over months, with 25 lines saying "wyvern" (a word the book never uses)
+spread evenly through it for a rare search. It opens Moolin in a sandbox of
+its own, with a local server to connect to (the world "Test Log"), and deletes
+the sandbox when Moolin quits. Options go after `--`, e.g.
+`npm run try-log -- --size=500`; `node scripts/make-test-log.mjs --out=FILE`
+just writes the log. See the script for the rest.
+
 `npm run smoke` (`scripts/smoke.mjs`) covers what the unit tests can't
 reach: the renderer in a real window. It launches Moolin in a throwaway
 sandbox (its own config folder, worlds file and Documents folder, so it
@@ -583,15 +635,27 @@ leaves a Moolin you have running and your logs alone), connects it to a
 local test server, and drives it over the Chrome DevTools Protocol:
 clicking, selecting, copying and typing, and checking where keyboard focus
 goes, that typed commands reach the server, what copying a wrapped or
-partial selection gives, Clear Screen, a Pueblo world's links, the
-Preferences font size slider and its weight, width and italic choices, and
-the encryption flows (the first-run offer, turning it on, unlocking, logging
+partial selection gives, Clear Screen, a Pueblo world's links, the history
+pane (opening it at the right line, paging back, closing it), the
+Preferences font size slider and its weight, width and italic choices, and the
+encryption flows (the first-run offer, turning it on, unlocking, logging
 encrypted, changing the key phrase, the phrase length limit, and unlocking in
 one window while another waits). The key file picker and the stop
 confirmation are native dialogs it can't drive, so unit tests cover those.
-Its windows appear on screen while it runs (a few seconds), so it needs a real
-display; on headless Linux use `xvfb-run`. Runs on Linux and macOS; on
-Windows the same mechanism should work but hasn't been tried. To check a packaged build instead, point
+Its windows need a display. On Linux it runs itself in a private one, so they
+don't open on your desktop or take keyboard focus; `MOOLIN_SMOKE_DISPLAY` picks
+which:
+
+| `MOOLIN_SMOKE_DISPLAY` | Display                                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------- |
+| `xvfb`                 | A virtual X display through `xvfb-run` (Arch: `xorg-server-xvfb`; Debian/Ubuntu: `xvfb`), so Electron runs on X11 |
+| `weston`               | A headless Weston (package `weston`), so Electron runs on Wayland, as on most Linux desktops; nothing moves focus between windows there, so the inactive-window check is skipped |
+| `visible`              | Your own display, to watch the run                                                            |
+
+Unset, it's `xvfb` if installed, else `weston`, else `visible` (with a
+warning). On macOS the windows appear on screen and take focus for the run.
+Runs on Linux and macOS; on Windows the same mechanism should work but hasn't
+been tried. To check a packaged build instead, point
 `MOOLIN_SMOKE_APP` at its executable, e.g.
 `MOOLIN_SMOKE_APP=release/linux-unpacked/moolin node scripts/smoke.mjs`
 (the AppImage works too; on macOS, the binary inside the `.app`'s
@@ -616,14 +680,19 @@ Windows the same mechanism should work but hasn't been tried. To check a package
 | `src/scrollback-buffer.ts`| The per-window replay buffer, with each line's arrival time               |
 | `src/ipc-validate.ts`     | Checks on every message the window sends the main process (sizes, addresses, text, ...) |
 | `src/file-modes.ts`       | The owner-only permissions for the worlds file and session logs            |
-| `src/session-log.ts`      | Persistent per-world/character logs and which window owns each              |
+| `src/session-log.ts`      | Persistent per-world/character logs, shared by the windows using each       |
 | `src/security-limits.ts`  | The longest key phrase, shared by the dialog and the check on what it sends |
 | `src/security.ts`         | Whether encryption is on, locked or unlocked; turning it on, off or changing the key |
 | `src/encryption-dialog.ts` | The dialog for the first-run offer, unlocking and managing encryption  |
 | `src/log-convert.ts`      | Converting every log to encrypted or plain, and finishing a stopped conversion |
-| `src/log-format.ts`       | The log file format (plain or sealed records), reading its tail, converting between modes |
+| `src/log-format.ts`       | The log file format (plain or sealed records), reading pages of it, converting between modes |
 | `src/key-file.ts`         | Reading a key file, and unlocking with the one Moolin remembers            |
 | `src/crypto-keys.ts`      | The data key, wrapped by a key phrase or file, and sealing values with it  |
+| `src/history-paging.ts`   | What the window and main agree on for paging through history              |
+| `src/log-pane.ts`         | A fixed chain of log pages, and the history pane's paging through it      |
+| `src/log-scan.ts`         | Searching a whole chain of the log for every match, in the background     |
+| `src/history-pane.ts`     | The history pane above the scrollback: opening, closing, the divider      |
+| `src/line-dedupe.ts`      | Keeps one copy of a line when several connections to a character get it    |
 | `src/line-feeds.ts`       | The line-feed count that keeps per-line times aligned across all of these |
 | `src/preload.ts`          | The `window.moolin` API exposed to the renderer                           |
 | `src/renderer.ts`         | The terminal window's page: wires the scrollback, gutter, input area, status bar and keys together |

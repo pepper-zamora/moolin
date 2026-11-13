@@ -6,8 +6,8 @@
 // Everything runs in a throwaway sandbox: its own config folder (so its own
 // preferences and single-instance lock, apart from a Moolin you have
 // running), worlds file and Documents folder (for session logs), and a local
-// server to connect to. Windows open on screen while it runs (so it needs a
-// real display; on headless Linux use xvfb-run).
+// server to connect to. Its windows need a display; on Linux it opens them in
+// a private one when it can (see below), otherwise on screen.
 //
 // On Linux, the sandbox works by setting XDG_CONFIG_HOME and faking
 // user-dirs.dirs, which Electron's app.getPath("userData"/"documents")
@@ -20,7 +20,7 @@
 // inside Contents/MacOS/).
 //
 // Exits non-zero if any check fails.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as net from "node:net";
@@ -42,6 +42,84 @@ if (packagedApp && !fs.existsSync(packagedApp)) {
 if (!packagedApp && !fs.existsSync(path.join(ROOT, "dist", "main.js"))) {
   console.error("smoke: no build in dist/; run `npm run smoke`, which builds first");
   process.exit(2);
+}
+
+// On Linux, the windows open in a private display of their own, so they don't
+// appear on your desktop and take keyboard focus from whatever you're typing
+// in. MOOLIN_SMOKE_DISPLAY picks which:
+//   xvfb     a virtual X display, through xvfb-run (Arch: xorg-server-xvfb;
+//            Debian/Ubuntu: xvfb), so Electron runs on X11. The default.
+//   weston   a headless Weston, a Wayland compositor, so Electron runs on
+//            Wayland as it does on most Linux desktops now (Arch and
+//            Debian/Ubuntu: weston). It moves no focus between windows, so the
+//            inactive-window check is skipped there.
+//   visible  your own display, to watch the run.
+// Unset, it's xvfb if installed, else weston if installed, else visible. The
+// script re-runs itself in the display chosen, and exits as that run does.
+function onPath(command) {
+  return (process.env.PATH ?? "").split(path.delimiter).some((dir) => dir && fs.existsSync(path.join(dir, command)));
+}
+
+// Runs this script again with `env`, inside `wrapper` (a command and its
+// arguments, or none), and returns its exit status.
+function runNested(wrapper, env) {
+  const [command, ...args] = [...wrapper, process.execPath, import.meta.filename, ...process.argv.slice(2)];
+  const result = spawnSync(command, args, { env: { ...env, MOOLIN_SMOKE_NESTED: "1" }, stdio: "inherit" });
+  if (result.error) console.error(`smoke: couldn't run ${command}: ${result.error.message}`);
+  return result.status ?? 1;
+}
+
+async function runInWeston() {
+  const runtimeDir = process.env.XDG_RUNTIME_DIR;
+  if (!runtimeDir) {
+    console.error("smoke: XDG_RUNTIME_DIR isn't set, so Weston has nowhere to put its socket");
+    return 2;
+  }
+  const socket = `moolin-smoke-${process.pid}`;
+  const weston = spawn("weston", ["--backend=headless", "--no-config", "--idle-time=0", `--socket=${socket}`], {
+    stdio: "ignore",
+  });
+  const exited = new Promise((resolve) => weston.on("exit", resolve));
+  try {
+    const deadline = Date.now() + 10000;
+    while (!fs.existsSync(path.join(runtimeDir, socket))) {
+      if (weston.exitCode !== null || Date.now() > deadline) {
+        console.error("smoke: headless Weston didn't start");
+        return 2;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    const env = { ...process.env, WAYLAND_DISPLAY: socket, XDG_SESSION_TYPE: "wayland" };
+    // No X display to fall back to: the app either runs on Wayland or fails.
+    delete env.DISPLAY;
+    return runNested([], env);
+  } finally {
+    weston.kill();
+    await exited;
+  }
+}
+
+if (process.platform === "linux" && !process.env.MOOLIN_SMOKE_NESTED) {
+  const choice =
+    process.env.MOOLIN_SMOKE_DISPLAY ||
+    (onPath("xvfb-run") ? "xvfb" : onPath("weston") ? "weston" : "visible");
+  if (choice === "xvfb") {
+    const env = { ...process.env };
+    // Electron prefers Wayland when it's offered; this is the X display's run.
+    delete env.WAYLAND_DISPLAY;
+    delete env.XDG_SESSION_TYPE;
+    process.exit(runNested(["xvfb-run", "-a", "-s", "-screen 0 1280x1024x24"], env));
+  } else if (choice === "weston") {
+    process.exit(await runInWeston());
+  } else if (choice !== "visible") {
+    console.error(`smoke: MOOLIN_SMOKE_DISPLAY should be xvfb, weston or visible, not ${choice}`);
+    process.exit(2);
+  } else if (!process.env.MOOLIN_SMOKE_DISPLAY) {
+    console.warn(
+      "smoke: neither xvfb-run nor weston is installed, so the windows open on your desktop and take keyboard focus\n" +
+        "       while it runs; install either (Arch: xorg-server-xvfb or weston) to run them off screen.",
+    );
+  }
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -582,6 +660,199 @@ try {
     await waitFor("new output after clearing", async () => (await visibleText()).includes("after the clear"), 3000);
   });
 
+  // A flood longer than the scrollback trims it to its newest 20,000 lines or
+  // so; scrolling up past its top opens the history pane above it, at the
+  // history just before its oldest line, read from the log.
+  const historyLines = () =>
+    main.evaluate(`Array.from(document.querySelectorAll("#history .line"), (line) => line.textContent)`);
+  const historyOpen = () => main.evaluate(`!document.getElementById("history-row").hidden`);
+  // A turn of the mouse wheel over a pane (negative is up).
+  const wheel = async (id, deltaY) => {
+    const point = await main.evaluate(
+      `(() => { const r = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`,
+    );
+    await main.call("Input.dispatchMouseEvent", { type: "mouseWheel", ...point, deltaX: 0, deltaY });
+  };
+  const scrollHistory = (top) =>
+    main.evaluate(`(() => { const t = document.getElementById("history"); t.scrollTop = ${top ? 0 : "t.scrollHeight"}; })()`);
+  const number = (line) => Number(line.slice(line.lastIndexOf(" ") + 1));
+
+  await check("scrolling up over the scrollback opens the history pane first, and the scrollback never moves", async () => {
+    if (!latestSocket) throw new Error("no server socket to write to");
+    const total = 26000;
+    let burst = "";
+    for (let i = 0; i < total; i++) burst += `paging line ${i}\r\n`;
+    latestSocket.write(burst);
+    await waitFor("the flood to be shown", async () => (await main.lineTexts()).at(-1) === `paging line ${total - 1}`, 30000);
+    const topLine = (id) =>
+      main.evaluate(`(() => {
+        const box = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect();
+        return Array.from(document.querySelectorAll("#${id} .line")).find((l) => { const r = l.getBoundingClientRect(); return (r.top + r.bottom) / 2 > box.top; })?.textContent;
+      })()`);
+    const liveAtBottom = () =>
+      main.evaluate(
+        `(() => { const t = document.getElementById("terminal"); return t.scrollHeight - t.scrollTop - t.clientHeight < 4; })()`,
+      );
+    const top = await topLine("terminal");
+    // Watch the scrollback while the wheel turns: it must never leave the newest line.
+    await main.evaluate(`(() => {
+      const t = document.getElementById("terminal");
+      window.__liveMoved = false;
+      t.addEventListener("scroll", () => { if (t.scrollHeight - t.scrollTop - t.clientHeight >= 4) window.__liveMoved = true; });
+    })()`);
+    await wheel("terminal", -100);
+    await waitFor("the history pane to open", historyOpen, 5000);
+    await waitFor("the scrollback's top line on screen in it", async () => {
+      const lines = await main.evaluate(`(() => {
+        const box = document.getElementById("history").getBoundingClientRect();
+        return Array.from(document.querySelectorAll("#history .line")).filter((l) => { const r = l.getBoundingClientRect(); return r.top >= box.top && r.bottom <= box.bottom; }).map((l) => l.textContent);
+      })()`);
+      return lines.includes(top);
+    }, 5000);
+    expectEqual(await main.evaluate("window.__liveMoved"), false, "the scrollback moved while the pane opened");
+    expectEqual(await liveAtBottom(), true, "the scrollback at its newest line");
+    // Scrolling over the scrollback while the pane is open scrolls the pane instead.
+    const before = await topLine("history");
+    await wheel("terminal", -300);
+    await waitFor("the pane to scroll", async () => (await topLine("history")) !== before, 3000);
+    expectEqual(await main.evaluate("window.__liveMoved"), false, "the scrollback moved under the wheel");
+    // The scrollback goes on as before, below.
+    latestSocket.write("said while reading history\r\n");
+    await waitFor("live output below the pane", async () => (await main.lineTexts()).at(-1) === "said while reading history", 3000);
+    if ((await historyLines()).includes("said while reading history")) throw new Error("live output went into the history pane");
+    await typingReachesServer(main, "while reading history");
+    // Scrolling back down to the end of the log closes the pane.
+    for (let i = 0; i < 40 && (await historyOpen()); i++) {
+      await wheel("history", 400);
+      await sleep(100);
+    }
+    expectEqual(await historyOpen(), false, "the pane, once scrolled back down to the end");
+    expectEqual(await liveAtBottom(), true, "the scrollback after the pane closed");
+  });
+
+  await check("the history pane opens again from the scrollback's top line", async () => {
+    await wheel("terminal", -100);
+    await waitFor("the history pane to open", historyOpen, 5000);
+    await waitFor("history in it", async () => (await historyLines()).length > 0, 10000);
+  });
+
+  await check("the history pane pages back as far as the log goes, held to a bounded size", async () => {
+    for (let i = 0; i < 12; i++) {
+      const first = (await historyLines())[0];
+      await scrollHistory(true);
+      await waitFor("an older page", async () => (await historyLines())[0] !== first, 5000).catch(() => {});
+      if ((await historyLines())[0] === first) break;
+    }
+    const lines = await historyLines();
+    if (lines.length > 35000) throw new Error(`${lines.length} lines held`);
+    const numbers = lines.filter((line) => line.startsWith("paging line ")).map(number);
+    if (numbers[0] !== 0) throw new Error(`paging back stopped at paging line ${numbers[0]}`);
+    numbers.forEach((n, i) => {
+      if (i > 0 && n !== numbers[i - 1] + 1) throw new Error(`paging line ${numbers[i - 1]} is followed by ${n}`);
+    });
+  });
+
+  await check("Escape and End close the history pane; scrolling down past the end of the log does too", async () => {
+    await main.key("Escape", "Escape", 27);
+    await waitFor("Escape to close it", async () => !(await historyOpen()), 3000);
+    await main.evaluate(`document.getElementById("terminal").scrollTop = 0`);
+    await main.key("PageUp", "PageUp", 33);
+    await waitFor("Page Up at the top to open it", historyOpen, 5000);
+    await main.key("End", "End", 35);
+    await waitFor("End to close it", async () => !(await historyOpen()), 3000);
+    const atBottom = await main.evaluate(
+      `(() => { const t = document.getElementById("terminal"); return t.scrollHeight - t.scrollTop - t.clientHeight < 4; })()`,
+    );
+    expectEqual(atBottom, true, "the live scrollback at its newest line");
+    await main.evaluate(`document.getElementById("terminal").scrollTop = 0`);
+    await sleep(100);
+    await wheel("terminal", -100);
+    await waitFor("the history pane to open", historyOpen, 5000);
+    await waitFor("history in it", async () => (await historyLines()).length > 0, 10000);
+    for (let i = 0; i < 20 && (await historyOpen()); i++) {
+      await scrollHistory(false);
+      await sleep(150);
+      await wheel("history", 100);
+      await sleep(150);
+    }
+    expectEqual(await historyOpen(), false, "the pane, after scrolling down past the end of the log");
+  });
+
+  // View > History Pane's key opens and closes it, and the divider's place is
+  // remembered: dragged, closed and opened again, the pane comes back that size.
+  await check("Ctrl+Shift+H opens and closes the history pane, which keeps the size it was dragged to", async () => {
+    const share = () =>
+      main.evaluate(
+        `document.getElementById("history-row").getBoundingClientRect().height / document.getElementById("panes").getBoundingClientRect().height`,
+      );
+    await main.key("H", "KeyH", 72, 2 | 8 /* Ctrl+Shift */);
+    await waitFor("Ctrl+Shift+H to open it", historyOpen, 5000);
+    const divider = await main.evaluate(`(() => {
+      const d = document.getElementById("history-divider").getBoundingClientRect();
+      const p = document.getElementById("panes").getBoundingClientRect();
+      return { x: d.x + 20, y: d.y + d.height / 2, to: p.y + p.height * 0.3 };
+    })()`);
+    await main.mouse("mousePressed", divider);
+    await main.call("Input.dispatchMouseEvent", { type: "mouseMoved", x: divider.x, y: divider.to, button: "left", buttons: 1 });
+    await main.mouse("mouseReleased", { x: divider.x, y: divider.to });
+    const dragged = await share();
+    if (Math.abs(dragged - 0.3) > 0.05) throw new Error(`the pane takes ${dragged.toFixed(2)} of the height after the drag`);
+    await main.key("H", "KeyH", 72, 2 | 8);
+    await waitFor("Ctrl+Shift+H to close it", async () => !(await historyOpen()), 3000);
+    await main.key("H", "KeyH", 72, 2 | 8);
+    await waitFor("Ctrl+Shift+H to open it again", historyOpen, 5000);
+    const again = await share();
+    if (Math.abs(again - dragged) > 0.02) throw new Error(`reopened at ${again.toFixed(2)}, not ${dragged.toFixed(2)}`);
+    await main.key("Escape", "Escape", 27);
+    await waitFor("Escape to close it", async () => !(await historyOpen()), 3000);
+  });
+
+  // Find searches the whole log, not just the scrollback: a match only the log
+  // holds is counted, and Enter (older) shows it in the history pane.
+  await check("Find counts the whole log, and Enter goes older, into the history pane", async () => {
+    const count = () => main.evaluate(`document.getElementById("find-count").textContent`);
+    const inHistoryView = (text) =>
+      main.evaluate(`(() => {
+        const box = document.getElementById("history").getBoundingClientRect();
+        const line = Array.from(document.querySelectorAll("#history .line")).find((l) => l.textContent === ${JSON.stringify(text)});
+        if (!line) return false;
+        const r = line.getBoundingClientRect();
+        return r.top >= box.top && r.bottom <= box.bottom;
+      })()`);
+    const target = "paging line 1234";
+    if ((await main.lineTexts()).includes(target)) throw new Error(`${target} is in the scrollback`);
+    await main.evaluate(`document.getElementById("input-area").focus()`);
+    await main.key("f", "KeyF", 70, 2 /* Ctrl */);
+    await main.evaluate(`(() => {
+      const word = document.getElementById("find-word");
+      if (word.getAttribute("aria-pressed") !== "true") word.click();
+      const input = document.getElementById("find-input");
+      input.value = ${JSON.stringify(target)};
+      input.dispatchEvent(new Event("input"));
+    })()`);
+    await waitFor("the whole log to be counted", async () => (await count()) === "? of 1", 20000).catch(async (error) => {
+      throw new Error(`${error.message} (the count says ${JSON.stringify(await count())})`);
+    });
+    await main.key("Enter", "Enter", 13);
+    await waitFor("the history pane to open", historyOpen, 10000);
+    await waitFor("the match on screen in it", () => inHistoryView(target), 10000);
+    expectEqual(await count(), "1 of 1", "the count");
+    // The history pane's scrollbar is marked with the matches too.
+    const marked = await main.evaluate(`(() => {
+      const ruler = document.getElementById("history-ruler");
+      if (ruler.hidden || ruler.width === 0) return false;
+      const data = ruler.getContext("2d").getImageData(0, 0, ruler.width, ruler.height).data;
+      for (let i = 3; i < data.length; i += 4) if (data[i] > 0) return true;
+      return false;
+    })()`);
+    expectEqual(marked, true, "a mark beside the history pane's scrollbar");
+    await main.key("Escape", "Escape", 27);
+    await waitFor("Escape to close the find box", async () => !(await main.evaluate(`!document.getElementById("find-widget").hidden`)), 3000);
+    expectEqual(await historyOpen(), true, "the history pane, after the find box closed");
+    await main.key("Escape", "Escape", 27);
+    await waitFor("Escape again to close the history pane", async () => !(await historyOpen()), 3000);
+  });
+
   // Launching again opens a second window in the running instance; it starts
   // disconnected, and (usually) takes focus from the first.
   console.log("smoke: a second, disconnected window");
@@ -630,9 +901,9 @@ try {
     }
   });
 
-  // The first window to connect to a world has its log; a second window
-  // connected to the same world doesn't log until the first lets go of it.
-  await check("a window that couldn't log starts when the window holding the log closes", async () => {
+  // Windows connected to the same world share its log: a second window logs
+  // from the start, and starts with the history the first has logged.
+  await check("a second window connected to the same world shares the log, and starts with its history", async () => {
     const logging = (page) => page.evaluate("document.getElementById('logging-status').dataset.logging");
     await second.evaluate(
       `window.moolin.connect(${JSON.stringify({ id: "smoke", name: "Smoke Test", host: "127.0.0.1", port: serverPort, tls: false, tlsAllowUntrusted: false, autoLogin: false, loginTemplate: "", echoCommands: "on", wordWrap: "off", characters: [] })}, null)`,
@@ -641,13 +912,11 @@ try {
       (await second.evaluate("document.getElementById('status-text').textContent")).startsWith("Connected"),
     );
     expectEqual(await logging(main), "on", "the first window logs");
-    expectEqual(await logging(second), "off", "the second doesn't");
-    await main.evaluate("window.close()");
-    await waitFor("logging to resume in the second window", async () => (await logging(second)) === "on", 5000);
-    expectEqual(
-      await second.evaluate("document.getElementById('terminal').textContent.includes('logging resumed')"),
-      true,
-      "the window says so",
+    expectEqual(await logging(second), "on", "the second does too");
+    await waitFor(
+      "the first window's history in the second",
+      () => second.evaluate("document.getElementById('terminal').textContent.includes('said while reading history')"),
+      5000,
     );
   });
 

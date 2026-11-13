@@ -32,7 +32,7 @@ export class LineStream {
   private readonly parser = new AnsiParser();
   private readonly pueblo: PuebloParser;
   private readonly builder = new LineBuilder();
-  private readonly decoder = new TextDecoder();
+  private decoder = new TextDecoder();
   // The Pueblo link the text being added is inside, if any.
   private link: PuebloLink | null = null;
   // Clear Screen's blank filler is the last thing added.
@@ -77,11 +77,34 @@ export class LineStream {
     return this.builder.dropFront(count);
   }
 
+  // Drops the newest `count` lines, and any half-received escape sequence,
+  // style or link with them, so what is added next starts afresh.
+  dropBack(count: number): Line[] {
+    const dropped = this.builder.dropBack(count);
+    this.pueblo.setEnabled(this.pueblo.enabled); // forgets a tag cut off, keeping the mode
+    this.parser.reset();
+    this.decoder = new TextDecoder();
+    this.link = null;
+    this.clearPending = false;
+    this.cleared = false;
+    return dropped;
+  }
+
   // Adds output. `time` is when it arrived, and becomes the time of each line
   // the data ends; null means Moolin's own output (status and echoed
   // commands), which carries no time.
   write(data: string | Uint8Array, time: number | null): void {
     this.ingest(data, constantTime(time));
+  }
+
+  // Whether the connection is in Pueblo mode, which history read on its own
+  // (see read) assumes.
+  get puebloEnabled(): boolean {
+    return this.pueblo.enabled;
+  }
+
+  setPuebloEnabled(enabled: boolean): void {
+    this.pueblo.setEnabled(enabled);
   }
 
   // The server's Pueblo greeting no longer counts (the first line has been
@@ -115,6 +138,44 @@ export class LineStream {
     this.pueblo.setEnabled(pueblo);
     this.pueblo.detecting = greetingOpen;
     this.link = null;
+  }
+
+  // Adds older history in front of the lines held, and returns the lines it
+  // made, oldest first. They are read on their own, so they start with no style
+  // and no link; the connection's Pueblo mode is assumed, and a server's clears
+  // in history are not acted on.
+  prepend(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): Line[] {
+    const lines = this.read(chunks, times);
+    this.builder.prepend(lines);
+    return lines;
+  }
+
+  // The lines history makes read on its own, as prepend reads it, without adding
+  // them: what searching the log looks through.
+  read(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): Line[] {
+    const history = new LineStream(this.log);
+    history.replay(chunks, times, this.pueblo.enabled, false);
+    return history.builder.lines;
+  }
+
+  // Replaces the lines held with history read on its own (see read), keeping the
+  // connection's Pueblo mode: the page a search found far from what was held.
+  replaceWith(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): Line[] {
+    const lines = this.read(chunks, times);
+    const { enabled, detecting } = this.pueblo;
+    this.reset();
+    this.pueblo.setEnabled(enabled);
+    this.pueblo.detecting = detecting;
+    this.builder.append(lines);
+    return lines;
+  }
+
+  // Adds newer history after the lines held, read on its own like prepend
+  // (the lines held must end with a finished line), and returns the lines it made.
+  append(chunks: ReadonlyArray<string | Uint8Array>, times: ReadonlyArray<number | null>): Line[] {
+    const lines = this.read(chunks, times);
+    this.builder.append(lines);
+    return lines;
   }
 
   private ingest(data: string | Uint8Array, source: TimeSource): void {

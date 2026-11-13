@@ -2,8 +2,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { PRIVATE_DIR_MODE, PRIVATE_FILE_MODE } from "./file-modes";
 import { countLineFeeds } from "./line-feeds";
-import { PLAIN, convertLog, encodeRecord, prepareForAppend, readLogHistory } from "./log-format";
-import type { LogHistory, LogMode } from "./log-format";
+import { LineDeduper } from "./line-dedupe";
+import { PLAIN, convertLog, encodeRecord, prepareForAppend, readLogPage, readLogPageSoon } from "./log-format";
+import type { LogMode, LogPage, PageFrom, PageLimits } from "./log-format";
 import type { Character, World } from "./worlds-types";
 import { characterLabel, worldLabel } from "./world-utils";
 
@@ -77,8 +78,8 @@ export function locateLogFile(root: string, world: World, character: Character |
   return path.join(dir, LOG_FILE_NAME);
 }
 
-// What claims a world/character's log: by id, so a rename (which moves the
-// folder) can't let two windows write the same files.
+// What identifies a world/character's log: by id, so a rename (which moves the
+// folder) can't give the same log two keys.
 export function logKeyFor(world: World, character: Character | null): string {
   return character ? `${world.id}/${character.id}` : world.id;
 }
@@ -101,7 +102,8 @@ function openPrivate(file: string): number {
   return fd;
 }
 
-// An open, append-only log file that one window owns, in the format described
+// An open, append-only log file, shared by the windows connected to its
+// character (see SessionLogRegistry), in the format described
 // in log-format.ts: plain, or sealed with the data key, whichever `mode` says.
 //
 // Writes are synchronous so a window that reads the log straight after
@@ -124,16 +126,31 @@ export class SessionLog {
     private readonly onError: (error: Error) => void,
   ) {}
 
-  // What the log already holds, plus each line's arrival time, for
+  // The newest `maxBytes` (and at most `maxLines` lines) the log holds, with
+  // each line's arrival time and the cursor for what lies before them, for
   // pre-populating the scrollback. Call before the first append. Empty if the
   // log can't be read, which is reported and stops logging.
-  history(maxBytes: number): LogHistory {
+  history(maxBytes: number, maxLines = Number.POSITIVE_INFINITY): LogPage {
     try {
       this.prepare();
-      return readLogHistory(this.file, this.mode, maxBytes);
+      const page = readLogPage(this.file, this.mode, { before: null }, { maxBytes, maxLines });
+      if (page) return page;
     } catch (error) {
       this.fail(error as Error);
-      return { bytes: new Uint8Array(), times: [] };
+    }
+    return { bytes: new Uint8Array(), times: [], before: null, after: null, end: null };
+  }
+
+  // A page of the log, read a block at a time (see readLogPageSoon, which this
+  // starts before returning). Null if the cursor doesn't fit the log, or if the
+  // log can't be read, which is reported and stops logging.
+  async page(from: PageFrom, limits: PageLimits): Promise<LogPage | null> {
+    try {
+      this.prepare();
+      return await readLogPageSoon(this.file, this.mode, from, limits);
+    } catch (error) {
+      this.fail(error as Error);
+      return null;
     }
   }
 
@@ -158,7 +175,7 @@ export class SessionLog {
     }
   }
 
-  // Closes the file and gives up ownership, letting another window claim it.
+  // Closes the file, and tells the registry it is no longer open.
   close(): void {
     if (this.closed) return;
     this.closed = true;
@@ -197,33 +214,115 @@ export class SessionLog {
   }
 }
 
-// Hands out each log to at most one window at a time. Several windows can be
-// connected to the same world and character; only the first to claim the
-// log reads and writes it, so output isn't logged once per window.
+// A log's file with the windows writing it. Windows connected to the same
+// world and character share one, so the character has one history; the lines
+// each window receives are written once (see LineDeduper).
+class SharedLog {
+  readonly dedupe = new LineDeduper();
+  // How many windows are attached.
+  users = 0;
+
+  constructor(readonly log: SessionLog) {}
+}
+
+// What a window holds of a shared log, from attaching to it until `close`.
+export class LogAttachment {
+  private closed = false;
+
+  constructor(
+    private readonly shared: SharedLog,
+    private readonly clock: () => number,
+  ) {
+    shared.users++;
+  }
+
+  get file(): string {
+    return this.shared.log.file;
+  }
+
+  // False once closed, and once the log has stopped on a disk error.
+  get isOpen(): boolean {
+    return !this.closed && this.shared.log.isOpen;
+  }
+
+  history(maxBytes: number, maxLines?: number): LogPage {
+    return this.shared.log.history(maxBytes, maxLines);
+  }
+
+  page(from: PageFrom, limits: PageLimits): Promise<LogPage | null> {
+    return this.shared.log.page(from, limits);
+  }
+
+  // The unfinished line this window's output is waiting to write (see
+  // LineDeduper), which the log doesn't have yet.
+  held(): Uint8Array {
+    return this.shared.dedupe.peek(this);
+  }
+
+  // Appends what the window was shown. With another window attached, only the
+  // lines that window hasn't already written are, and the unfinished end of the
+  // output waits for its line feed. A line with no time is Moolin's own, so it
+  // is written as it is, after whatever the window was waiting to write.
+  append(data: string | Uint8Array, time: number | null): void {
+    if (!this.isOpen) return;
+    const { log, dedupe, users } = this.shared;
+    if (users < 2) {
+      log.append(data, time);
+      return;
+    }
+    const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+    if (time === null) {
+      log.append(dedupe.flush(this), this.clock());
+      log.append(bytes, null);
+    } else {
+      log.append(dedupe.push(this, bytes, this.clock()), time);
+    }
+  }
+
+  // Stops writing. The last window to leave closes the file; one leaving with
+  // a single window left writes what both were holding, since there is nothing
+  // left to match it against.
+  close(): void {
+    if (this.closed) return;
+    const wasOpen = this.isOpen;
+    this.closed = true;
+    const { log, dedupe } = this.shared;
+    if (wasOpen && this.shared.users >= 2) {
+      log.append(dedupe.leave(this), this.clock());
+      if (this.shared.users === 2) log.append(dedupe.flushAll(), this.clock());
+    }
+    if (--this.shared.users === 0) log.close();
+  }
+}
+
+// Hands out each world/character's log, which every window connected to it
+// attaches to; the file is closed when the last one leaves. Windows can't
+// write a file at the same time, and the lines every connection of a character
+// receives would be logged once per window, so the windows share one log and
+// the copies of a line are dropped on the way in.
 export class SessionLogRegistry {
-  private readonly owned = new Set<string>();
-  // Windows that wanted a log another window held, in the order they asked,
-  // to be told when it is let go (see whenFree).
-  private readonly waiting = new Map<string, Array<() => void>>();
+  private readonly open = new Map<string, SharedLog>();
   private paused = false;
+  private readonly rewrittenListeners: Array<() => void> = [];
 
   // `modeNow` says how logs are written right now: plain, or encrypted with a
-  // key, or null while the key is not available (then no log can be claimed).
+  // key, or null while the key is not available (then no log can be opened).
   constructor(
     private readonly onError: (file: string, error: Error) => void = () => {},
     private readonly modeNow: () => LogMode | null = () => PLAIN,
+    private readonly clock: () => number = Date.now,
   ) {}
 
-  // Whether any window holds a log, which stops the logs being converted.
-  anyOwned(): boolean {
-    return this.owned.size > 0;
+  // Whether any log is open, which stops the logs being converted.
+  anyOpen(): boolean {
+    return this.open.size > 0;
   }
 
   // While logs are being converted or the way they are written is changing, no
-  // window may claim one (it would read or write a file mid-conversion, or in
-  // the mode being left). Refuses while one is held. Always `resume` after.
+  // window may attach to one (it would read or write a file mid-conversion, or in
+  // the mode being left). Refuses while one is open. Always `resume` after.
   pause(): boolean {
-    if (this.owned.size > 0) return false;
+    if (this.open.size > 0) return false;
     this.paused = true;
     return true;
   }
@@ -232,113 +331,79 @@ export class SessionLogRegistry {
     this.paused = false;
   }
 
-  // The log identified by `key` (see logKeyFor), or null if another window
-  // already owns it. `locate` finds its file, and is only called once the
-  // claim succeeds, since it may rename folders the owner is writing in.
-  claim(key: string, locate: () => string): SessionLog | null {
-    if (this.owned.has(key)) return null;
-    if (this.paused) throw new Error("Moolin is changing its encryption settings: try again in a moment");
-    const mode = this.modeNow();
-    if (!mode) throw new Error("the logs are locked: unlock Moolin to log");
-    this.owned.add(key);
-    let file: string;
-    try {
-      file = locate();
-    } catch (error) {
-      this.owned.delete(key);
-      throw error;
+  // Logs were rewritten in another mode (see convertAllLogs), so the places in
+  // them that windows paging through their history hold no longer fit.
+  rewritten(): void {
+    for (const listener of this.rewrittenListeners) listener();
+  }
+
+  onRewritten(listener: () => void): void {
+    this.rewrittenListeners.push(listener);
+  }
+
+  // The log identified by `key` (see logKeyFor), opened if no window has it
+  // open. `locate` finds its file, and is only called when it is opened, since
+  // it may rename folders a window already attached would be writing in.
+  attach(key: string, locate: () => string): LogAttachment {
+    let shared = this.open.get(key);
+    if (!shared) {
+      if (this.paused) throw new Error("Moolin is changing its encryption settings: try again in a moment");
+      const mode = this.modeNow();
+      if (!mode) throw new Error("the logs are locked: unlock Moolin to log");
+      const file = locate();
+      const log: SessionLog = new SessionLog(
+        file,
+        mode,
+        () => {
+          if (this.open.get(key)?.log === log) this.open.delete(key);
+        },
+        (error) => this.onError(file, error),
+      );
+      shared = new SharedLog(log);
+      this.open.set(key, shared);
     }
-    return new SessionLog(
-      file,
-      mode,
-      () => {
-        this.owned.delete(key);
-        this.handOver(key);
-      },
-      (error) => this.onError(file, error),
-    );
+    return new LogAttachment(shared, this.clock);
   }
 
-  // Calls `onFree` the next time the log `key` is let go by the window that
-  // holds it, for a window that found it held and so isn't logging. Only the
-  // first of several waiting gets the call: it is expected to claim the log
-  // (and to wait again if that fails). Returns a way to stop waiting.
-  whenFree(key: string, onFree: () => void): () => void {
-    const queue = this.waiting.get(key) ?? [];
-    queue.push(onFree);
-    this.waiting.set(key, queue);
-    return () => {
-      const index = queue.indexOf(onFree);
-      if (index !== -1) queue.splice(index, 1);
-      if (queue.length === 0 && this.waiting.get(key) === queue) this.waiting.delete(key);
-    };
-  }
-
-  private handOver(key: string): void {
-    const queue = this.waiting.get(key);
-    const next = queue?.shift();
-    if (queue?.length === 0) this.waiting.delete(key);
-    next?.();
+  // A page of the log in `file` for a window that has let go of it (it
+  // disconnected, but its scrollback can still be paged through). Null if the
+  // cursor doesn't fit the log, or the log can't be read: locked, or not a log
+  // this key opens.
+  async readPage(file: string, from: PageFrom, limits: PageLimits): Promise<LogPage | null> {
+    const mode = this.modeNow();
+    if (!mode) return null;
+    try {
+      return await readLogPageSoon(file, mode, from, limits);
+    } catch {
+      return null;
+    }
   }
 }
 
-// The log one window writes to. A window claims its target's log as it
-// connects and releases it when the connection ends (or the window closes),
-// so another window can then take it over. A window that finds the log
-// already taken shows no history and logs nothing, until the window holding it
-// lets go: then it takes the log over, and logs from that point on.
+// The log one window writes to. A window attaches to its target's log as it
+// connects and lets go of it when the connection ends (or the window closes).
 export class WindowLog {
-  private log: SessionLog | null = null;
-  private stopWaiting: (() => void) | null = null;
-  private target: { world: World; character: Character | null } | null = null;
+  private log: LogAttachment | null = null;
+  // The file of the last log opened, which can be read after letting go of it.
+  private lastFile: string | null = null;
 
-  // `onResumed` is called when a window that was not logging starts to.
   constructor(
     private readonly registry: SessionLogRegistry,
     private readonly root: string,
-    private readonly onResumed: () => void = () => {},
   ) {}
 
-  // Releases any log held, then claims `world`/`character`'s. Returns up to
-  // `maxBytes` of its history to show, or nothing if another window has it.
-  open(world: World, character: Character | null, maxBytes: number): LogHistory {
+  // Lets go of any log held, then attaches to `world`/`character`'s. Returns up
+  // to `maxBytes` (and `maxLines` lines) of its history to show.
+  open(world: World, character: Character | null, maxBytes: number, maxLines?: number): LogPage {
     this.release();
-    this.target = { world, character };
-    this.log = this.claim();
-    if (this.log) return this.log.history(maxBytes);
-    this.wait();
-    return { bytes: new Uint8Array(), times: [] };
+    this.lastFile = null;
+    this.log = this.registry.attach(logKeyFor(world, character), () => locateLogFile(this.root, world, character));
+    this.lastFile = this.log.file;
+    return this.log.history(maxBytes, maxLines);
   }
 
-  private claim(): SessionLog | null {
-    const { world, character } = this.target ?? {};
-    if (!world || character === undefined) return null;
-    return this.registry.claim(logKeyFor(world, character), () => locateLogFile(this.root, world, character));
-  }
-
-  // Waits for the window holding the log to let go of it.
-  private wait(): void {
-    const { world, character } = this.target ?? {};
-    if (!world || character === undefined) return;
-    this.stopWaiting = this.registry.whenFree(logKeyFor(world, character), () => {
-      this.stopWaiting = null;
-      let claimed: SessionLog | null = null;
-      try {
-        claimed = this.claim();
-      } catch {
-        return; // can't log now (locked, or encryption is changing): stay as it is
-      }
-      if (claimed) {
-        this.log = claimed;
-        this.onResumed();
-      } else {
-        this.wait(); // someone else got it first
-      }
-    });
-  }
-
-  // Whether this window holds a log (and so is writing to it).
-  get owned(): boolean {
+  // Whether this window is writing a log.
+  get logging(): boolean {
     return this.log?.isOpen ?? false;
   }
 
@@ -351,10 +416,21 @@ export class WindowLog {
     this.log?.append(data, time);
   }
 
+  // A page of the history, from the log held or, once it was let go of, from
+  // its file. The read starts before this returns (see readLogPageSoon), so it
+  // covers what the log held at the call. Null if the cursor doesn't fit the
+  // log, or the log can't be read.
+  page(from: PageFrom, limits: PageLimits): Promise<LogPage | null> {
+    if (this.log?.isOpen) return this.log.page(from, limits);
+    return this.lastFile ? this.registry.readPage(this.lastFile, from, limits) : Promise.resolve(null);
+  }
+
+  // The unfinished line this window has output for that the log is yet to write.
+  held(): Uint8Array {
+    return this.log?.isOpen ? this.log.held() : new Uint8Array();
+  }
+
   release(): void {
-    this.stopWaiting?.();
-    this.stopWaiting = null;
-    this.target = null;
     this.log?.close();
     this.log = null;
   }

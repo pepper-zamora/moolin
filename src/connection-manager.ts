@@ -38,8 +38,8 @@ export interface ConnectionState {
 // What the renderer is told about its window: the connection, plus whether
 // the window is writing it to the session log.
 export interface WindowState extends ConnectionState {
-  // False when another window connected to the same world/character already
-  // owns that log, and while disconnected.
+  // False when the log couldn't be opened (locked, or a disk error), and
+  // while disconnected.
   logging: boolean;
 }
 

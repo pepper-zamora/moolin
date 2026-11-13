@@ -12,15 +12,29 @@
   </head>
   <body>
     <div id="app">
-      <div id="terminal-row">
-        <!-- Per-line timestamp column; a sibling of the terminal rather than
-             part of its buffer, kept scroll-synced in renderer.ts. -->
-        <div id="gutter" hidden></div>
-        <div id="terminal"></div>
-        <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
-        <canvas id="search-ruler" hidden></canvas>
-        <!-- Scrollback search (Ctrl+F), floating over the terminal's top
-             right; driven by find-widget.ts. -->
+      <div id="panes">
+        <!-- The history pane: a read-only window onto the character's log,
+             above the live scrollback, opened by scrolling up past the live
+             scrollback's top (see history-pane.ts). -->
+        <div id="history-row" class="scrollback-row" hidden>
+          <div id="history-gutter" class="gutter" hidden></div>
+          <div id="history" class="scrollback" aria-label="History"></div>
+          <canvas id="history-ruler" class="search-ruler" hidden></canvas>
+        </div>
+        <div id="history-divider" role="separator" aria-orientation="horizontal" title="Drag to resize" hidden>
+          <span>History: Escape closes</span>
+          <button id="history-close" type="button" tabindex="-1" title="Close the history (Escape)" aria-label="Close the history">&#x2715;</button>
+        </div>
+        <div id="terminal-row" class="scrollback-row">
+          <!-- Per-line timestamp column; a sibling of the terminal rather than
+               part of its buffer, kept scroll-synced in renderer.ts. -->
+          <div id="gutter" class="gutter" hidden></div>
+          <div id="terminal" class="scrollback"></div>
+          <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
+          <canvas id="search-ruler" class="search-ruler" hidden></canvas>
+        </div>
+        <!-- Search (Ctrl+F), floating over the panes' top right; driven by
+             find-widget.ts. -->
         <div id="find-widget" role="search" hidden>
           <div class="find-field">
             <input id="find-input" type="text" spellcheck="false" placeholder="Find" aria-label="Find" />
@@ -29,8 +43,8 @@
             <button id="find-regex" class="find-toggle" type="button" aria-pressed="false" title="Use Regular Expression (Alt+R)">.*</button>
           </div>
           <span id="find-count" aria-live="polite">No results</span>
-          <button id="find-prev" class="find-action" type="button" title="Previous Match (Shift+Enter)" aria-label="Previous Match">&#x2191;</button>
-          <button id="find-next" class="find-action" type="button" title="Next Match (Enter)" aria-label="Next Match">&#x2193;</button>
+          <button id="find-older" class="find-action" type="button" title="Older Match (Enter)" aria-label="Older Match">&#x2191;</button>
+          <button id="find-newer" class="find-action" type="button" title="Newer Match (Shift+Enter)" aria-label="Newer Match">&#x2193;</button>
           <button id="find-close" class="find-action" type="button" title="Close (Escape)" aria-label="Close">&#x2715;</button>
         </div>
       </div>
@@ -38,11 +52,14 @@
       <textarea id="input-area" rows="1" spellcheck="true" disabled></textarea>
       <div id="status-bar" data-status="disconnected">
         <span id="status-text">Not connected</span>
+        <!-- How far a search of the log has got, while it takes a while (see
+             find-widget.ts). -->
+        <span id="search-status" aria-live="polite" hidden></span>
         <!-- The terminal's current size, in characters (cols x rows). -->
         <span id="screen-size" title="Terminal size, in characters"></span>
         <!-- Whether this window is writing the session log: a scroll when it
-             is, a "no" sign when another window connected to the same
-             world/character already owns the log. -->
+             is, a "no" sign when the log couldn't be opened (locked, or a
+             disk error). -->
         <span id="logging-status" role="img" hidden>
           <svg class="logging-on" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
             <path d="M5 13.5 H3.6 a1.6 1.6 0 0 1 0 -3.2 H5 M5 13.5 h5.4 a1.6 1.6 0 0 0 1.6 -1.6 V5.7 M5 13.5 a1.6 1.6 0 0 0 1.6 -1.6 V10.3 H3.6 M5 10.3 V4.1 a1.6 1.6 0 0 1 1.6 -1.6 H12.4 a1.6 1.6 0 0 1 0 3.2 H12 M10.8 2.5 a1.6 1.6 0 0 1 1.6 1.6" />

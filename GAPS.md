@@ -200,8 +200,11 @@ currently discards or never negotiates:
 - **Searchable/filterable scrollback** beyond plain text search (Mudlet
   logs are searchable; Blightmud has a text-search mode in its TUI). Moolin
   has plain text search (Edit > Find, with case, whole-word and regex
-  options) but nothing beyond it, such as filtering to matching lines or
-  searching the on-disk logs.
+  options), which covers the character's whole on-disk log as well as the
+  scrollback, but nothing beyond it, such as filtering to matching lines.
+  Searching a log reads all of it, at roughly 100 MB a second; an index
+  kept beside the log would make it near-instant, if logs grow big enough to
+  need one.
 - **Tag-aware scrollback filtering**: the view-side counterpart to
   Blightmud's trigger-tagging (§1) — once lines can be tagged, being able to
   show-only or hide-by-tag turns tags into a lightweight "channel" view
@@ -265,7 +268,8 @@ currently discards or never negotiates:
     little-endian float64 of epoch ms per line feed in them, NaN for no time),
     so the times can't fall out of step with the bytes, and a crash can
     only leave an unfinished last line, which is cut off before the next
-    append. On connect the tail's bytes and times are read back together.
+    append. On connect the tail's bytes and times are read back together, and
+    scrolling to the top pages older history in the same way.
   - **Not done.** There's no hover tooltip with the exact time, and no
     seconds or configurable format. The log is not
     pruned.
@@ -274,16 +278,13 @@ currently discards or never negotiates:
   Moolin's input box has history recall (Up/Down) but no completion.
 - **Split-view scrolling**: scrolling back through history opens a split so
   new server output keeps arriving below while old output stays pinned above
-  (Blightmud's `scroll_split`; similar in Mudlet/TinTin++). Not a quick win
-  for Moolin specifically: the scrollback (`src/scrollback-view.ts`) is a
-  single scrolling element with one viewport over one set of lines, and
-  has no split/pinned-pane mode — there's nothing to "turn on."
-  Getting this would mean building it: most plausibly a second, read-only
-  view frozen at a scroll position, fed from the same replay
-  data Moolin already keeps per window in `scrollback-buffer.ts`, rendered
-  alongside the live-tailing primary instance. That's real layout and
-  state-sync work, not a config flag — treat it as closer in cost to a
-  mapper or status-bar feature than to scrollback search.
+  (Blightmud's `scroll_split`; similar in Mudlet/TinTin++).
+  - **Done.** Moolin's history pane (`src/history-pane.ts`) opens as soon as
+    you scroll up, as Blightmud's split does, and reads back
+    through the character's whole log, not just the scrollback (see README,
+    History pane). View > History Pane (Ctrl+Shift+H) opens it too, and the
+    divider's position is remembered. Without a log there's no pane, and the
+    scrollback scrolls back by itself.
 
 ## 9. Accessibility
 

@@ -183,3 +183,69 @@ test("runs merge only when they share a link as well as a style", () => {
     ],
   );
 });
+
+test("older lines go in front, with ids below the rest that still increase along the lines", () => {
+  const b = build(["new one\nnew two\n"], [3, 4]);
+  const newest = b.lines.map((l) => l.id);
+  b.prepend(build(["old one\nold two\n"], [1, 2]).lines);
+  assert.deepEqual(
+    b.lines.map((l) => [l.text, l.time]),
+    [
+      ["old one", 1],
+      ["old two", 2],
+      ["new one", 3],
+      ["new two", 4],
+    ],
+  );
+  const ids = b.lines.map((l) => l.id);
+  assert.deepEqual(ids.slice(2), newest, "the lines already held keep their ids");
+  assert.ok(
+    ids.every((id, i) => i === 0 || id > ids[i - 1]),
+    "increasing",
+  );
+  b.prepend(build(["older\n"], [0]).lines);
+  assert.ok(b.lines[0].id < ids[0]);
+  assert.equal(new Set(b.lines.map((l) => l.id)).size, b.lines.length, "unique");
+});
+
+test("lines added in front leave the open line and what is due to be drawn alone", () => {
+  const b = build(["new\nprompt> "], [3]);
+  b.takeDirty();
+  b.prepend(build(["old\n"], [1]).lines);
+  assert.equal(b.dirtyCount, 0);
+  assert.equal(b.openLine?.text, "prompt> ");
+});
+
+test("newer lines go after the rest, with ids above theirs", () => {
+  const b = build(["one\ntwo\n"], [1, 2]);
+  b.append(build(["three\nfour\n"], [3, 4]).lines);
+  assert.deepEqual(
+    b.lines.map((l) => l.text),
+    ["one", "two", "three", "four"],
+  );
+  const ids = b.lines.map((l) => l.id);
+  assert.ok(
+    ids.every((id, i) => i === 0 || id > ids[i - 1]),
+    "increasing",
+  );
+  assert.equal(b.takeDirty().length, 2, "only the lines it made itself are due to be drawn");
+});
+
+test("dropping the newest lines takes the open line with them", () => {
+  const b = build(["one\ntwo\nprompt> "], [1, 2]);
+  const dropped = b.dropBack(2);
+  assert.deepEqual(
+    dropped.map((l) => [l.text, l.dropped]),
+    [
+      ["two", true],
+      ["prompt> ", true],
+    ],
+  );
+  assert.equal(b.openLine, null);
+  b.feed(parser("more\n"), () => 3);
+  assert.deepEqual(
+    b.lines.map((l) => l.text),
+    ["one", "more"],
+    "what comes next starts a line of its own",
+  );
+});

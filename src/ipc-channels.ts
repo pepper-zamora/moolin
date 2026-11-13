@@ -16,6 +16,10 @@ export const IpcChannels = {
   telnetResize: "telnet:resize",
   telnetData: "telnet:data",
   terminalGetScrollback: "terminal:getScrollback",
+  terminalGetHistoryPage: "terminal:getHistoryPage",
+  // main -> renderer: the logs were rewritten (encryption turned on or off), so
+  // the window's places in its log no longer fit; it fetches its replay again.
+  terminalHistoryRewritten: "terminal:historyRewritten",
   // main -> renderer: the scrollback was replaced; clear and write these chunks.
   terminalReset: "terminal:reset",
   // main -> renderer: the server's Pueblo greeting no longer counts, with the
@@ -35,6 +39,7 @@ export const IpcChannels = {
   // main -> renderer: Edit menu's Find / Find Next / Find Previous.
   terminalFindRequested: "terminal:findRequested",
   terminalClearScreenRequested: "terminal:clearScreenRequested",
+  terminalHistoryPaneRequested: "terminal:historyPaneRequested",
   // main -> renderer: show or hide the per-line timestamp gutter.
   terminalToggleTimestamps: "terminal:toggleTimestamps",
   // main -> renderer: apply a newly chosen default font/size to this window.

@@ -30,6 +30,7 @@ import { checkForUpdate } from "./update-check";
 import { type FontStyle, fontFamilyFor } from "./fonts";
 import { normalizePhrase, type KeySource } from "./crypto-keys";
 import { readKeyFile, unlockWithKeyFile } from "./key-file";
+import { STALE_PAGE, type HistoryPage } from "./history-paging";
 import { Security, type Outcome, type SecurityPageState } from "./security";
 import {
   parseSecurityDecline,
@@ -40,6 +41,7 @@ import {
   parseConnectRequest,
   parseContextMenuOptions,
   parseExternalUrl,
+  parseHistoryRequest,
   parseInitialSize,
   parseInputText,
   parseLogCall,
@@ -131,6 +133,11 @@ const logRegistry = new SessionLogRegistry(
 );
 // Whether passwords and logs are encrypted, and the key while unlocked (see security.ts).
 const security = new Security(worldsPath, LOG_ROOT, logRegistry);
+// A window paging through a log that was just converted holds places in it that
+// no longer fit; it starts over from a fresh replay.
+logRegistry.onRewritten(() => {
+  for (const terminal of windowManager.all()) terminal.send(IpcChannels.terminalHistoryRewritten);
+});
 // Whether to offer setting up encryption: once a run, to the first window to ask.
 let offerPending = prefs.encryptionPrompt === "ask" && security.state() === "off";
 
@@ -525,6 +532,14 @@ function buildMenu(terminal: TerminalWindow): void {
           click: () => terminal.send(IpcChannels.terminalClearScreenRequested),
         },
         {
+          // Opens the history pane above the scrollback, or closes it; the
+          // window handles the key itself, as with Clear Screen.
+          label: "&History Pane",
+          accelerator: "CmdOrCtrl+Shift+H",
+          registerAccelerator: false,
+          click: () => terminal.send(IpcChannels.terminalHistoryPaneRequested),
+        },
+        {
           label: "Show &Timestamps",
           type: "checkbox",
           checked: terminal.showTimestamps,
@@ -708,8 +723,23 @@ ipcMain.on(IpcChannels.terminalUndoStateChanged, (event, rawCanUndo: unknown, ra
 ipcMain.handle(
   IpcChannels.terminalGetScrollback,
   (event) =>
-    terminalFor(event)?.getScrollback() ?? { chunks: [], times: [], seq: 0, pueblo: false, greetingOpen: false },
+    terminalFor(event)?.getScrollback() ?? {
+      chunks: [],
+      times: [],
+      seq: 0,
+      pueblo: false,
+      greetingOpen: false,
+      fromLog: false,
+      before: null,
+    },
 );
+
+ipcMain.handle(IpcChannels.terminalGetHistoryPage, (event, rawRequest: unknown): Promise<HistoryPage> | HistoryPage => {
+  const terminal = terminalFor(event);
+  const request = parseHistoryRequest(rawRequest);
+  if (terminal && !request) ignoreBad(IpcChannels.terminalGetHistoryPage, rawRequest);
+  return terminal && request ? terminal.getHistoryPage(request) : STALE_PAGE;
+});
 
 // A freshly opened (non-cascaded) window's one-shot report of how big its
 // content needs to be to show an 80x25 terminal at its starting font.
@@ -719,10 +749,11 @@ ipcMain.on(IpcChannels.terminalInitialSize, (event, rawSize: unknown) => {
   windowManager.applyInitialSize(event.sender, size);
 });
 
-// The Preferences dialog's changes save and apply immediately: showTimestamps
-// is this window's own per-window state (same as the View menu's checkbox),
-// while checkForUpdates and the font/size also become the default for new
-// windows; a font change additionally re-renders this window's terminal.
+// The Preferences dialog's changes save and apply immediately (as does the
+// font size a window zooms to): showTimestamps is this window's own per-window
+// state (same as the View menu's checkbox), while checkForUpdates and the
+// font/size also become the default for new windows; a font change
+// additionally re-renders this window's terminal.
 ipcMain.handle(IpcChannels.preferencesSave, (event, rawPartial: unknown) => {
   if (!terminalFor(event)) return;
   if (typeof rawPartial !== "object" || rawPartial === null) return ignoreBad(IpcChannels.preferencesSave, rawPartial);

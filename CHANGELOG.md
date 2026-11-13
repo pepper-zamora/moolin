@@ -10,6 +10,48 @@ renames that section to the new version and date.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-13
+
+### Added
+
+- **History pane.** Scrolling up over the scrollback (the mouse wheel, or Page
+  Up), or View > History Pane (Ctrl+Shift+H), splits the window before
+  anything scrolls: a history pane opens above, starting at the scrollback's
+  top line, and the scrolling goes on in it, back through the character's
+  log, 5,000 lines at a time, as far as it goes, instead of stopping at the
+  newest 20,000. With a log, the scrollback below stays at the newest line,
+  with new output and the input line, and reading back happens in the pane.
+  Drag the bar between them to resize (the height is remembered); Escape, End,
+  Ctrl+Shift+H, the bar's close button, or scrolling back down to the end of
+  the log close the pane. It holds at most 30,000 lines. Only the log can be
+  paged: a window with no log has what it had. Pages start in the default
+  colour. Known limit: reloading a window just as another window on the same
+  character logs a line this one has not been sent yet shows that line twice.
+- **Find searches the whole log.** With a log, Find searches all of it as well
+  as the scrollback, in the background from the newest line back, and counts
+  every match ("3 of 25"). Each match opens the history pane at it, in one
+  move once found; the status bar shows how far a long search has got and how
+  many it has found.
+
+### Changed
+
+- **Windows connected to the same character now share one log.** Before, the
+  first window to connect owned the log and the others logged nothing and
+  started with no history, until that window let go of it (0.3.1). Now every
+  window logs and reads the same history, and a line that several windows
+  receive within five seconds of each other is written once, since servers
+  that allow several connections to a character send all of its output to
+  each. Closing one window no longer stops logging for the others. The status
+  bar's "no" sign now means the log couldn't be opened (locked, or a disk
+  error).
+- **Breaking:** Find's Enter and F3 now go to the next older match (up the
+  scrollback), and Shift+Enter and Shift+F3 the next newer. On macOS, Cmd+G
+  and Cmd+Shift+G do the same.
+- The font size you zoom to (Ctrl+= and Ctrl+-) is now saved as the font size
+  preference, so new windows and the next run start at it, and the Preferences
+  dialog shows it. Before, zooming changed only the window it was done in.
+  Actual Size (Ctrl+0) goes back to the default size, 14, and saves that.
+
 ## [0.3.1] - 2026-11-06
 
 ### Added
@@ -202,7 +244,8 @@ The first public release.
   portable exe) and macOS (dmg and zip, Apple silicon and Intel). The
   Windows and macOS builds are unsigned.
 
-[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/pepper-zamora/moolin/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/pepper-zamora/moolin/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/pepper-zamora/moolin/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/pepper-zamora/moolin/compare/v0.1.1...v0.3.0
 [0.1.1]: https://github.com/pepper-zamora/moolin/compare/v0.1.0...v0.1.1

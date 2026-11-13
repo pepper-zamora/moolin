@@ -1,13 +1,22 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { PLAIN, type LogCursor } from "./log-format";
 import { locateLogFile, logPathFor, sanitizePathSegment, SessionLogRegistry, WindowLog } from "./session-log";
 import { newWorld } from "./world-utils";
 
+// Temporary folders the tests make, removed once they have all run.
+const tempDirs: string[] = [];
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function tempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), "moolin-log-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "moolin-log-"));
+  tempDirs.push(dir);
+  return dir;
 }
 
 test("sanitizePathSegment neutralises separators, dots and empties", () => {
@@ -36,39 +45,40 @@ test("logPathFor nests character under world, or omits it, each prefixed by its 
   assert.equal(logPathFor("/r", { ...world, id: "../.." }, null), path.join("/r", "_.LambdaMOO", "moolin.log"));
 });
 
-test("only the first claimant owns a log; closing releases it", () => {
+test("windows share a log, which closes with the last of them", () => {
   const registry = new SessionLogRegistry();
   const file = path.join(tempDir(), "w", "moolin.log");
-  const first = registry.claim(file, () => file);
-  assert.ok(first);
+  const first = registry.attach(file, () => file);
   let located = false;
-  assert.equal(
-    registry.claim(file, () => {
-      located = true;
-      return file;
-    }),
-    null,
-  );
-  assert.equal(located, false, "a failed claim must not touch the log's folders");
+  const second = registry.attach(file, () => {
+    located = true;
+    return file;
+  });
+  assert.equal(located, false, "attaching to an open log must not touch its folders");
+  assert.equal(registry.anyOpen(), true);
   first.close();
-  assert.ok(registry.claim(file, () => file));
+  assert.equal(second.isOpen, true);
+  assert.equal(registry.anyOpen(), true);
+  second.close();
+  assert.equal(registry.anyOpen(), false);
+  assert.ok(registry.attach(file, () => file));
 });
 
 test("append creates directories, keeps escapes, and accumulates across sessions", () => {
   const file = path.join(tempDir(), "w", "c", "moolin.log");
   const registry = new SessionLogRegistry();
-  const first = registry.claim(file, () => file);
+  const first = registry.attach(file, () => file);
   assert.ok(first);
   first.append("\x1b[31mred\x1b[0m\r\n", 1000);
   first.append(new Uint8Array([104, 105, 13, 10]), 2000);
   first.close();
 
-  const second = registry.claim(file, () => file);
+  const second = registry.attach(file, () => file);
   assert.ok(second);
   assert.equal(Buffer.from(second.history(1000).bytes).toString(), "\x1b[31mred\x1b[0m\r\nhi\r\n");
   second.append("more\r\n", 3000);
   second.close();
-  const again = registry.claim(file, () => file);
+  const again = registry.attach(file, () => file);
   assert.ok(again);
   assert.equal(Buffer.from(again.history(1000).bytes).toString(), "\x1b[31mred\x1b[0m\r\nhi\r\nmore\r\n");
   again.close();
@@ -77,13 +87,13 @@ test("append creates directories, keeps escapes, and accumulates across sessions
 test("each line's arrival time is restored across sessions", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   const registry = new SessionLogRegistry();
-  const first = registry.claim(file, () => file);
+  const first = registry.attach(file, () => file);
   assert.ok(first);
   first.append("one\r\n", 1000);
   first.append("two\r\nthree\r\n", 2000); // one append, two lines, same time
   first.close();
 
-  const second = registry.claim(file, () => file);
+  const second = registry.attach(file, () => file);
   assert.ok(second);
   assert.deepEqual(second.history(1000).times, [1000, 2000, 2000]);
   second.close();
@@ -92,14 +102,14 @@ test("each line's arrival time is restored across sessions", () => {
 test("history times align to the log tail when it is truncated", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   const registry = new SessionLogRegistry();
-  const log = registry.claim(file, () => file);
+  const log = registry.attach(file, () => file);
   assert.ok(log);
   log.append("aaaa\r\n", 1); // dropped by the tail cut below
   log.append("bbbb\r\n", 2);
   log.append("cccc\r\n", 3);
   log.close();
 
-  const reopened = registry.claim(file, () => file);
+  const reopened = registry.attach(file, () => file);
   assert.ok(reopened);
   // Only the last two lines survive a 14-byte tail; their times come with them.
   const history = reopened.history(14);
@@ -111,13 +121,13 @@ test("history times align to the log tail when it is truncated", () => {
 test("untimed (Moolin) lines come back as null, keeping alignment", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   const registry = new SessionLogRegistry();
-  const log = registry.claim(file, () => file);
+  const log = registry.attach(file, () => file);
   assert.ok(log);
   log.append("[connecting]\r\n", null); // a Moolin status line: no timestamp
   log.append("server says hi\r\n", 5000); // real server output
   log.close();
 
-  const reopened = registry.claim(file, () => file);
+  const reopened = registry.attach(file, () => file);
   assert.ok(reopened);
   assert.deepEqual(reopened.history(1000).times, [null, 5000]);
   reopened.close();
@@ -126,13 +136,13 @@ test("untimed (Moolin) lines come back as null, keeping alignment", () => {
 test("a log reclaimed straight after close reads back everything, times aligned", () => {
   const file = path.join(tempDir(), "w", "moolin.log");
   const registry = new SessionLogRegistry();
-  const first = registry.claim(file, () => file);
+  const first = registry.attach(file, () => file);
   assert.ok(first);
   for (let i = 0; i < 100; i++) first.append(`line ${i}\r\n`, i);
   first.close();
 
   // Reconnecting to the same world: no chance for anything to flush between.
-  const second = registry.claim(file, () => file);
+  const second = registry.attach(file, () => file);
   assert.ok(second);
   const history = second.history(1_000_000);
   assert.equal(Buffer.from(history.bytes).toString().split("\r\n").length - 1, 100);
@@ -180,119 +190,133 @@ test("worlds whose names differ only in case get separate folders", () => {
   assert.notEqual(path.dirname(a).toLowerCase(), path.dirname(b).toLowerCase());
 });
 
-test("a window's log is released on disconnect, so another window can take it", () => {
+test("windows connected to the same character log each line once, and see the same history", () => {
   const root = tempDir();
-  const registry = new SessionLogRegistry();
+  let now = 1000;
+  const registry = new SessionLogRegistry(
+    undefined,
+    () => PLAIN,
+    () => now,
+  );
   const world = { ...newWorld("w1"), name: "Moo" };
   const a = new WindowLog(registry, root);
   const b = new WindowLog(registry, root);
 
   a.open(world, null, 1000);
-  a.append("from a\n", 1);
-  assert.equal(a.owned, true);
-  assert.deepEqual(b.open(world, null, 1000).bytes, new Uint8Array(), "b gets no history while a holds it");
-  assert.equal(b.owned, false);
-  b.append("not logged\n", 2);
+  a.append("before b\n", 1);
+  assert.equal(Buffer.from(b.open(world, null, 1000).bytes).toString(), "before b\n", "b sees what a logged");
+  assert.equal(a.logging && b.logging, true);
 
-  a.append("[disconnected]\n", null);
-  a.release();
-  const history = b.open(world, null, 1000);
-  assert.equal(b.owned, true);
-  assert.equal(Buffer.from(history.bytes).toString(), "from a\n[disconnected]\n");
-  assert.deepEqual(history.times, [1, null]);
-  b.release();
-});
-
-test("a window that could not log takes the log over when the window holding it lets go", () => {
-  const root = tempDir();
-  const registry = new SessionLogRegistry();
-  const world = { ...newWorld("w1"), name: "Moo" };
-  let resumed = 0;
-  const a = new WindowLog(registry, root);
-  const b = new WindowLog(registry, root, () => resumed++);
-
-  a.open(world, null, 1000);
-  b.open(world, null, 1000);
-  a.append("a1\n", 1);
-  b.append("b while a holds it\n", 2);
-  assert.equal(b.owned, false);
-  assert.equal(resumed, 0);
-
-  a.release();
-  assert.equal(b.owned, true, "b logs now");
-  assert.equal(resumed, 1);
-  b.append("b after\n", 3);
-  b.release();
-
-  const history = new WindowLog(registry, root).open(world, null, 1000);
+  // Both receive the same output, cut differently; a line only one receives is kept.
+  a.append("hel", 2);
+  a.append("lo\nonly a\n", 2);
+  now += 500;
+  b.append("hello\nwor", 3);
+  b.append("ld\n", 3);
+  a.append("world\n", 4);
+  b.append("[typed] look\n", null);
   assert.equal(
-    Buffer.from(history.bytes).toString(),
-    "a1\nb after\n",
-    "what b showed while not logging was not logged",
+    Buffer.from(a.open(world, null, 1000).bytes).toString(),
+    "before b\nhello\nonly a\nworld\n[typed] look\n",
   );
-});
-
-test("of several windows waiting for a log, the first to ask gets it, and the next gets it after", () => {
-  const root = tempDir();
-  const registry = new SessionLogRegistry();
-  const world = { ...newWorld("w1"), name: "Moo" };
-  const resumed: string[] = [];
-  const a = new WindowLog(registry, root);
-  const b = new WindowLog(registry, root, () => resumed.push("b"));
-  const c = new WindowLog(registry, root, () => resumed.push("c"));
-  a.open(world, null, 1000);
-  b.open(world, null, 1000);
-  c.open(world, null, 1000);
-
   a.release();
-  assert.deepEqual([b.owned, c.owned], [true, false]);
-  b.release();
-  assert.deepEqual([b.owned, c.owned], [false, true]);
-  assert.deepEqual(resumed, ["b", "c"]);
-  c.release();
-});
-
-test("a window that disconnects or connects elsewhere stops waiting for the log", () => {
-  const root = tempDir();
-  const registry = new SessionLogRegistry();
-  const world = { ...newWorld("w1"), name: "Moo" };
-  const other = { ...newWorld("w2"), name: "Other" };
-  let resumed = 0;
-  const a = new WindowLog(registry, root);
-  const b = new WindowLog(registry, root, () => resumed++);
-  a.open(world, null, 1000);
-  b.open(world, null, 1000);
-  b.release(); // disconnected
-  a.release();
-  assert.equal(b.owned, false);
-
-  a.open(world, null, 1000);
-  b.open(world, null, 1000);
-  b.open(other, null, 1000); // connected to another world: it owns that log
-  a.release();
-  assert.equal(resumed, 0);
-  assert.equal(b.owned, true);
-  assert.match(b.file ?? "", /Other/, "and stays on the other world's log");
   b.release();
 });
 
-test("a window waiting for a log stays unlogged if it cannot claim it when it is free", () => {
+test("a window leaving writes the unfinished line it and the last other window were holding", () => {
   const root = tempDir();
-  let locked = false;
-  const registry = new SessionLogRegistry(undefined, () => (locked ? null : { kind: "plain" }));
+  const registry = new SessionLogRegistry();
   const world = { ...newWorld("w1"), name: "Moo" };
-  let resumed = 0;
   const a = new WindowLog(registry, root);
-  const b = new WindowLog(registry, root, () => resumed++);
+  const b = new WindowLog(registry, root);
   a.open(world, null, 1000);
   b.open(world, null, 1000);
-  locked = true;
-  a.release(); // b can't claim while locked, and must not throw
-  assert.equal(b.owned, false);
-  assert.equal(resumed, 0);
+  a.append("> ", 1);
+  b.append("> ", 1);
+  b.release();
+  a.append("more\n", 2);
+  a.release();
+  const history = new WindowLog(registry, root).open(world, null, 1000);
+  assert.equal(Buffer.from(history.bytes).toString(), "> more\n", "the prompt both held is written once");
 });
 
-test("a log that stops on a disk error no longer counts as owned", () => {
+test("a window pages back through the log it holds, and after letting go of it", async () => {
+  const root = tempDir();
+  const registry = new SessionLogRegistry();
+  const world = { ...newWorld("w1"), name: "Moo" };
+  const log = new WindowLog(registry, root);
+  assert.equal(await log.page({ before: null }, { maxBytes: 100 }), null, "nothing to read before a log is opened");
+  const opened = log.open(world, null, 1000);
+  assert.deepEqual([opened.bytes.length, opened.before], [0, null]);
+  for (let i = 0; i < 6; i++) log.append(`line ${i}\n`, i);
+  const read = async () => {
+    const pieces: string[] = [];
+    let before: LogCursor | null = null;
+    for (let n = 0; n < 20; n++) {
+      const page = await log.page({ before }, { maxBytes: 16, lenient: true });
+      assert.ok(page);
+      pieces.unshift(Buffer.from(page.bytes).toString());
+      if (!page.before) break;
+      before = page.before;
+    }
+    return pieces.join("");
+  };
+  const all = "line 0\nline 1\nline 2\nline 3\nline 4\nline 5\n";
+  assert.equal(await read(), all);
+  log.release();
+  assert.equal(await read(), all, "the file can still be read once the window has let go of it");
+  const history = log.open(world, null, 1000, 2);
+  assert.equal(Buffer.from(history.bytes).toString(), "line 4\nline 5\n", "history keeps to a number of lines");
+  assert.ok(history.before);
+  const forward = await log.page({ after: history.before }, { maxBytes: 1000 });
+  assert.deepEqual([Buffer.from(forward?.bytes ?? []).toString(), forward?.after], ["line 4\nline 5\n", null]);
+  log.release();
+});
+
+test("a page read takes the log as it was when asked, whatever is written while it reads", async () => {
+  const root = tempDir();
+  const registry = new SessionLogRegistry();
+  const world = { ...newWorld("w1"), name: "Moo" };
+  const log = new WindowLog(registry, root);
+  log.open(world, null, 1000);
+  for (let i = 0; i < 3000; i++) log.append(`line ${i} of a long enough log\n`, i);
+  const reading = log.page({ before: null }, { maxBytes: 10_000_000 });
+  log.append("written while reading\n", 9999);
+  const page = await reading;
+  assert.ok(page);
+  const text = Buffer.from(page.bytes).toString();
+  assert.ok(text.endsWith("line 2999 of a long enough log\n"), "the line written while reading is not in it");
+  assert.equal(page.times.length, 3000);
+  log.release();
+});
+
+test("the registry says when logs were rewritten", () => {
+  const registry = new SessionLogRegistry();
+  let told = 0;
+  registry.onRewritten(() => told++);
+  registry.rewritten();
+  assert.equal(told, 1);
+});
+
+test("a window knows the unfinished line it is waiting to write", () => {
+  const root = tempDir();
+  const registry = new SessionLogRegistry();
+  const world = { ...newWorld("w1"), name: "Moo" };
+  const a = new WindowLog(registry, root);
+  const b = new WindowLog(registry, root);
+  a.open(world, null, 1000);
+  assert.equal(a.held().length, 0);
+  a.append("alone> ", 1);
+  assert.equal(a.held().length, 0, "a window on its own writes straight through");
+  b.open(world, null, 1000);
+  a.append("> ", 2);
+  assert.equal(Buffer.from(a.held()).toString(), "> ");
+  assert.equal(b.held().length, 0);
+  a.release();
+  b.release();
+});
+
+test("a log that stops on a disk error stops logging", () => {
   const root = tempDir();
   const world = { ...newWorld("w1"), name: "Moo" };
   // A file where the world's folder should be makes every write fail.
@@ -301,7 +325,7 @@ test("a log that stops on a disk error no longer counts as owned", () => {
   const log = new WindowLog(new SessionLogRegistry((_file, error) => errors.push(error.message)), root);
   log.open(world, null, 1000);
   log.append("x\n", 1);
-  assert.equal(log.owned, false);
+  assert.equal(log.logging, false);
   assert.equal(errors.length, 1);
 });
 
@@ -310,7 +334,7 @@ test("log files and the folders made for them can be read by their owner alone",
 }, () => {
   const root = tempDir();
   const file = path.join(root, "w", "c", "moolin.log");
-  const log = new SessionLogRegistry().claim(file, () => file);
+  const log = new SessionLogRegistry().attach(file, () => file);
   assert.ok(log);
   log.append("secret\r\n", 1000);
   const mode = (target: string) => fs.statSync(target).mode & 0o777;
@@ -320,7 +344,7 @@ test("log files and the folders made for them can be read by their owner alone",
 
   // A log from an earlier version, readable by everyone, is tightened when reopened.
   fs.chmodSync(file, 0o644);
-  const again = new SessionLogRegistry().claim(file, () => file);
+  const again = new SessionLogRegistry().attach(file, () => file);
   assert.ok(again);
   again.append("more\r\n", 2000);
   assert.equal(mode(file), 0o600);

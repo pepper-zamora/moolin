@@ -2,6 +2,7 @@
 // whatever servers send, so main treats its messages as input from outside:
 // nothing it sends is used without being checked here first. Pure, so it can
 // be tested without Electron.
+import type { HistoryRequest } from "./history-paging";
 import { LOG_LEVELS, type LogLevel } from "./logger";
 import { MAX_PHRASE_LENGTH } from "./security-limits";
 
@@ -19,6 +20,25 @@ export function parseSize(value: unknown): { cols: number; rows: number } | null
   const { cols, rows } = value as { cols?: unknown; rows?: unknown };
   const ok = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= 0xffff;
   return ok(cols) && ok(rows) ? { cols, rows } : null;
+}
+
+// A request for the page of history before or after a log cursor (see
+// history-paging.ts). The cursor's numbers only need to be whole and in the
+// range of a file offset; one that doesn't fit the log gets a stale page.
+export function parseHistoryRequest(value: unknown): HistoryRequest | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { before, after } = value as { before?: unknown; after?: unknown };
+  if ((before === undefined) === (after === undefined)) return null;
+  // A page after nothing is the first page of the log, and one before nothing
+  // its last.
+  if (after === null) return { after: null };
+  if (before === null) return { before: null };
+  const cursor = before ?? after;
+  if (typeof cursor !== "object" || cursor === null) return null;
+  const { offset, skip } = cursor as { offset?: unknown; skip?: unknown };
+  const ok = (n: unknown): n is number => typeof n === "number" && Number.isSafeInteger(n) && n >= 0;
+  if (!ok(offset) || !ok(skip)) return null;
+  return before !== undefined ? { before: { offset, skip } } : { after: { offset, skip } };
 }
 
 // A web address to open in the browser: http or https only, so a server can't
