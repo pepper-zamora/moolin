@@ -677,46 +677,63 @@ try {
     main.evaluate(`(() => { const t = document.getElementById("history"); t.scrollTop = ${top ? 0 : "t.scrollHeight"}; })()`);
   const number = (line) => Number(line.slice(line.lastIndexOf(" ") + 1));
 
-  await check("scrolling the scrollback up opens the history pane there, and the scrollback stays at the newest line", async () => {
+  await check("scrolling up over the scrollback opens the history pane first, and the scrollback never moves", async () => {
     if (!latestSocket) throw new Error("no server socket to write to");
     const total = 26000;
     let burst = "";
     for (let i = 0; i < total; i++) burst += `paging line ${i}\r\n`;
     latestSocket.write(burst);
     await waitFor("the flood to be shown", async () => (await main.lineTexts()).at(-1) === `paging line ${total - 1}`, 30000);
-    // Scroll up two screens, and see which line that brings to the top.
-    const top = await main.evaluate(`(() => {
-      const t = document.getElementById("terminal");
-      t.scrollTop = t.scrollHeight - 3 * t.clientHeight;
-      const box = t.getBoundingClientRect();
-      return Array.from(document.querySelectorAll("#terminal .line")).find((l) => { const r = l.getBoundingClientRect(); return (r.top + r.bottom) / 2 > box.top; })?.textContent;
-    })()`);
-    await waitFor("the history pane to open", historyOpen, 5000);
-    await waitFor("history in it", async () => (await historyLines()).length > 0, 10000);
-    const atTopEdge = () =>
+    const topLine = (id) =>
       main.evaluate(`(() => {
-        const box = document.getElementById("history").getBoundingClientRect();
-        return Array.from(document.querySelectorAll("#history .line")).find((l) => { const r = l.getBoundingClientRect(); return (r.top + r.bottom) / 2 > box.top; })?.textContent;
+        const box = document.getElementById(${JSON.stringify(id)}).getBoundingClientRect();
+        return Array.from(document.querySelectorAll("#${id} .line")).find((l) => { const r = l.getBoundingClientRect(); return (r.top + r.bottom) / 2 > box.top; })?.textContent;
       })()`);
-    await waitFor("the line scrolled to at the history pane's top", async () => (await atTopEdge()) === top, 5000).catch(
-      async (error) => {
-        throw new Error(`${error.message}: ${await atTopEdge()} is there, not ${top}`);
-      },
-    );
     const liveAtBottom = () =>
       main.evaluate(
         `(() => { const t = document.getElementById("terminal"); return t.scrollHeight - t.scrollTop - t.clientHeight < 4; })()`,
       );
+    const top = await topLine("terminal");
+    // Watch the scrollback while the wheel turns: it must never leave the newest line.
+    await main.evaluate(`(() => {
+      const t = document.getElementById("terminal");
+      window.__liveMoved = false;
+      t.addEventListener("scroll", () => { if (t.scrollHeight - t.scrollTop - t.clientHeight >= 4) window.__liveMoved = true; });
+    })()`);
+    await wheel("terminal", -100);
+    await waitFor("the history pane to open", historyOpen, 5000);
+    await waitFor("the scrollback's top line on screen in it", async () => {
+      const lines = await main.evaluate(`(() => {
+        const box = document.getElementById("history").getBoundingClientRect();
+        return Array.from(document.querySelectorAll("#history .line")).filter((l) => { const r = l.getBoundingClientRect(); return r.top >= box.top && r.bottom <= box.bottom; }).map((l) => l.textContent);
+      })()`);
+      return lines.includes(top);
+    }, 5000);
+    expectEqual(await main.evaluate("window.__liveMoved"), false, "the scrollback moved while the pane opened");
     expectEqual(await liveAtBottom(), true, "the scrollback at its newest line");
-    // Scrolling the scrollback while the pane is open scrolls the pane instead.
+    // Scrolling over the scrollback while the pane is open scrolls the pane instead.
+    const before = await topLine("history");
     await wheel("terminal", -300);
-    await sleep(300);
-    expectEqual(await liveAtBottom(), true, "the scrollback after the wheel over it");
+    await waitFor("the pane to scroll", async () => (await topLine("history")) !== before, 3000);
+    expectEqual(await main.evaluate("window.__liveMoved"), false, "the scrollback moved under the wheel");
     // The scrollback goes on as before, below.
     latestSocket.write("said while reading history\r\n");
     await waitFor("live output below the pane", async () => (await main.lineTexts()).at(-1) === "said while reading history", 3000);
     if ((await historyLines()).includes("said while reading history")) throw new Error("live output went into the history pane");
     await typingReachesServer(main, "while reading history");
+    // Scrolling back down to the end of the log closes the pane.
+    for (let i = 0; i < 40 && (await historyOpen()); i++) {
+      await wheel("history", 400);
+      await sleep(100);
+    }
+    expectEqual(await historyOpen(), false, "the pane, once scrolled back down to the end");
+    expectEqual(await liveAtBottom(), true, "the scrollback after the pane closed");
+  });
+
+  await check("the history pane opens again from the scrollback's top line", async () => {
+    await wheel("terminal", -100);
+    await waitFor("the history pane to open", historyOpen, 5000);
+    await waitFor("history in it", async () => (await historyLines()).length > 0, 10000);
   });
 
   await check("the history pane pages back as far as the log goes, held to a bounded size", async () => {
@@ -820,6 +837,15 @@ try {
     await waitFor("the history pane to open", historyOpen, 10000);
     await waitFor("the match on screen in it", () => inHistoryView(target), 10000);
     expectEqual(await count(), "1 of 1", "the count");
+    // The history pane's scrollbar is marked with the matches too.
+    const marked = await main.evaluate(`(() => {
+      const ruler = document.getElementById("history-ruler");
+      if (ruler.hidden || ruler.width === 0) return false;
+      const data = ruler.getContext("2d").getImageData(0, 0, ruler.width, ruler.height).data;
+      for (let i = 3; i < data.length; i += 4) if (data[i] > 0) return true;
+      return false;
+    })()`);
+    expectEqual(marked, true, "a mark beside the history pane's scrollbar");
     await main.key("Escape", "Escape", 27);
     await waitFor("Escape to close the find box", async () => !(await main.evaluate(`!document.getElementById("find-widget").hidden`)), 3000);
     expectEqual(await historyOpen(), true, "the history pane, after the find box closed");

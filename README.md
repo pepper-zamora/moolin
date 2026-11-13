@@ -100,17 +100,18 @@ from source never check at startup.
 - **Scrollback that survives a reload.** 20,000 lines, with clickable URLs.
   The main process keeps the last 2 MiB of each window's output, so reloading
   the window (Ctrl+R, Cmd+R on macOS) or a renderer crash doesn't lose it.
-- **History pane.** Scroll the scrollback up at all (the mouse wheel, Page
-  Up, or its scrollbar), or choose View > History Pane (Ctrl+Shift+H), and the
-  window splits: a history pane opens above, at the line you scrolled to, read
-  from the character's log, and pages further back, 5,000 lines at a time, as
-  far as the log goes. The scrollback below goes back to the newest line and
-  stays there, with new output and the input line, so you can keep playing
-  while you read; all reading back happens in the pane, and the mouse wheel
-  over the scrollback scrolls the pane while it's open. Drag the bar between
+- **History pane.** Scroll up over the scrollback (the mouse wheel, or Page
+  Up), or choose View > History Pane (Ctrl+Shift+H), and the window splits
+  before anything scrolls: a history pane opens above, starting at the
+  scrollback's top line, read from the character's log, and the scrolling goes
+  on in it, back 5,000 lines at a time, as far as the log goes. The scrollback
+  below stays at the newest line, with new output and the input line, so you
+  can keep playing while you read: with a log, it can't be scrolled itself,
+  all reading back happens in the pane, and the mouse wheel over the
+  scrollback scrolls the pane while it's open. Drag the bar between
   them to share the height; every window opens the pane at the height it was
   last left at. Escape, End, Ctrl+Shift+H again, the bar's close button, or
-  scrolling down past the end of the log close the pane. Page Up and Page Down
+  scrolling back down to the end of the log close the pane. Page Up and Page Down
   scroll it while it's open. It holds at most 30,000 lines, letting go of
   those furthest from where you are reading and paging them in again as you
   scroll back. A page starts in the default colour, so a colour a server
@@ -159,8 +160,8 @@ from source never check at startup.
   [Preferences](#preferences)).
 - **Scrollback search.** Edit > Find (Ctrl+F, Cmd+F on macOS) opens a find box at the top
   right of the window, with match-case, whole-word and regular-expression
-  toggles. Every match on screen is highlighted, in the scrollback (marked
-  beside its scrollbar too) and the history pane, and the highlights follow
+  toggles. Every match on screen is highlighted, in the scrollback and the
+  history pane, and marked beside each one's scrollbar; the highlights follow
   new output. With a log, the whole log is searched as well, from the newest
   line back, while you type: the count is of every match, newest first ("3 of
   25"), and says "…" while the search is still going. Enter (or F3, or ↑) goes

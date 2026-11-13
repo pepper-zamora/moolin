@@ -19,6 +19,7 @@
         <div id="history-row" class="scrollback-row" hidden>
           <div id="history-gutter" class="gutter" hidden></div>
           <div id="history" class="scrollback" aria-label="History"></div>
+          <canvas id="history-ruler" class="search-ruler" hidden></canvas>
         </div>
         <div id="history-divider" role="separator" aria-orientation="horizontal" title="Drag to resize" hidden>
           <span>History: Escape closes</span>
@@ -30,7 +31,7 @@
           <div id="gutter" class="gutter" hidden></div>
           <div id="terminal" class="scrollback"></div>
           <!-- Search-match ticks drawn over the scrollbar's track; see find-widget.ts. -->
-          <canvas id="search-ruler" hidden></canvas>
+          <canvas id="search-ruler" class="search-ruler" hidden></canvas>
         </div>
         <!-- Search (Ctrl+F), floating over the panes' top right; driven by
              find-widget.ts. -->
