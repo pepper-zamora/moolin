@@ -279,12 +279,12 @@ currently discards or never negotiates:
 - **Split-view scrolling**: scrolling back through history opens a split so
   new server output keeps arriving below while old output stays pinned above
   (Blightmud's `scroll_split`; similar in Mudlet/TinTin++).
-  - **Done, differently placed.** Moolin's history pane (`src/history-pane.ts`)
-    opens when the scrollback is scrolled up past its top, not on any scroll
-    up: the scrollback's own 20,000 lines scroll as before, and the pane
-    reads further back from the character's log (see README, History pane).
-    Blightmud splits as soon as you scroll back at all. View > History Pane
-    (Ctrl+Shift+H) opens it too, and the divider's position is remembered.
+  - **Done.** Moolin's history pane (`src/history-pane.ts`) opens as soon as
+    the scrollback is scrolled up, as Blightmud's split does, and reads back
+    through the character's whole log, not just the scrollback (see README,
+    History pane). View > History Pane (Ctrl+Shift+H) opens it too, and the
+    divider's position is remembered. Without a log there's no pane, and the
+    scrollback scrolls back by itself.
 
 ## 9. Accessibility
 

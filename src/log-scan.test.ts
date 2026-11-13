@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAGE_LINES, type HistoryPage, type HistoryRequest, type LogCursor } from "./history-paging";
 import { LogChain } from "./log-pane";
-import { LogScan, alignLive } from "./log-scan";
+import { LogScan } from "./log-scan";
 
 const decoder = new TextDecoder();
 const linesOf = (chunks: ReadonlyArray<Uint8Array>): string[] =>
@@ -65,7 +65,6 @@ test("a scan finds every match from the end of the log back, and says where each
     const text: string = linesOf(page?.chunks ?? [])[hit.line];
     assert.equal(text.slice(hit.start, hit.end).toLowerCase(), "wyvern");
   }
-  assert.equal(scan.texts[0], "wyvern 29007");
 });
 
 test("a cancelled scan stops, and anything waiting on it goes on", async () => {
@@ -79,20 +78,4 @@ test("a cancelled scan stops, and anything waiting on it goes on", async () => {
   await waiting;
   await running;
   assert.equal(scan.count, 0);
-});
-
-test("the live scrollback's matches are lined up with the scan's newest hits by their text", () => {
-  const m = (text: string, start = 0) => ({ text, start });
-  const hits = [m("c"), m("b"), m("a"), m("older")];
-  // Two came in since the scan began.
-  assert.deepEqual(alignLive([m("e"), m("d"), m("c"), m("b"), m("a")], hits), { newer: 2, shared: 3 });
-  // None since, and the scrollback reaches further back than these hits.
-  assert.deepEqual(alignLive([m("c"), m("b")], hits), { newer: 0, shared: 2 });
-  // The same text twice on a line is told apart by where it starts.
-  assert.deepEqual(alignLive([m("x", 5), m("x", 0)], [m("x", 5), m("x", 0)]), { newer: 0, shared: 2 });
-  // A line the scrollback has that the log doesn't shifts nothing before it.
-  assert.deepEqual(alignLive([m("c"), m("only here"), m("b")], hits), { newer: 0, shared: 1 });
-  // Nothing in common: every live match counts as newer.
-  assert.deepEqual(alignLive([m("q")], hits), { newer: 1, shared: 0 });
-  assert.deepEqual(alignLive([m("q")], []), { newer: 1, shared: 0 });
 });

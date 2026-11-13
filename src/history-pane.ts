@@ -31,12 +31,15 @@ export interface HistoryPaneElements {
   close: HTMLElement;
 }
 
-// The upper half of a split: a read-only window onto the character's log, for
-// reading further back than the live scrollback below it holds. Scrolling the
-// live scrollback up past its top opens it, at the history just before the live
-// scrollback's oldest line; Escape, End, its close button, or scrolling down
-// past the end of the log close it. Nothing live is ever written to it, so the
-// live scrollback, and typing to the world, carry on as they are.
+// The upper half of a split: a read-only window onto the character's log, where
+// all reading back happens, so the live scrollback below only ever shows the
+// newest lines. Scrolling the live scrollback up at all (the wheel, Page Up, its
+// scrollbar) opens it, at the line that scrolling reached, and puts the live
+// scrollback back at the newest line; while it is open, the wheel over the live
+// scrollback scrolls it instead. Escape, End, its close button, or scrolling
+// down past the end of the log close it. Nothing live is ever written to it.
+// Without a log there is nothing for it to read, and the live scrollback
+// scrolls back as it always has.
 export class HistoryPane {
   readonly view: ScrollbackView;
   readonly gutter: TimestampGutter;
@@ -51,8 +54,8 @@ export class HistoryPane {
     options: Omit<ScrollbackViewOptions, "maxLines" | "onResize">,
     private readonly live: ScrollbackView,
     private readonly getPage: (request: HistoryRequest) => Promise<HistoryPage>,
-    // Whether the log holds history older than the live scrollback's oldest line.
-    private readonly hasOlder: () => boolean,
+    // Whether there is a log to read back through: only a replay from one is.
+    private readonly hasLog: () => boolean,
     private readonly onToggle: (open: boolean) => void,
     warn: (message: string) => void,
   ) {
@@ -63,9 +66,23 @@ export class HistoryPane {
     this.pane = new LogPane(this.view, () => this.close(), warn);
     this.view.onScroll(() => this.pane.scrolled());
 
-    live.element.addEventListener("wheel", (event) => {
-      if (event.deltaY < 0 && live.scrollTop() <= 0) void this.openAbove();
-    });
+    live.onScroll(() => this.liveScrolled());
+    // A drag selecting upwards scrolls the live scrollback too; it opens the
+    // pane once the button is let go, not in the middle of the drag.
+    document.addEventListener("mouseup", () => setTimeout(() => this.liveScrolled()));
+    live.element.addEventListener(
+      "wheel",
+      (event) => {
+        if (this.isOpen) {
+          event.preventDefault();
+          this.view.element.scrollBy({ top: event.deltaY });
+        } else if (event.deltaY < 0 && live.scrollTop() <= 0) {
+          // Too little in it to scroll: there's no scroll to go on.
+          void this.openHere();
+        }
+      },
+      { passive: false },
+    );
     els.terminal.addEventListener("wheel", (event) => {
       if (event.deltaY > 0 && this.pane.atEnd()) this.close();
     });
@@ -78,19 +95,31 @@ export class HistoryPane {
     return !this.els.row.hidden;
   }
 
-  // Opens at the history just before the live scrollback's oldest line, if the
-  // log holds any.
-  async openAbove(): Promise<void> {
-    if (this.isOpen || this.opening || !this.hasOlder()) return;
+  // The live scrollback was scrolled: away from the newest line, it opens the
+  // pane there, or (open already) goes back to the newest line.
+  private liveScrolled(): void {
+    if (!this.hasLog() || this.live.isAtBottom() || this.live.isSelecting()) return;
+    if (this.isOpen) this.live.scrollToBottom();
+    else void this.openHere();
+  }
+
+  // Opens with the line at the top of the live scrollback at its top, and puts
+  // the live scrollback back at the newest line.
+  async openHere(): Promise<void> {
+    if (this.isOpen || this.opening || !this.hasLog()) return;
     const mine = ++this.opens;
     this.opening = true;
     try {
       const chain = await LogChain.start(this.getPage);
       if (!chain || mine !== this.opens) return;
-      // The live scrollback's lines that are in the log: not Clear Screen's
-      // blanks, nor an unfinished last line, which isn't logged yet.
+      // From the top line on, the live scrollback's lines that are in the log:
+      // not Clear Screen's blanks, nor an unfinished last line, which isn't
+      // logged yet.
       const open = this.live.openLine;
-      const logged = this.live.allLines().filter((line) => !line.filler && line !== open);
+      const logged = this.live
+        .allLines()
+        .slice(this.live.topLineIndex())
+        .filter((line) => !line.filler && line !== open);
       if (logged.length === 0) return;
       this.view.setPuebloEnabled(this.live.puebloEnabled);
       const at = await locateFromEnd(
@@ -101,7 +130,8 @@ export class HistoryPane {
       );
       if (!at || mine !== this.opens) return;
       this.show();
-      await this.pane.show(chain, at.k, { line: at.line, at: "bottom" });
+      this.live.scrollToBottom();
+      await this.pane.show(chain, at.k, { line: at.line, at: "top" });
     } finally {
       this.opening = false;
     }
@@ -120,6 +150,15 @@ export class HistoryPane {
   read(chunks: ReadonlyArray<Uint8Array>, times: ReadonlyArray<number | null>): ReadonlyArray<Line> {
     this.view.setPuebloEnabled(this.live.puebloEnabled);
     return this.view.readHistory(chunks, times);
+  }
+
+  // The page and line of `chain` at the pane's top and bottom edges, if it is
+  // open on that chain.
+  edges(chain: LogChain): { top: { k: number; line: number }; bottom: { k: number; line: number } } | null {
+    if (!this.isOpen) return null;
+    const top = this.pane.placeOf(chain, this.view.topLineIndex());
+    const bottom = this.pane.placeOf(chain, this.view.bottomLineIndex());
+    return top && bottom ? { top, bottom } : null;
   }
 
   // The line of the pane that is line `line` of page k of `chain`, if it holds it.

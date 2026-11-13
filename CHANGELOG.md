@@ -12,12 +12,13 @@ renames that section to the new version and date.
 
 ### Added
 
-- **History pane.** Scrolling up past the top of the scrollback (the mouse
-  wheel, or Page Up), or View > History Pane (Ctrl+Shift+H), splits the window:
-  a history pane opens above, at the lines just before the scrollback's
-  oldest, and pages back through the character's log, 5,000 lines at a time,
-  as far as it goes, instead of stopping at the newest 20,000. The scrollback
-  below carries on with new output and the input line. Drag the bar between
+- **History pane.** Scrolling the scrollback up at all (the mouse wheel, Page
+  Up, or its scrollbar), or View > History Pane (Ctrl+Shift+H), splits the
+  window: a history pane opens above, at the line scrolled to, and pages back
+  through the character's log, 5,000 lines at a time, as far as it goes,
+  instead of stopping at the newest 20,000. The scrollback below stays at the
+  newest line, with new output and the input line; reading back happens in
+  the pane. Drag the bar between
   them to resize (the height is remembered); Escape, End, Ctrl+Shift+H, the
   bar's close button, or scrolling down past the end of the log close the
   pane. It holds at most 30,000 lines. Only the log can be paged: a window
@@ -26,9 +27,9 @@ renames that section to the new version and date.
   this one has not been sent yet shows that line twice.
 - **Find searches the whole log.** With a log, Find searches all of it as well
   as the scrollback, in the background from the newest line back, and counts
-  every match ("3 of 25"). A match only the log holds opens the history pane
-  at it, in one move once found; the status bar shows how far a long search
-  has got and how many it has found.
+  every match ("3 of 25"). Each match opens the history pane at it, in one
+  move once found; the status bar shows how far a long search has got and how
+  many it has found.
 
 ### Changed
 

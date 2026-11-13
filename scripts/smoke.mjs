@@ -677,47 +677,42 @@ try {
     main.evaluate(`(() => { const t = document.getElementById("history"); t.scrollTop = ${top ? 0 : "t.scrollHeight"}; })()`);
   const number = (line) => Number(line.slice(line.lastIndexOf(" ") + 1));
 
-  await check("scrolling up past the top opens the history pane at the history before the oldest line", async () => {
+  await check("scrolling the scrollback up opens the history pane there, and the scrollback stays at the newest line", async () => {
     if (!latestSocket) throw new Error("no server socket to write to");
     const total = 26000;
     let burst = "";
     for (let i = 0; i < total; i++) burst += `paging line ${i}\r\n`;
     latestSocket.write(burst);
     await waitFor("the flood to be shown", async () => (await main.lineTexts()).at(-1) === `paging line ${total - 1}`, 30000);
-    const oldest = (await main.lineTexts()).find((line) => line.startsWith("paging line "));
-    if (!oldest || number(oldest) === 0) throw new Error(`the scrollback wasn't trimmed (oldest line ${oldest})`);
-    await main.evaluate(`document.getElementById("terminal").scrollTop = 0`);
-    await sleep(100);
-    await wheel("terminal", -100);
+    // Scroll up two screens, and see which line that brings to the top.
+    const top = await main.evaluate(`(() => {
+      const t = document.getElementById("terminal");
+      t.scrollTop = t.scrollHeight - 3 * t.clientHeight;
+      const box = t.getBoundingClientRect();
+      return Array.from(document.querySelectorAll("#terminal .line")).find((l) => { const r = l.getBoundingClientRect(); return (r.top + r.bottom) / 2 > box.top; })?.textContent;
+    })()`);
     await waitFor("the history pane to open", historyOpen, 5000);
     await waitFor("history in it", async () => (await historyLines()).length > 0, 10000);
-    // The pane's bottom edge shows the live scrollback's oldest line, so the
-    // history reads on upwards from where the scrollback stops.
-    const atBottomEdge = await main.evaluate(`(() => {
-      const box = document.getElementById("history").getBoundingClientRect();
-      const lines = Array.from(document.querySelectorAll("#history .line"));
-      const last = lines.filter((l) => l.getBoundingClientRect().top < box.bottom - 2).at(-1);
-      return last ? last.textContent : null;
-    })()`);
-    if (atBottomEdge !== oldest) {
-      const metrics = await main.evaluate(`(() => {
-        const t = document.getElementById("history");
-        const lines = Array.from(document.querySelectorAll("#history .line"));
-        const i = lines.findIndex((l) => l.textContent === ${JSON.stringify(oldest)});
-        const el = lines[i];
-        return JSON.stringify({ scrollTop: t.scrollTop, scrollHeight: t.scrollHeight, clientHeight: t.clientHeight,
-          boxHeight: t.getBoundingClientRect().height, count: lines.length, index: i, first: lines[0]?.textContent,
-          last: lines.at(-1)?.textContent, offsetTop: el?.offsetTop, offsetHeight: el?.offsetHeight,
-          panes: document.getElementById("panes").getBoundingClientRect().height,
-          row: document.getElementById("history-row").getBoundingClientRect().height,
-          live: document.getElementById("terminal-row").getBoundingClientRect().height,
-          basis: document.getElementById("history-row").style.flexBasis, window: innerHeight });
+    const atTopEdge = () =>
+      main.evaluate(`(() => {
+        const box = document.getElementById("history").getBoundingClientRect();
+        return Array.from(document.querySelectorAll("#history .line")).find((l) => { const r = l.getBoundingClientRect(); return (r.top + r.bottom) / 2 > box.top; })?.textContent;
       })()`);
-      throw new Error(`the line at the history pane's bottom edge is ${atBottomEdge}, not ${oldest}: ${metrics}`);
-    }
-    const lines = await historyLines();
-    if (!lines.includes(`paging line ${number(oldest) - 1}`)) throw new Error("the line before the oldest isn't in the pane");
-    // The live scrollback goes on as before, below.
+    await waitFor("the line scrolled to at the history pane's top", async () => (await atTopEdge()) === top, 5000).catch(
+      async (error) => {
+        throw new Error(`${error.message}: ${await atTopEdge()} is there, not ${top}`);
+      },
+    );
+    const liveAtBottom = () =>
+      main.evaluate(
+        `(() => { const t = document.getElementById("terminal"); return t.scrollHeight - t.scrollTop - t.clientHeight < 4; })()`,
+      );
+    expectEqual(await liveAtBottom(), true, "the scrollback at its newest line");
+    // Scrolling the scrollback while the pane is open scrolls the pane instead.
+    await wheel("terminal", -300);
+    await sleep(300);
+    expectEqual(await liveAtBottom(), true, "the scrollback after the wheel over it");
+    // The scrollback goes on as before, below.
     latestSocket.write("said while reading history\r\n");
     await waitFor("live output below the pane", async () => (await main.lineTexts()).at(-1) === "said while reading history", 3000);
     if ((await historyLines()).includes("said while reading history")) throw new Error("live output went into the history pane");

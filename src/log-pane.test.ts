@@ -53,8 +53,9 @@ class FakeView implements PaneView {
     this.top = 0;
     return this.lines.length;
   }
-  revealLineAt(index: number, at: "center" | "bottom" = "center"): void {
-    if (at === "bottom") this.scrollTo(index - SCREEN + 1);
+  revealLineAt(index: number, at: "center" | "top" | "bottom" = "center"): void {
+    if (at === "top") this.scrollTo(index);
+    else if (at === "bottom") this.scrollTo(index - SCREEN + 1);
     else if (index < this.top || index >= this.top + SCREEN) this.scrollTo(index - SCREEN / 2);
   }
   scrollToBottom(): void {

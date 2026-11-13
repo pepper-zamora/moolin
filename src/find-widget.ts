@@ -2,7 +2,7 @@ import type { HistoryPage, HistoryRequest } from "./history-paging";
 import type { HistoryPane } from "./history-pane";
 import type { Line } from "./line-builder";
 import { LogChain } from "./log-pane";
-import { LogScan, alignLive } from "./log-scan";
+import { LogScan } from "./log-scan";
 import type { ScrollbackView } from "./scrollback-view";
 import { buildPattern, findMatches, type Match, type SearchQuery, type SearchResult } from "./scrollback-search";
 
@@ -85,15 +85,16 @@ export interface LogAccess {
 // The find box floating at the top right of the panes, modelled on VS Code's
 // editor find widget (minus replace, since the scrollback is read-only).
 //
-// Matches in the live scrollback are highlighted, marked on a ruler beside its
-// scrollbar, and stay current as new output arrives. With a log, the whole log
-// is searched too, from its end back, in the background while the term stands;
-// the matches are numbered newest first, the live scrollback's own and then
-// the log's older ones, "3 of 25". Enter (and F3, ↑) goes to the next older
-// match, Shift+Enter (Shift+F3, ↓) the next newer, wrapping around at the ends
-// of the log. A match the live scrollback holds is scrolled to there; an older
-// one is shown in the history pane, in one move once found. While a step waits
-// on the search, the status bar says how far it has got.
+// Matches on screen are highlighted, in both panes, and marked on a ruler beside
+// the live scrollback's scrollbar; they stay current as new output arrives.
+// With a log, the whole log is searched, from its end back, in the background
+// while the term stands, and the matches are numbered newest first, "3 of 25".
+// Enter (and F3, ↑) goes to the next older match, Shift+Enter (Shift+F3, ↓) the
+// next newer, from where the history pane is (or the newest line), wrapping
+// around at the ends of the log. Each is shown in the history pane, in one move
+// once found, so the live scrollback stays at the newest line. While a step
+// waits on the search, the status bar says how far it has got. Without a log,
+// it steps through the live scrollback's own matches, scrolling to them there.
 export class FindWidget {
   readonly root = element<HTMLDivElement>("find-widget");
   private readonly input = element<HTMLInputElement>("find-input");
@@ -120,13 +121,6 @@ export class FindWidget {
   // Counts steps, so a step waiting on the scan gives way to a later one.
   private steps = 0;
   private waiting = false;
-  // The last order worked out, and what it was worked out from.
-  private ordered: {
-    from: Array<Match<Line>>;
-    scan: LogScan | null;
-    texts: number;
-    order: { live: Array<Match<Line>>; newer: number; shared: number };
-  } | null = null;
 
   constructor(
     private readonly view: ScrollbackView,
@@ -278,9 +272,15 @@ export class FindWidget {
     }
     const kept = this.current?.kind === "live" ? this.current.match : null;
     this.searchPanes();
-    const match = (kept && this.liveMatching(kept)) ?? this.firstInView();
-    this.current = match ? { kind: "live", match } : null;
-    if (match) this.view.revealLine(match.line);
+    if (this.log.available()) {
+      // The matches are the log's, stepped through in the history pane; none is
+      // current until a step.
+      this.current = null;
+    } else {
+      const match = (kept && this.liveMatching(kept)) ?? this.firstInView();
+      this.current = match ? { kind: "live", match } : null;
+      if (match) this.view.revealLine(match.line);
+    }
     this.show();
   }
 
@@ -382,28 +382,13 @@ export class FindWidget {
 
   // --- Stepping through the matches ----------------------------------------------
 
-  // The matches in order, newest first: the live scrollback's newer than the
-  // scan's first hit, then the ones it shares with the scan, then the scan's
-  // older hits. Without a scan, just the live scrollback's.
-  private order(): { live: Array<Match<Line>>; newer: number; shared: number } {
-    const scan = this.scan;
-    const cached = this.ordered;
-    // Worked out again only when the live matches or the scan's newest hits change.
-    if (cached && cached.from === this.live && cached.scan === scan && cached.texts === (scan?.texts.length ?? 0)) {
-      return cached.order;
-    }
+  // The matches in order, newest first: with a log, the scan's hits, all shown
+  // in the history pane (the live scrollback stays at the newest line);
+  // without one, the live scrollback's own matches. `newer` counts the live
+  // matches before the scan's hits: all of them without a scan, none with one.
+  private order(): { live: Array<Match<Line>>; newer: number } {
     const live = [...this.live].reverse();
-    let order = { live, newer: live.length, shared: 0 };
-    if (scan) {
-      const hits = scan.texts.map((text, i) => ({ text, start: scan.hits[i]?.start ?? -1 }));
-      const aligned = alignLive(
-        live.map((m) => ({ text: m.line.text, start: m.start })),
-        hits,
-      );
-      order = { live, ...aligned };
-    }
-    this.ordered = { from: this.live, scan, texts: scan?.texts.length ?? 0, order };
-    return order;
+    return { live, newer: this.scan ? 0 : live.length };
   }
 
   // Where the current match is in the order, or -1.
@@ -420,9 +405,13 @@ export class FindWidget {
     const scan = this.log.available() ? await this.startScan() : null;
     if (mine !== this.steps) return;
     let order = this.order();
-    let index = this.indexOf(this.current, order);
-    if (index < 0) index = direction === "older" ? this.startOlder(order) - 1 : 0;
-    let target = index + (direction === "older" ? 1 : -1);
+    const index = this.indexOf(this.current, order);
+    let target: number;
+    if (index >= 0) target = index + (direction === "older" ? 1 : -1);
+    else if (scan) {
+      target = await this.startInLog(scan, direction);
+      if (mine !== this.steps || this.scan !== scan) return;
+    } else target = direction === "older" ? this.startOlder(order) : -1;
     const known = () => (scan ? order.newer + scan.hits.length : order.live.length);
     if (scan && (target >= known() || target < 0) && !scan.done) {
       // Past the matches found so far: wait for the search to find the next, or
@@ -448,8 +437,34 @@ export class FindWidget {
     await this.go(target, order);
   }
 
-  // Where going older starts from without a current match: the newest live
-  // match at or above the bottom of the view.
+  // Where a step starts from in the log without a current match: from where the
+  // history pane is, if it is open on the scan's chain, else from the newest
+  // line. Going older, the nearest hit at or above the pane's bottom edge
+  // (waiting for the scan to get that far); going newer, the nearest at or
+  // below its top edge. -1, or past the hits, goes round.
+  private async startInLog(scan: LogScan, direction: "older" | "newer"): Promise<number> {
+    const edges = this.history.edges(scan.chain);
+    if (direction === "older") {
+      if (!edges) return 0;
+      const { k, line } = edges.bottom;
+      const above = (hit: { k: number; line: number }) => hit.k > k || (hit.k === k && hit.line <= line);
+      for (;;) {
+        const index = scan.hits.findIndex(above);
+        if (index >= 0) return index;
+        if (scan.done || this.scan !== scan) return scan.hits.length;
+        await scan.reach(scan.hits.length);
+      }
+    }
+    if (!edges) return -1;
+    const { k, line } = edges.top;
+    const below = (hit: { k: number; line: number }) => hit.k < k || (hit.k === k && hit.line >= line);
+    let last = -1;
+    for (let i = 0; i < scan.hits.length && below(scan.hits[i]); i++) last = i;
+    return last;
+  }
+
+  // Where going older starts from without a current match and without a log:
+  // the newest live match at or above the bottom of the view.
   private startOlder(order: ReturnType<FindWidget["order"]>): number {
     const bottom = this.view.scrollTop() + this.view.element.clientHeight;
     const index = order.live.findIndex((m) => this.view.lineOffset(m.line) < bottom);
@@ -458,7 +473,7 @@ export class FindWidget {
 
   private async go(index: number, order: ReturnType<FindWidget["order"]>): Promise<void> {
     const mine = this.steps;
-    if (index < order.newer + order.shared) {
+    if (index < order.newer) {
       const match = order.live[index];
       this.current = { kind: "live", match };
       this.view.revealLine(match.line);
